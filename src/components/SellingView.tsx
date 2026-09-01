@@ -435,7 +435,9 @@ export const SellingView: React.FC = () => {
           setIsSaleFormOpen(false);
                     setSaleItemToEdit(null);
         }}
-      /> {/* Note: If this belongs to a component like a close button, make sure it closes cleanly here */}
+      /> 
+    
+            {/* Note: If this belongs to a component like a close button, make sure it closes cleanly here */}
       
       <SaleFormModal
         isOpen={isSaleFormOpen}
