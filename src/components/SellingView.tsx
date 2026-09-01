@@ -136,7 +136,7 @@ export const SellingView: React.FC = () => {
       counts[b] = (counts[b] || 0) + 1;
     });
     return Object.entries(counts)
-      .sort((a, b) => a[0].localeCompare(b[0]))
+      .sort((a, b) => a.localeCompare(b))
       .map(([brand, count]) => ({ brand, count }));
   }, [saleItems]);
 
@@ -241,210 +241,127 @@ export const SellingView: React.FC = () => {
       return true;
     });
 
-    // Execute sorting
+    // Execute sorting completely
     return matched.sort((a, b) => {
       if (sortBy === 'newest') return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
-      if (sortBy === 'price_desc') return (b.listingPrice || 0) - (a.listingPrice || 0);
-      if (sortBy === 'price_asc') return (a.listingPrice || 0) - (b.listingPrice || 0);
+      if (sortBy === 'oldest') return new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime();
+      if (sortBy === 'price-high') return (b.listedPrice || 0) - (a.listedPrice || 0);
+      if (sortBy === 'price-low') return (a.listedPrice || 0) - (b.listedPrice || 0);
       return 0;
     });
   }, [saleItems, selectedStatusTab, selectedPlatform, selectedBrand, selectedCategory, searchQuery, sortBy]);
 
-  const toggleSelectSale = (id: string) => {
-    setSelectedSaleIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
-
-  const handleBulkDelete = () => {
-    if (window.confirm(`Are you sure you want to delete ${selectedSaleIds.size} listings?`)) {
-      deleteMultipleSaleItems(Array.from(selectedSaleIds));
-      setSelectedSaleIds(new Set());
-    }
-  };
-
   return (
-    <div className="space-y-6">
-      {/* Search and Action Bar */}
-      <div className="flex flex-wrap justify-between items-center gap-4 bg-white p-4 rounded-xl border border-zinc-200 shadow-sm">
-        <div className="relative max-w-xs w-full">
-          <Search className="absolute left-3 top-2.5 h-4 w-4 text-zinc-400" />
-          <input
-            type="text"
-            placeholder="Search listings..."
-            className="pl-9 pr-4 py-2 w-full text-sm bg-zinc-50 border border-zinc-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-zinc-400"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-          />
-        </div>
-
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setIsSellFromWardrobeOpen(true)}
-            className="flex items-center gap-1.5 px-3 py-2 border border-zinc-200 rounded-lg text-sm font-medium hover:bg-zinc-50 transition"
-          >
-
-      {/* Grid Filtering Tabs */}
-      {/* 2. Added missing option tags for status */}
-      <div className="flex items-center gap-2">
-        <label htmlFor="status-filter" className="text-sm font-medium text-zinc-600">
-          Status:
-        </label>
-        <select
-          id="status-filter"
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-          className="rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-sm font-medium text-zinc-700 shadow-sm focus:border-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-500"
-        >
-          <option value="all">All Statuses</option>
-          <option value="active">Active Listings</option>
-          <option value="sold">Sold</option>
-        </select>
-      </div>
-
-
-      {/* Grid Filtering Tabs */}
-      {/* 2. Added missing option tags for status */}
-      <select
-        value={selectedStatusTab}
-        onChange={(e) => setSelectedStatusTab(e.target.value)}
-        className="bg-white border border-zinc-200 rounded-lg p-2 text-xs focus:ring-1 focus:ring-zinc-400"
-      >
-        <option value="all">All Statuses</option>
-        <option value="active">Active / Listed</option>
-        <option value="sold">Sold / Shipped</option>
-        <option value="drafts">Drafts</option>
-      </select>
-
-      {/* 3. Added missing option tags and mapping template structure */}
-      <select
-        value={selectedBrand}
-        onChange={(e) => setSelectedBrand(e.target.value)}
-        className="bg-white border border-zinc-200 rounded-lg p-2 text-xs focus:ring-1 focus:ring-zinc-400"
-      >
-        <option value="">All Brands</option>
-        {uniqueBrands.map((ub) => (
-          <option key={ub.brand} value={ub.brand}>
-            {ub.brand} ({ub.count})
-          </option>
-        ))}
-      </select>
-
-      {/* 4. Added missing option tags for platforms */}
-      <select
-        value={selectedPlatform}
-        onChange={(e) => setSelectedPlatform(e.target.value)}
-        className="bg-white border border-zinc-200 rounded-lg p-2 text-xs focus:ring-1 focus:ring-zinc-400"
-      >
-        <option value="">All Platforms</option>
-        <option value="vinted">Vinted</option>
-        <option value="depop">Depop</option>
-        <option value="ebay">eBay</option>
-      </select>
-
-      {/* 5. Added missing option tags for sorting */}
-      <select
-        value={sortBy}
-        onChange={(e) => setSortBy(e.target.value)}
-        className="bg-white border border-zinc-200 rounded-lg p-2 text-xs focus:ring-1 focus:ring-zinc-400"
-      >
-        <option value="recent">Recently Listed</option>
-        <option value="price-high">Highest Price</option>
-        <option value="price-low">Lowest Price</option>
-      </select>
-
-      {/* Bulk actions status overlay */}
-      {/* 6. Wrapped static text strings inside valid HTML elements */}
-      {selectedSaleIds.size > 0 && (
-        <div className="flex items-center gap-2 bg-zinc-800 text-white p-2 rounded-lg">
-          <span>{selectedSaleIds.size} listings selected</span>
-          <button 
-            onClick={() => {/* add delete handler function here */}}
-            className="text-red-400 hover:text-red-500"
-          >
-            Delete
-          </button>
-          <button
-            onClick={() => setSelectedSaleIds(new Set())}
-            className="p-1.5 text-zinc-400 hover:text-white"
-          >
-            Cancel
-          </button>
-        </div>
-      )}
-
-      {/* Content Renderer Layout */}
-      {/* 7. Wrapped raw strings into elements and corrected layout template string concatenation */}
-      {viewMode === 'grid' ? (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {filteredSales.map((item) => (
-            <div
-              key={item.id}
-              className={`bg-white rounded-xl border p-3 flex flex-col group relative transition hover:shadow-md ${
-                selectedSaleIds.has(item.id) ? 'border-zinc-900 ring-1 ring-zinc-900' : 'border-zinc-200'
-              }`}
+    <>
+      <div className="p-6 max-w-7xl mx-auto space-y-6">
+        {/* Top Controls Header */}
+        <div className="flex flex-wrap items-center justify-between gap-4 p-4 border-b border-zinc-100 bg-white rounded-xl shadow-sm">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => {
+                setSaleItemToEdit(null);
+                setIsSaleFormOpen(true);
+              }}
+              className="flex items-center gap-1.5 px-4 py-2 bg-zinc-900 hover:bg-zinc-800 text-white rounded-lg text-sm font-medium shadow transition"
             >
-              <button
-                onClick={() => toggleSelectSale(item.id)}
-                className="absolute top-2 left-2 z-10 p-1 rounded-md bg-white/90 shadow-sm border border-zinc-200"
+              <Plus className="w-4 h-4" />
+              Sell from Wardrobe
+            </button>
+          </div>
+
+          {/* Grid Filtering Tabs & Layout Options */}
+          <div className="flex flex-wrap items-center gap-4">
+            <div className="flex items-center gap-2">
+              <label htmlFor="status-filter" className="text-sm font-medium text-zinc-600">
+                Status:
+              </label>
+              <select
+                id="status-filter"
+                value={selectedStatusTab}
+                onChange={(e) => setSelectedStatusTab(e.target.value)}
+                className="rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-sm font-medium text-zinc-700 shadow-sm focus:border-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-500"
               >
-                <CheckSquare 
-                  className={`w-3.5 h-3.5 ${
-                    selectedSaleIds.has(item.id) ? 'text-zinc-900' : 'text-zinc-300'
-                  }`} 
-                />
-              </button>
-              
-              <div>{item.platform}</div>
-              <div>{item.brand || 'Unbranded'}</div>
-              <div>{item.name}</div>
-              
-              <span className={`px-2 py-0.5 rounded text-[10px] font-medium uppercase ${
-                item.status === 'Listed' 
-                  ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' 
-                  : 'bg-zinc-100 text-zinc-600'
-              }`}>
-                {item.status}
-              </span>
-              <div>{formatGbp(item.listingPrice || 0)}</div>
+                <option value="All">All Statuses</option>
+                <option value="Active">Active Listings</option>
+                <option value="Sold">Sold &gt; Completed</option>
+                <option value="Draft">Drafts</option>
+              </select>
             </div>
-          ))}
+
+            <div className="flex items-center border border-zinc-200 rounded-lg p-0.5 bg-zinc-50">
+              <button
+                onClick={() => handleSetViewMode('grid')}
+                className={`p-1.5 rounded-md transition ${viewMode === 'grid' ? 'bg-white shadow text-zinc-900' : 'text-zinc-400 hover:text-zinc-600'}`}
+              >
+                <LayoutGrid className="w-4 h-4" />
+              </button>
+              <button
+                onClick={() => handleSetViewMode('table')}
+                className={`p-1.5 rounded-md transition ${viewMode === 'table' ? 'bg-white shadow text-zinc-900' : 'text-zinc-400 hover:text-zinc-600'}`}
+              >
+                <List className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
         </div>
-      ) : (
-        <SellingDatabaseTable
-          items={filteredSales}
-          onEditItem={(item) => {
-            setSaleItemToEdit(item);
-            setIsSaleFormOpen(true);
-          }}
+
+        {/* View Mode Context Handler */}
+        {viewMode === 'table' ? (
+          <SellingDatabaseTable 
+            items={filteredSales} 
+            selectedIds={selectedSaleIds} 
+            setSelectedIds={setSelectedSaleIds} 
+            onEdit={setSaleItemToEdit}
+          />
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {filteredSales.map((item) => (
+              <div key={item.id} className="bg-white border border-zinc-200 rounded-xl overflow-hidden shadow-sm hover:shadow-md transition">
+                <div className="p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold uppercase tracking-wider text-zinc-400">{item.brand || 'Unbranded'}</span>
+                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${item.status === 'Listed' ? 'bg-green-50 text-green-700' : 'bg-zinc-100 text-zinc-700'}`}>
+                      {item.status}
+                    </span>
+                  </div>
+                  <h3 className="font-medium text-zinc-900 text-sm line-clamp-1">{item.name}</h3>
+                  <p className="text-lg font-semibold text-zinc-900">{formatGbp(item.listedPrice || 0)}</p>
+                  <div className="pt-2 flex items-center justify-end gap-2 border-t border-zinc-100">
+                    <button
+                      onClick={() => {
+                        setSaleItemToEdit(item);
+                        setIsSaleFormOpen(true);
+                      }}
+                      className="p-1.5 text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50 rounded-md transition"
+                    >
+                      <Edit2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+            {filteredSales.length === 0 && (
+              <div className="col-span-full py-12 text-center bg-zinc-50 rounded-xl border border-dashed border-zinc-200">
+                <AlertCircle className="w-8 h-8 text-zinc-400 mx-auto mb-2" />
+                <p className="text-sm font-medium text-zinc-600">No items match your selected filters</p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Modals & Control Footers */}
+        <SaleFormModal
+          isOpen={isSaleFormOpen}
+          onClose={() => setIsSaleFormOpen(false)}
+          initialItem={saleItemToEdit}
         />
-      )}
-
-      {/* Overlay Modals */}
-      <SellFromWardrobeModal
-        isOpen={isSellFromWardrobeOpen}
-        onClose={() => setIsSellFromWardrobeOpen(false)}
-      />
-      
-      <SaleFormModal
-        isOpen={isSaleFormOpen}
-        onClose={() => {
-          setIsSaleFormOpen(false);
-                    setSaleItemToEdit(null);
-        }}
-      /> 
-    
-            {/* Note: If this belongs to a component like a close button, make sure it closes cleanly here */}
-      
-      <SaleFormModal
-        isOpen={isSaleFormOpen}
-
-        onClose={() => setIsSaleFormOpen(false)}
-        initialItem={saleItemToEdit}
-      />
+        <MarkSoldModal isOpen={!!markSoldItem} onClose={() => setMarkSoldItem(null)} item={markSoldItem} />
+        <SellFromWardrobeModal isOpen={isSellFromWardrobeOpen} onClose={() => setIsSellFromWardrobeOpen(false)} />
+        <AiListingGeneratorModal isOpen={!!aiGeneratorItem} onClose={() => setAiGeneratorItem(null)} item={aiGeneratorItem} />
+        <AutoImportModal isOpen={isAutoImportOpen} onClose={() => setIsAutoImportOpen(false)} />
+        <BulkEditModal isOpen={isBulkEditOpen} onClose={() => setIsBulkEditOpen(false)} selectedIds={selectedSaleIds} />
+        <SellingDisplaySettingsModal isOpen={isDisplaySettingsOpen} onClose={() => setIsDisplaySettingsOpen(false)} settings={displaySettings} onSave={handleUpdateDisplaySettings} />
+      </div>
     </>
   );
 };
