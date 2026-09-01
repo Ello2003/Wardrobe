@@ -1,0 +1,6 @@
+{
+  "name": "Wardrobe & Lookbook Studio",
+  "description": "Comprehensive garment inventory tracking, purchases & wishlist planning, resale selling manager with P&L profit tracking, lookbook styling studio, AI styling intelligence, and change versioning history in GBP (£).",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
