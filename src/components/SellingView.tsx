@@ -435,6 +435,10 @@ export const SellingView: React.FC = () => {
           setIsSaleFormOpen(false);
           setSaleItemToEdit(null);
         }}
+            {/* Ensure any open modals or conditional blocks are completely closed before this wrapper */}
+      <SaleFormModal
+        isOpen={isSaleFormOpen}
+        onClose={() => setIsSaleFormOpen(false)}
         initialItem={saleItemToEdit}
       />
     </>
