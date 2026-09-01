@@ -287,4 +287,156 @@ export const SellingView: React.FC = () => {
             className="flex items-center gap-1.5 px-3 py-2 border border-zinc-200 rounded-lg text-sm font-medium hover:bg-zinc-50 transition"
           >
 
-            Sell from Wardrobe<buttononClick={() ,> {setSaleItemToEdit(null);setIsSaleFormOpen(true);}}className="flex items-center gap-1.5 px-4 py-2 bg-zinc-900 hover:bg-zinc-800 text-white rounded-lg text-sm font-medium shadow transition"> Add Listing{/* Grid Filtering Tabs */}<selectvalue={selectedStatusTab}onChange={(e) => setSelectedStatusTab(e.target.value)}className="bg-white border border-zinc-200 rounded-lg p-2 text-xs focus:ring-1 focus:ring-zinc-400">All StatusesActive / ListedSold / ShippedDrafts<selectvalue={selectedBrand}onChange={(e) => setSelectedBrand(e.target.value)}className="bg-white border border-zinc-200 rounded-lg p-2 text-xs focus:ring-1 focus:ring-zinc-400">All Brands{uniqueBrands.map((ub) => ({ub.brand} ({ub.count})))}<selectvalue={selectedPlatform}onChange={(e) => setSelectedPlatform(e.target.value)}className="bg-white border border-zinc-200 rounded-lg p-2 text-xs focus:ring-1 focus:ring-zinc-400">All PlatformsVintedDepopeBay<selectvalue={sortBy}onChange={(e) => setSortBy(e.target.value)}className="bg-white border border-zinc-200 rounded-lg p-2 text-xs focus:ring-1 focus:ring-zinc-400">Recently ListedHighest PriceLowest Price{/* Bulk actions status overlay */}{selectedSaleIds.size > 0 && ({selectedSaleIds.size} listings selected Delete<buttononClick={() => setSelectedSaleIds(new Set())}className="p-1.5 text-zinc-400 hover:text-white">)}{/* Content Renderer Layout */}{viewMode === 'grid' ? ({filteredSales.map((item) => (<divkey={item.id}className={bg-white rounded-xl border p-3 flex flex-col group relative transition hover:shadow-md ${selectedSaleIds.has(item.id) ? 'border-zinc-900 ring-1 ring-zinc-900' : 'border-zinc-200'}}><buttononClick={() => toggleSelectSale(item.id)}className="absolute top-2 left-2 z-10 p-1 rounded-md bg-white/90 shadow-sm border border-zinc-200"><CheckSquare className={w-3.5 h-3.5 ${selectedSaleIds.has(item.id) ? 'text-zinc-900' : 'text-zinc-300'}} />{item.platform}{item.brand || 'Unbranded'}{item.name}<span className={px-2 py-0.5 rounded text-[10px] font-medium uppercase ${item.status === 'Listed' ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' : 'bg-zinc-100 text-zinc-600'}}>{item.status}{formatGbp(item.listingPrice || 0)}))}) : (<SellingDatabaseTableitems={filteredSales}onEditItem={(item) => {setSaleItemToEdit(item);setIsSaleFormOpen(true);}}/>)}{/* Overlay Modals */}<SellFromWardrobeModalisOpen={isSellFromWardrobeOpen}onClose={() => setIsSellFromWardrobeOpen(false)}/><SaleFormModalisOpen={isSaleFormOpen}onClose={() => {setIsSaleFormOpen(false);setSaleItemToEdit(null);}}initialItem={saleItemToEdit}/>);};
+import React from 'react';
+import { CheckSquare } from 'lucide-react'; // Assumed icon library based on your markup
+
+export const WardrobeManager = () => {
+  // ... state definitions and handlers should go here ...
+
+  return (
+    <>
+      {/* 1. Fixed corrupted button tag and click handler */}
+      <button
+        onClick={() => {
+          setSaleItemToEdit(null);
+          setIsSaleFormOpen(true);
+        }}
+        className="flex items-center gap-1.5 px-4 py-2 bg-zinc-900 hover:bg-zinc-800 text-white rounded-lg text-sm font-medium shadow transition"
+      >
+        Sell from Wardrobe
+      </button>
+
+      {/* Grid Filtering Tabs */}
+      {/* 2. Added missing option tags for status */}
+      <select
+        value={selectedStatusTab}
+        onChange={(e) => setSelectedStatusTab(e.target.value)}
+        className="bg-white border border-zinc-200 rounded-lg p-2 text-xs focus:ring-1 focus:ring-zinc-400"
+      >
+        <option value="all">All Statuses</option>
+        <option value="active">Active / Listed</option>
+        <option value="sold">Sold / Shipped</option>
+        <option value="drafts">Drafts</option>
+      </select>
+
+      {/* 3. Added missing option tags and mapping template structure */}
+      <select
+        value={selectedBrand}
+        onChange={(e) => setSelectedBrand(e.target.value)}
+        className="bg-white border border-zinc-200 rounded-lg p-2 text-xs focus:ring-1 focus:ring-zinc-400"
+      >
+        <option value="">All Brands</option>
+        {uniqueBrands.map((ub) => (
+          <option key={ub.brand} value={ub.brand}>
+            {ub.brand} ({ub.count})
+          </option>
+        ))}
+      </select>
+
+      {/* 4. Added missing option tags for platforms */}
+      <select
+        value={selectedPlatform}
+        onChange={(e) => setSelectedPlatform(e.target.value)}
+        className="bg-white border border-zinc-200 rounded-lg p-2 text-xs focus:ring-1 focus:ring-zinc-400"
+      >
+        <option value="">All Platforms</option>
+        <option value="vinted">Vinted</option>
+        <option value="depop">Depop</option>
+        <option value="ebay">eBay</option>
+      </select>
+
+      {/* 5. Added missing option tags for sorting */}
+      <select
+        value={sortBy}
+        onChange={(e) => setSortBy(e.target.value)}
+        className="bg-white border border-zinc-200 rounded-lg p-2 text-xs focus:ring-1 focus:ring-zinc-400"
+      >
+        <option value="recent">Recently Listed</option>
+        <option value="price-high">Highest Price</option>
+        <option value="price-low">Lowest Price</option>
+      </select>
+
+      {/* Bulk actions status overlay */}
+      {/* 6. Wrapped static text strings inside valid HTML elements */}
+      {selectedSaleIds.size > 0 && (
+        <div className="flex items-center gap-2 bg-zinc-800 text-white p-2 rounded-lg">
+          <span>{selectedSaleIds.size} listings selected</span>
+          <button 
+            onClick={() => {/* add delete handler function here */}}
+            className="text-red-400 hover:text-red-500"
+          >
+            Delete
+          </button>
+          <button
+            onClick={() => setSelectedSaleIds(new Set())}
+            className="p-1.5 text-zinc-400 hover:text-white"
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+
+      {/* Content Renderer Layout */}
+      {/* 7. Wrapped raw strings into elements and corrected layout template string concatenation */}
+      {viewMode === 'grid' ? (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {filteredSales.map((item) => (
+            <div
+              key={item.id}
+              className={`bg-white rounded-xl border p-3 flex flex-col group relative transition hover:shadow-md ${
+                selectedSaleIds.has(item.id) ? 'border-zinc-900 ring-1 ring-zinc-900' : 'border-zinc-200'
+              }`}
+            >
+              <button
+                onClick={() => toggleSelectSale(item.id)}
+                className="absolute top-2 left-2 z-10 p-1 rounded-md bg-white/90 shadow-sm border border-zinc-200"
+              >
+                <CheckSquare 
+                  className={`w-3.5 h-3.5 ${
+                    selectedSaleIds.has(item.id) ? 'text-zinc-900' : 'text-zinc-300'
+                  }`} 
+                />
+              </button>
+              
+              <div>{item.platform}</div>
+              <div>{item.brand || 'Unbranded'}</div>
+              <div>{item.name}</div>
+              
+              <span className={`px-2 py-0.5 rounded text-[10px] font-medium uppercase ${
+                item.status === 'Listed' 
+                  ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' 
+                  : 'bg-zinc-100 text-zinc-600'
+              }`}>
+                {item.status}
+              </span>
+              <div>{formatGbp(item.listingPrice || 0)}</div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <SellingDatabaseTable
+          items={filteredSales}
+          onEditItem={(item) => {
+            setSaleItemToEdit(item);
+            setIsSaleFormOpen(true);
+          }}
+        />
+      )}
+
+      {/* Overlay Modals */}
+      <SellFromWardrobeModal
+        isOpen={isSellFromWardrobeOpen}
+        onClose={() => setIsSellFromWardrobeOpen(false)}
+      />
+      
+      <SaleFormModal
+        isOpen={isSaleFormOpen}
+        onClose={() => {
+          setIsSaleFormOpen(false);
+          setSaleItemToEdit(null);
+        }}
+        initialItem={saleItemToEdit}
+      />
+    </>
+  );
+};
