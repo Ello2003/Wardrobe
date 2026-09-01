@@ -287,24 +287,24 @@ export const SellingView: React.FC = () => {
             className="flex items-center gap-1.5 px-3 py-2 border border-zinc-200 rounded-lg text-sm font-medium hover:bg-zinc-50 transition"
           >
 
-import React from 'react';
-import { CheckSquare } from 'lucide-react'; // Assumed icon library based on your markup
+      {/* Grid Filtering Tabs */}
+      {/* 2. Added missing option tags for status */}
+      <div className="flex items-center gap-2">
+        <label htmlFor="status-filter" className="text-sm font-medium text-zinc-600">
+          Status:
+        </label>
+        <select
+          id="status-filter"
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value)}
+          className="rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-sm font-medium text-zinc-700 shadow-sm focus:border-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-500"
+        >
+          <option value="all">All Statuses</option>
+          <option value="active">Active Listings</option>
+          <option value="sold">Sold</option>
+        </select>
+      </div>
 
-export const WardrobeManager = () => {
-  // ... state definitions and handlers should go here ...
-
-  return (
-    <>
-      {/* 1. Fixed corrupted button tag and click handler */}
-      <button
-        onClick={() => {
-          setSaleItemToEdit(null);
-          setIsSaleFormOpen(true);
-        }}
-        className="flex items-center gap-1.5 px-4 py-2 bg-zinc-900 hover:bg-zinc-800 text-white rounded-lg text-sm font-medium shadow transition"
-      >
-        Sell from Wardrobe
-      </button>
 
       {/* Grid Filtering Tabs */}
       {/* 2. Added missing option tags for status */}
