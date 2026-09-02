@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { X, Link2, Sparkles, Loader2, Check, Upload, Image as ImageIcon, ClipboardPaste } from 'lucide-react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { X, Link2, Sparkles, Loader2, Check, Upload, Image as ImageIcon, ClipboardPaste, AlertTriangle, Layers } from 'lucide-react';
 import { WardrobeItem, Category, Season, Condition } from '../types';
 import { useWardrobe } from '../context/WardrobeContext';
 import { GarmentImage } from './GarmentImage';
+import { isGarmentDuplicate } from './duplicateMerge/duplicateUtils';
 
 interface ItemFormModalProps {
   isOpen: boolean;
@@ -17,7 +18,7 @@ export const ItemFormModal: React.FC<ItemFormModalProps> = ({
   onClose,
   initialItem,
 }) => {
-  const { addItem, updateItem, categories = [] } = useWardrobe();
+  const { items, addItem, updateItem, categories = [] } = useWardrobe();
   const safeCategories = Array.isArray(categories) && categories.length > 0 ? categories : ['Tops', 'Knitwear', 'Trousers', 'Outerwear', 'Footwear', 'Accessories', 'Suits & Tailoring'];
 
   const [name, setName] = useState('');
@@ -36,6 +37,8 @@ export const ItemFormModal: React.FC<ItemFormModalProps> = ({
   const [tagsInput, setTagsInput] = useState('');
   const [imageUrl, setImageUrl] = useState('');
   const [isPhotoDragging, setIsPhotoDragging] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [autoConsolidate, setAutoConsolidate] = useState(true);
 
   // Quick Auto-Import inside modal
   const [importUrl, setImportUrl] = useState('');
@@ -44,6 +47,22 @@ export const ItemFormModal: React.FC<ItemFormModalProps> = ({
   const [extractSuccess, setExtractSuccess] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Detect duplicate copies in inventory using Humidor-grade matcher
+  const detectedDuplicates = useMemo(() => {
+    if (!brand.trim() && !name.trim()) return [];
+    const tempItem = {
+      brand: brand.trim(),
+      name: name.trim(),
+      color: color.trim(),
+      category,
+      imageUrl,
+    };
+    return items.filter((it) => {
+      if (initialItem && it.id === initialItem.id) return false;
+      return isGarmentDuplicate(tempItem, it);
+    });
+  }, [items, brand, name, color, category, imageUrl, initialItem]);
 
   useEffect(() => {
     if (initialItem) {
@@ -239,8 +258,10 @@ export const ItemFormModal: React.FC<ItemFormModalProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
     if (!name.trim() || !brand.trim()) return;
 
+    setIsSubmitting(true);
     const priceNum = parseFloat(purchasePrice) || 0;
     const tags = tagsInput
       .split(',')
@@ -249,49 +270,60 @@ export const ItemFormModal: React.FC<ItemFormModalProps> = ({
 
     const finalImageUrl = imageUrl.trim();
 
-    if (initialItem) {
-      updateItem(initialItem.id, {
-        name,
-        brand,
-        category,
-        color,
-        season: seasons,
-        purchasePrice: priceNum,
-        purchaseDate,
-        condition,
-        material,
-        size,
-        storageLocation,
-        careNotes,
-        notes,
-        tags,
-        imageUrl: finalImageUrl,
-      });
-    } else {
-      addItem({
-        name,
-        brand,
-        category,
-        subcategory: tags[0] || 'Capsule Piece',
-        color,
-        season: seasons,
-        purchasePrice: priceNum,
-        currentValuation: priceNum,
-        purchaseDate,
-        condition,
-        material,
-        size,
-        storageLocation,
-        careNotes,
-        notes,
-        tags,
-        imageUrl: finalImageUrl,
-        isFavorite: false,
-        isArchived: false,
-      });
-    }
+    try {
+      if (initialItem) {
+        updateItem(
+          initialItem.id,
+          {
+            name: name.trim(),
+            brand: brand.trim(),
+            category,
+            color: color.trim(),
+            season: seasons,
+            purchasePrice: priceNum,
+            purchaseDate,
+            condition,
+            material: material.trim(),
+            size: size.trim(),
+            storageLocation: storageLocation.trim(),
+            careNotes: careNotes.trim(),
+            notes: notes.trim(),
+            tags,
+            imageUrl: finalImageUrl,
+          },
+          autoConsolidate
+        );
+      } else {
+        addItem(
+          {
+            name: name.trim(),
+            brand: brand.trim(),
+            category,
+            subcategory: tags[0] || 'Capsule Piece',
+            color: color.trim(),
+            season: seasons,
+            purchasePrice: priceNum,
+            currentValuation: priceNum,
+            purchaseDate,
+            condition,
+            material: material.trim(),
+            size: size.trim(),
+            storageLocation: storageLocation.trim(),
+            careNotes: careNotes.trim(),
+            notes: notes.trim(),
+            tags,
+            imageUrl: finalImageUrl,
+            isFavorite: false,
+            isArchived: false,
+          },
+          autoConsolidate
+        );
+      }
 
-    onClose();
+      onClose();
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -385,6 +417,37 @@ export const ItemFormModal: React.FC<ItemFormModalProps> = ({
 
         {/* Form Body */}
         <form onSubmit={handleSubmit} className="p-5 space-y-4 max-h-[75vh] overflow-y-auto">
+          {/* Duplicate Detection Alert & Consolidation Notice */}
+          {detectedDuplicates.length > 0 && (
+            <div className="p-3.5 bg-amber-50/90 border border-amber-300 rounded-sm text-[#1A1A1A]">
+              <div className="flex items-start gap-2.5">
+                <AlertTriangle className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
+                <div className="flex-1 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs font-semibold text-amber-900">
+                      {detectedDuplicates.length} duplicate {detectedDuplicates.length === 1 ? 'copy' : 'copies'} detected in your wardrobe
+                    </p>
+                    <span className="text-[10px] font-mono font-medium px-2 py-0.5 bg-amber-200 text-amber-900 rounded-full">
+                      Humidor Auto-Merge
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-amber-800 leading-relaxed">
+                    Saving will consolidate all {detectedDuplicates.length + 1} instances into this single master record, safely combining wear counts, merged tags, and notes into 1 clean item.
+                  </p>
+                  <label className="flex items-center gap-2 pt-1 font-medium text-xs text-amber-950 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={autoConsolidate}
+                      onChange={(e) => setAutoConsolidate(e.target.checked)}
+                      className="accent-[#8C7355] w-3.5 h-3.5 rounded"
+                    />
+                    <span>Consolidate all duplicate copies into this master item on save</span>
+                  </label>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Photo Preview & Upload */}
           <div className="space-y-2">
             <label className="text-[11px] font-mono text-[#5A5A55] block font-semibold">

@@ -3,6 +3,7 @@ import {
   MatchParametersConfig,
   StatusCategory,
 } from './duplicateMergeTypes';
+import { WardrobeItem, ShoppingItem, SaleItem } from '../../types';
 
 export const normalizeString = (str: string = ''): string => {
   return str
@@ -395,3 +396,345 @@ export const getDefaultPresetConfig = (preset: MatchPreset): MatchParametersConf
       };
   }
 };
+
+/**
+ * Humidor-grade Garment Duplicate Evaluator
+ * Checks whether two garment records represent instances of the exact same clothing item
+ * Accounts for brand aliases, punctuation, lowercase normalisation, title token overlaps,
+ * and generic fallback naming (e.g. "raldo" vs "raldo shirt" vs "Raldo").
+ */
+export const isGarmentDuplicate = (
+  a: { id?: string; brand?: string; name?: string; color?: string; category?: string; imageUrl?: string },
+  b: { id?: string; brand?: string; name?: string; color?: string; category?: string; imageUrl?: string }
+): boolean => {
+  if (!a || !b) return false;
+  if (a.id && b.id && a.id === b.id) return true;
+
+  // Exact image URL match (non-empty)
+  if (a.imageUrl && b.imageUrl && a.imageUrl === b.imageUrl && a.imageUrl.length > 20) {
+    return true;
+  }
+
+  const rawBrandA = (a.brand || '').trim();
+  const rawBrandB = (b.brand || '').trim();
+  const rawNameA = (a.name || '').trim();
+  const rawNameB = (b.name || '').trim();
+
+  const brandA = normalizeBrand(rawBrandA);
+  const brandB = normalizeBrand(rawBrandB);
+  const cleanBrandA = brandA.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const cleanBrandB = brandB.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+  const cleanNameA = rawNameA.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const cleanNameB = rawNameB.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+  // Combined full titles
+  const fullA = `${cleanBrandA}${cleanNameA}`;
+  const fullB = `${cleanBrandB}${cleanNameB}`;
+
+  // If full texts match and non-empty (e.g. "raldo" and "raldo", "raldoshirt" and "raldoshirt")
+  if (fullA && fullB && fullA === fullB) {
+    return true;
+  }
+
+  // Exact brand match
+  if (cleanBrandA && cleanBrandB && cleanBrandA === cleanBrandB) {
+    if (cleanNameA === cleanNameB) return true;
+
+    // One name is empty or just generic ("garment", "item", "clothing", brand name itself)
+    const isGenericA = !cleanNameA || cleanNameA === cleanBrandA || cleanNameA === 'item' || cleanNameA === 'clothing';
+    const isGenericB = !cleanNameB || cleanNameB === cleanBrandB || cleanNameB === 'item' || cleanNameB === 'clothing';
+    if (isGenericA || isGenericB) return true;
+
+    // One name contains the other (e.g. "raldo oxford shirt" and "oxford shirt")
+    if (cleanNameA.length >= 3 && cleanNameB.length >= 3) {
+      if (cleanNameA.includes(cleanNameB) || cleanNameB.includes(cleanNameA)) return true;
+    }
+
+    // Clean title match without noise words
+    const titleA = cleanItemTitle(rawNameA, rawBrandA);
+    const titleB = cleanItemTitle(rawNameB, rawBrandB);
+    if (titleA && titleB && titleA === titleB) return true;
+    if (titleA.length >= 3 && titleB.length >= 3 && (titleA.includes(titleB) || titleB.includes(titleA))) return true;
+  }
+
+  // Brand embedded in other name (e.g. brand is "raldo", other has brand "" and name "raldo shirt")
+  if (cleanBrandA && cleanBrandA.length >= 3 && fullB.includes(cleanBrandA)) {
+    if (cleanNameA.length < 3 || fullB.includes(cleanBrandA)) return true;
+  }
+  if (cleanBrandB && cleanBrandB.length >= 3 && fullA.includes(cleanBrandB)) {
+    if (cleanNameB.length < 3 || fullA.includes(cleanBrandB)) return true;
+  }
+
+  // Handle case where one name or brand is identical (e.g. both named "raldo" even if brand is empty)
+  if (cleanNameA && cleanNameB && cleanNameA === cleanNameB && cleanNameA.length >= 3) {
+    return true;
+  }
+
+  return false;
+};
+
+/**
+ * Humidor-grade Universal Wardrobe Consolidator
+ * Consolidates duplicate instances into a single master record per unique garment.
+ * Combines wear counts, unions unique tags, merges notes, preserves best imagery and valuation.
+ */
+export const consolidateWardrobeDuplicates = (
+  items: WardrobeItem[]
+): {
+  consolidated: WardrobeItem[];
+  remappedIds: Map<string, string>;
+  mergedCount: number;
+} => {
+  if (!items || items.length <= 1) {
+    return { consolidated: items || [], remappedIds: new Map(), mergedCount: 0 };
+  }
+
+  const clusters: WardrobeItem[][] = [];
+  const visitedIndices = new Set<number>();
+
+  // Cluster items using isGarmentDuplicate or identical id
+  for (let i = 0; i < items.length; i++) {
+    if (visitedIndices.has(i)) continue;
+    const item = items[i];
+    const cluster: WardrobeItem[] = [item];
+    visitedIndices.add(i);
+
+    for (let j = i + 1; j < items.length; j++) {
+      if (visitedIndices.has(j)) continue;
+      const candidate = items[j];
+
+      if (item.id === candidate.id || isGarmentDuplicate(item, candidate)) {
+        cluster.push(candidate);
+        visitedIndices.add(j);
+      }
+    }
+    clusters.push(cluster);
+  }
+
+  const consolidated: WardrobeItem[] = [];
+  const remappedIds = new Map<string, string>();
+  let mergedCount = 0;
+  const now = new Date().toISOString();
+
+  clusters.forEach((cluster) => {
+    if (cluster.length === 1) {
+      consolidated.push(cluster[0]);
+      return;
+    }
+
+    // Multiple instances detected! Merge into single master record (Humidor standard)
+    mergedCount += cluster.length - 1;
+
+    // Pick primary master: prioritize image presence, wear count, and completeness
+    const sorted = [...cluster].sort((a, b) => {
+      const aScore =
+        (a.imageUrl ? 20 : 0) +
+        (a.wearCount || 0) * 2 +
+        (a.notes ? 5 : 0) +
+        (a.purchasePrice ? 3 : 0) +
+        (a.brand && a.brand.toLowerCase() !== 'unbranded' ? 10 : 0);
+      const bScore =
+        (b.imageUrl ? 20 : 0) +
+        (b.wearCount || 0) * 2 +
+        (b.notes ? 5 : 0) +
+        (b.purchasePrice ? 3 : 0) +
+        (b.brand && b.brand.toLowerCase() !== 'unbranded' ? 10 : 0);
+      return bScore - aScore;
+    });
+
+    const primary = sorted[0];
+    const secondaries = sorted.slice(1);
+
+    secondaries.forEach((s) => {
+      remappedIds.set(s.id, primary.id);
+    });
+
+    // Sum all wear counts
+    const totalWears = cluster.reduce((sum, it) => sum + (it.wearCount || 0), 0);
+
+    // Merge unique tags
+    const allTags = Array.from(new Set(cluster.flatMap((it) => it.tags || [])));
+
+    // Maximum valuation / purchase price
+    const maxValuation = Math.max(
+      ...cluster.map((it) => it.currentValuation || it.purchasePrice || 0)
+    );
+
+    // Combine distinct notes
+    const notePieces = Array.from(
+      new Set(cluster.map((it) => (it.notes || '').trim()).filter(Boolean))
+    );
+    const combinedNotes = notePieces.join(' | ');
+
+    // Fallbacks from any instance in the cluster
+    const bestImage = primary.imageUrl || cluster.find((it) => it.imageUrl)?.imageUrl || '';
+    const bestColor = primary.color || cluster.find((it) => it.color && it.color !== 'Unspecified')?.color || 'Unspecified';
+    const bestSize = primary.size || cluster.find((it) => it.size)?.size;
+    const bestMaterial = primary.material || cluster.find((it) => it.material)?.material;
+    const bestCare = primary.careNotes || cluster.find((it) => it.careNotes)?.careNotes;
+    const bestLocation = primary.storageLocation || cluster.find((it) => it.storageLocation)?.storageLocation;
+    const bestSubcategory = primary.subcategory || cluster.find((it) => it.subcategory)?.subcategory;
+    const bestSeller = primary.seller || cluster.find((it) => it.seller)?.seller;
+
+    const masterItem: WardrobeItem = {
+      ...primary,
+      imageUrl: bestImage,
+      color: bestColor,
+      size: bestSize,
+      material: bestMaterial,
+      careNotes: bestCare,
+      storageLocation: bestLocation,
+      subcategory: bestSubcategory,
+      seller: bestSeller,
+      tags: allTags,
+      wearCount: totalWears,
+      currentValuation: maxValuation,
+      notes: combinedNotes || undefined,
+      updatedAt: now,
+    };
+
+    consolidated.push(masterItem);
+  });
+
+  return { consolidated, remappedIds, mergedCount };
+};
+
+/**
+ * Humidor-grade Shopping / Wishlist Consolidator
+ */
+export const consolidateShoppingDuplicates = (
+  items: ShoppingItem[]
+): {
+  consolidated: ShoppingItem[];
+  remappedIds: Map<string, string>;
+  mergedCount: number;
+} => {
+  if (!items || items.length <= 1) {
+    return { consolidated: items || [], remappedIds: new Map(), mergedCount: 0 };
+  }
+
+  const clusters: ShoppingItem[][] = [];
+  const visitedIndices = new Set<number>();
+
+  for (let i = 0; i < items.length; i++) {
+    if (visitedIndices.has(i)) continue;
+    const item = items[i];
+    const cluster: ShoppingItem[] = [item];
+    visitedIndices.add(i);
+
+    for (let j = i + 1; j < items.length; j++) {
+      if (visitedIndices.has(j)) continue;
+      const candidate = items[j];
+
+      if (item.id === candidate.id || isGarmentDuplicate(item, candidate)) {
+        cluster.push(candidate);
+        visitedIndices.add(j);
+      }
+    }
+    clusters.push(cluster);
+  }
+
+  const consolidated: ShoppingItem[] = [];
+  const remappedIds = new Map<string, string>();
+  let mergedCount = 0;
+
+  clusters.forEach((cluster) => {
+    if (cluster.length === 1) {
+      consolidated.push(cluster[0]);
+      return;
+    }
+
+    mergedCount += cluster.length - 1;
+    const primary = cluster[0];
+    const secondaries = cluster.slice(1);
+
+    secondaries.forEach((s) => remappedIds.set(s.id, primary.id));
+
+    const allTags = Array.from(new Set(cluster.flatMap((it) => it.tags || [])));
+    const bestImage = primary.imageUrl || cluster.find((it) => it.imageUrl)?.imageUrl || '';
+    const reasonPieces = Array.from(
+      new Set(cluster.map((it) => (it.reasonOrGap || '').trim()).filter(Boolean))
+    );
+    const allMatching = Array.from(
+      new Set(cluster.flatMap((it) => it.matchingWardrobeItemIds || []))
+    );
+
+    consolidated.push({
+      ...primary,
+      imageUrl: bestImage,
+      tags: allTags,
+      matchingWardrobeItemIds: allMatching,
+      reasonOrGap: reasonPieces.join(' | ') || undefined,
+    });
+  });
+
+  return { consolidated, remappedIds, mergedCount };
+};
+
+/**
+ * Humidor-grade Sale Items Consolidator
+ */
+export const consolidateSaleDuplicates = (
+  items: SaleItem[]
+): {
+  consolidated: SaleItem[];
+  remappedIds: Map<string, string>;
+  mergedCount: number;
+} => {
+  if (!items || items.length <= 1) {
+    return { consolidated: items || [], remappedIds: new Map(), mergedCount: 0 };
+  }
+
+  const clusters: SaleItem[][] = [];
+  const visitedIndices = new Set<number>();
+
+  for (let i = 0; i < items.length; i++) {
+    if (visitedIndices.has(i)) continue;
+    const item = items[i];
+    const cluster: SaleItem[] = [item];
+    visitedIndices.add(i);
+
+    for (let j = i + 1; j < items.length; j++) {
+      if (visitedIndices.has(j)) continue;
+      const candidate = items[j];
+
+      if (item.id === candidate.id || isGarmentDuplicate(item, candidate)) {
+        cluster.push(candidate);
+        visitedIndices.add(j);
+      }
+    }
+    clusters.push(cluster);
+  }
+
+  const consolidated: SaleItem[] = [];
+  const remappedIds = new Map<string, string>();
+  let mergedCount = 0;
+
+  clusters.forEach((cluster) => {
+    if (cluster.length === 1) {
+      consolidated.push(cluster[0]);
+      return;
+    }
+
+    mergedCount += cluster.length - 1;
+    const primary = cluster[0];
+    const secondaries = cluster.slice(1);
+
+    secondaries.forEach((s) => remappedIds.set(s.id, primary.id));
+
+    const allTags = Array.from(new Set(cluster.flatMap((it) => it.tags || [])));
+    const bestImage = primary.imageUrl || cluster.find((it) => it.imageUrl)?.imageUrl || '';
+    const notePieces = Array.from(new Set(cluster.map((it) => (it.notes || '').trim()).filter(Boolean)));
+
+    consolidated.push({
+      ...primary,
+      imageUrl: bestImage,
+      tags: allTags,
+      notes: notePieces.join(' | ') || undefined,
+    });
+  });
+
+  return { consolidated, remappedIds, mergedCount };
+};
+

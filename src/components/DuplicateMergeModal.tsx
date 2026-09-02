@@ -58,6 +58,7 @@ export const DuplicateMergeModal: React.FC<DuplicateMergeModalProps> = ({
     mergeSaleItems,
     mergeCrossCollectionItems,
     batchAutoMergeDuplicates,
+    autoMergeAllDuplicates,
     undoLastAction,
     canUndo,
     formatCurrency,
@@ -281,9 +282,23 @@ export const DuplicateMergeModal: React.FC<DuplicateMergeModalProps> = ({
 
   // Perform Merge Action
   const executeMerge = (cluster: DuplicateCluster, customMergedData?: any) => {
-    const primaryId = cluster.primaryId;
-    const primaryItem = cluster.items.find((it) => it.id === primaryId) || cluster.items[0];
-    const secondaries = cluster.items.filter((it) => it.id !== primaryItem.id);
+    const primaryItem =
+      cluster.items.find(
+        (it) => it.id === cluster.primaryId && it.source === cluster.primarySource
+      ) ||
+      cluster.items.find((it) => it.id === cluster.primaryId) ||
+      cluster.items[0];
+
+    let secondaries = cluster.items.filter((it) =>
+      it.refKey ? it.refKey !== primaryItem.refKey : it !== primaryItem
+    );
+
+    if (secondaries.length === 0 && cluster.items.length > 1) {
+      secondaries = cluster.items.filter((it) => it !== primaryItem);
+      if (secondaries.length === 0) {
+        secondaries = cluster.items.slice(1);
+      }
+    }
 
     const isCrossCollection = cluster.items.some((it) => it.source !== primaryItem.source);
 
@@ -317,24 +332,20 @@ export const DuplicateMergeModal: React.FC<DuplicateMergeModalProps> = ({
     }
 
     setLastMergedMessage(
-      `Merged ${cluster.items.length} copies of "${primaryItem.brand} ${primaryItem.name}" into master record.`
+      `Merged ${cluster.items.length} copies of "${primaryItem.brand} ${primaryItem.name}" into 1 master record.`
     );
+  };
+
+  // 1-Click Universal Auto-Merge All Duplicates (Humidor standard)
+  const handleAutoMergeAll = () => {
+    const res = autoMergeAllDuplicates(scope, false);
+    setLastMergedMessage(res.message);
   };
 
   // Batch auto-merge all exact clusters
   const handleBatchAutoMerge = () => {
-    const exactActiveClusters = activeClusters.filter(
-      (c) => c.matchType === 'exact' && !c.hasColorMismatch && !c.hasStatusMismatch
-    );
-    if (exactActiveClusters.length === 0) return;
-
-    exactActiveClusters.forEach((cluster) => {
-      executeMerge(cluster);
-    });
-
-    setLastMergedMessage(
-      `Successfully batch-merged ${exactActiveClusters.length} exact duplicate groups.`
-    );
+    const res = autoMergeAllDuplicates(scope, true);
+    setLastMergedMessage(res.message);
   };
 
   if (!isOpen) return null;
@@ -373,9 +384,20 @@ export const DuplicateMergeModal: React.FC<DuplicateMergeModalProps> = ({
                 title="Undo last merge operation"
               >
                 <Undo2 className="w-3.5 h-3.5 text-[#8C7355]" />
-                <span>Undo Merge</span>
+                <span>Undo</span>
               </button>
             )}
+
+            <button
+              type="button"
+              onClick={handleAutoMergeAll}
+              disabled={activeClusters.length === 0}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono font-bold bg-[#8C7355] hover:bg-[#735D43] text-white rounded-xs shadow-xs transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+              title="Automatically merge all duplicate instances across your inventory into single master records"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-amber-200" />
+              <span>Auto-Merge All ({activeClusters.length})</span>
+            </button>
 
             <button
               type="button"
@@ -384,8 +406,8 @@ export const DuplicateMergeModal: React.FC<DuplicateMergeModalProps> = ({
               className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono font-bold bg-[#1A1A1A] hover:bg-black text-white rounded-xs shadow-xs transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
               title="Automatically merge clusters where all parameters and colours are exact duplicates"
             >
-              <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-              <span>Batch Auto-Merge Exact</span>
+              <Layers className="w-3.5 h-3.5 text-stone-300" />
+              <span>Auto-Merge Exact</span>
             </button>
 
             <button

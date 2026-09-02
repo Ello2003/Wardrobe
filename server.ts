@@ -64,6 +64,15 @@ async function generateContentWithFallback(
   throw lastError || new Error('All AI models unavailable.');
 }
 
+// Legacy route redirect: handles requests to /Inventory-Sales
+app.use((req, res, next) => {
+  if (req.path === '/Inventory-Sales' || req.path.startsWith('/Inventory-Sales/')) {
+    const strippedPath = req.url.replace(/^\/Inventory-Sales/, '') || '/';
+    return res.redirect(301, strippedPath);
+  }
+  next();
+});
+
 // Health check endpoint
 app.get('/api/health', (req, res) => {
   res.json({

@@ -29,7 +29,12 @@ export const CustomiseMergeDrawer: React.FC<CustomiseMergeDrawerProps> = ({
   onConfirm,
   formatCurrency,
 }) => {
-  const primary = cluster.items.find((it) => it.id === cluster.primaryId) || cluster.items[0];
+  const primary =
+    cluster.items.find(
+      (it) => it.id === cluster.primaryId && it.source === cluster.primarySource
+    ) ||
+    cluster.items.find((it) => it.id === cluster.primaryId) ||
+    cluster.items[0];
   const allNotes = cluster.items.map((i) => i.notes).filter(Boolean).join(' | ');
 
   const [draft, setDraft] = useState<CustomMergeDraft>({

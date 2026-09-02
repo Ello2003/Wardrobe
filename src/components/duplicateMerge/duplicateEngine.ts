@@ -48,7 +48,7 @@ export const buildDuplicateItemRefs = (
   const allRefs: DuplicateItemRef[] = [];
 
   if (scope === 'all' || scope === 'wardrobe') {
-    items.forEach((item) => {
+    items.forEach((item, idx) => {
       const isArchived = Boolean(item.isArchived);
       const statusText = isArchived
         ? 'Archived'
@@ -57,6 +57,7 @@ export const buildDuplicateItemRefs = (
         : 'Active Closet';
 
       allRefs.push({
+        refKey: `wardrobe::${item.id}::${idx}`,
         id: item.id,
         source: 'wardrobe',
         name: item.name,
@@ -86,12 +87,13 @@ export const buildDuplicateItemRefs = (
   }
 
   if (scope === 'all' || scope === 'shopping') {
-    shoppingList.forEach((item) => {
+    shoppingList.forEach((item, idx) => {
       const rawStatus = item.status || 'To Buy';
       const statusText = `Wishlist (${rawStatus})`;
       const isArchived = false;
 
       allRefs.push({
+        refKey: `shopping::${item.id}::${idx}`,
         id: item.id,
         source: 'shopping',
         name: item.name,
@@ -118,12 +120,13 @@ export const buildDuplicateItemRefs = (
   }
 
   if (scope === 'all' || scope === 'selling') {
-    saleItems.forEach((item) => {
+    saleItems.forEach((item, idx) => {
       const rawStatus = item.status || 'Listed';
       const statusText = `${item.platform || 'Resale'} (${rawStatus})`;
       const isArchived = false;
 
       allRefs.push({
+        refKey: `selling::${item.id}::${idx}`,
         id: item.id,
         source: 'selling',
         name: item.name,
@@ -311,14 +314,14 @@ export const computeDuplicateClusters = (
       if (matchPreset === 'brand_consolidator') {
         // Group all instances of same brand & garment into 1 tile
         if (isSameBrand && garmentA === garmentB) {
-          uf.union(a.id, b.id);
+          uf.union(a.refKey, b.refKey);
         }
       } else if (config.matchTags === 'any_overlap') {
         const sharedTags = a.tags.filter((t) =>
           b.tags.some((bt) => normalizeString(bt) === normalizeString(t))
         );
         if (sharedTags.length > 0) {
-          uf.union(a.id, b.id);
+          uf.union(a.refKey, b.refKey);
         }
       } else if (config.matchTitle) {
         const normTitleA = normalizeString(a.name);
@@ -339,11 +342,11 @@ export const computeDuplicateClusters = (
         const isFuzzyMatch = (matchPreset === 'fuzzy' || matchPreset === 'style_model') && (tokenOverlapRatio >= 0.4 || garmentA === garmentB);
 
         if (isExactTitle || isCleanMatch || isFuzzyMatch) {
-          uf.union(a.id, b.id);
+          uf.union(a.refKey, b.refKey);
         }
       } else {
         // No title matching required
-        uf.union(a.id, b.id);
+        uf.union(a.refKey, b.refKey);
       }
     }
   }
@@ -351,7 +354,7 @@ export const computeDuplicateClusters = (
   // Group items by their disjoint-set root representative
   const rootGroups = new Map<string, DuplicateItemRef[]>();
   filteredRefs.forEach((item) => {
-    const root = uf.find(item.id);
+    const root = uf.find(item.refKey);
     if (!rootGroups.has(root)) {
       rootGroups.set(root, []);
     }

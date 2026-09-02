@@ -27,6 +27,37 @@ import {
   INITIAL_VERSION_LOGS,
   INITIAL_SNAPSHOTS,
 } from '../data/initialData';
+import {
+  isGarmentDuplicate,
+  consolidateWardrobeDuplicates,
+  consolidateShoppingDuplicates,
+  consolidateSaleDuplicates,
+} from '../components/duplicateMerge/duplicateUtils';
+
+// Global counter and entropy to ensure collision-free IDs even inside tight synchronous loops (e.g. bulk moves)
+let globalIdCounter = 0;
+export const generateUniqueId = (prefix: string = 'id'): string => {
+  globalIdCounter = (globalIdCounter + 1) % 1000000;
+  const entropy = Math.random().toString(36).substring(2, 8);
+  const time = Date.now().toString(36);
+  return `${prefix}-${time}-${globalIdCounter}-${entropy}`;
+};
+
+export const ensureUniqueIds = <T extends { id: string }>(list: T[] | null | undefined, prefix: string): T[] => {
+  if (!Array.isArray(list)) return [];
+  const seen = new Set<string>();
+  return list
+    .filter((item): item is T => Boolean(item && typeof item === 'object'))
+    .map((item) => {
+      if (!item.id || seen.has(item.id)) {
+        const newId = generateUniqueId(prefix);
+        seen.add(newId);
+        return { ...item, id: newId };
+      }
+      seen.add(item.id);
+      return item;
+    });
+};
 
 interface UndoState {
   items: WardrobeItem[];
@@ -114,8 +145,8 @@ interface WardrobeContextType {
   resetCategories: () => void;
 
   // Wardrobe Item Actions
-  addItem: (itemData: Omit<WardrobeItem, 'id' | 'createdAt' | 'updatedAt' | 'wearCount'>) => string;
-  updateItem: (id: string, updates: Partial<WardrobeItem>) => void;
+  addItem: (itemData: Omit<WardrobeItem, 'id' | 'createdAt' | 'updatedAt' | 'wearCount'>, checkDuplicate?: boolean) => string;
+  updateItem: (id: string, updates: Partial<WardrobeItem>, consolidateDuplicates?: boolean) => void;
   deleteItem: (id: string) => void;
   logItemWear: (id: string, customDate?: string) => void;
   toggleItemFavorite: (id: string) => void;
@@ -238,6 +269,10 @@ interface WardrobeContextType {
       secondary: Array<{ collection: 'wardrobe' | 'shopping' | 'selling'; id: string }>;
     }>
   ) => number;
+  autoMergeAllDuplicates: (
+    scope?: 'all' | 'wardrobe' | 'shopping' | 'selling',
+    exactOnly?: boolean
+  ) => { mergedCount: number; removedCount: number; message: string };
 
   // Snapshot & Versioning Actions
   createSnapshot: (name: string, description?: string) => string;
@@ -335,29 +370,46 @@ export const normalizeShoppingItem = (item: ShoppingItem): ShoppingItem => {
 const WardrobeContext = createContext<WardrobeContextType | undefined>(undefined);
 
 export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  // Load initial state with localStorage fallback
+  // Load initial state with localStorage fallback, unique ID disambiguation, and Humidor-grade deduplication sweep
   const [items, setItems] = useState<WardrobeItem[]>(() => {
     try {
       const saved = localStorage.getItem(`${STORAGE_KEY}_items`);
       const raw: WardrobeItem[] = saved ? JSON.parse(saved) : INITIAL_WARDROBE_ITEMS;
-      return raw.map((item) => ({
+      const uniqueRaw = ensureUniqueIds(raw, 'item');
+      const normalized = uniqueRaw.map((item) => ({
         ...item,
         category: normalizeCategoryName(item.category) as Category,
       }));
+      const { consolidated, mergedCount } = consolidateWardrobeDuplicates(normalized);
+      if (mergedCount > 0) {
+        console.info(
+          `[Humidor Auto-Deduplication] Consolidated ${mergedCount} duplicate instances on startup into clean master records.`
+        );
+        try {
+          localStorage.setItem(`${STORAGE_KEY}_items`, JSON.stringify(consolidated));
+        } catch (e) {
+          console.warn('Failed to cache deduplicated items', e);
+        }
+      }
+      return consolidated;
     } catch {
-      return INITIAL_WARDROBE_ITEMS.map((item) => ({
+      const uniqueRaw = ensureUniqueIds(INITIAL_WARDROBE_ITEMS, 'item');
+      const normalized = uniqueRaw.map((item) => ({
         ...item,
         category: normalizeCategoryName(item.category) as Category,
       }));
+      const { consolidated } = consolidateWardrobeDuplicates(normalized);
+      return consolidated;
     }
   });
 
   const [outfits, setOutfits] = useState<LookbookOutfit[]>(() => {
     try {
       const saved = localStorage.getItem(`${STORAGE_KEY}_outfits`);
-      return saved ? JSON.parse(saved) : INITIAL_LOOKBOOK_OUTFITS;
+      const raw: LookbookOutfit[] = saved ? JSON.parse(saved) : INITIAL_LOOKBOOK_OUTFITS;
+      return ensureUniqueIds(raw, 'look');
     } catch {
-      return INITIAL_LOOKBOOK_OUTFITS;
+      return ensureUniqueIds(INITIAL_LOOKBOOK_OUTFITS, 'look');
     }
   });
 
@@ -365,21 +417,27 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     try {
       const saved = localStorage.getItem(`${STORAGE_KEY}_shopping`);
       const raw: ShoppingItem[] = saved ? JSON.parse(saved) : INITIAL_SHOPPING_LIST;
-      return raw.map((item) => {
+      const uniqueRaw = ensureUniqueIds(raw, 'shop');
+      const normalized = uniqueRaw.map((item) => {
         const norm = normalizeShoppingItem(item);
         return {
           ...norm,
           category: normalizeCategoryName(norm.category) as Category,
         };
       });
+      const { consolidated } = consolidateShoppingDuplicates(normalized);
+      return consolidated;
     } catch {
-      return INITIAL_SHOPPING_LIST.map((item) => {
+      const uniqueRaw = ensureUniqueIds(INITIAL_SHOPPING_LIST, 'shop');
+      const normalized = uniqueRaw.map((item) => {
         const norm = normalizeShoppingItem(item);
         return {
           ...norm,
           category: normalizeCategoryName(norm.category) as Category,
         };
       });
+      const { consolidated } = consolidateShoppingDuplicates(normalized);
+      return consolidated;
     }
   });
 
@@ -387,22 +445,29 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     try {
       const saved = localStorage.getItem(`${STORAGE_KEY}_sales`);
       const raw: SaleItem[] = saved ? JSON.parse(saved) : INITIAL_SALE_ITEMS;
-      return raw.map((item) => ({
+      const uniqueRaw = ensureUniqueIds(raw, 'sale');
+      const normalized = uniqueRaw.map((item) => ({
         ...item,
         category: normalizeCategoryName(item.category) as Category,
       }));
+      const { consolidated } = consolidateSaleDuplicates(normalized);
+      return consolidated;
     } catch {
-      return INITIAL_SALE_ITEMS.map((item) => ({
+      const uniqueRaw = ensureUniqueIds(INITIAL_SALE_ITEMS, 'sale');
+      const normalized = uniqueRaw.map((item) => ({
         ...item,
         category: normalizeCategoryName(item.category) as Category,
       }));
+      const { consolidated } = consolidateSaleDuplicates(normalized);
+      return consolidated;
     }
   });
 
   const [changeLogs, setChangeLogs] = useState<VersionChangeLog[]>(() => {
     try {
       const saved = localStorage.getItem(`${STORAGE_KEY}_logs`);
-      return saved ? JSON.parse(saved) : INITIAL_VERSION_LOGS;
+      const parsed = saved ? JSON.parse(saved) : null;
+      return Array.isArray(parsed) ? parsed : INITIAL_VERSION_LOGS;
     } catch {
       return INITIAL_VERSION_LOGS;
     }
@@ -411,7 +476,8 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [snapshots, setSnapshots] = useState<WardrobeSnapshot[]>(() => {
     try {
       const saved = localStorage.getItem(`${STORAGE_KEY}_snapshots`);
-      return saved ? JSON.parse(saved) : INITIAL_SNAPSHOTS;
+      const parsed = saved ? JSON.parse(saved) : null;
+      return Array.isArray(parsed) ? parsed : INITIAL_SNAPSHOTS;
     } catch {
       return INITIAL_SNAPSHOTS;
     }
@@ -420,7 +486,8 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [settings, setSettings] = useState<AppSettings>(() => {
     try {
       const saved = localStorage.getItem(`${STORAGE_KEY}_settings`);
-      return saved ? { ...DEFAULT_APP_SETTINGS, ...JSON.parse(saved) } : DEFAULT_APP_SETTINGS;
+      const parsed = saved ? JSON.parse(saved) : null;
+      return parsed && typeof parsed === 'object' ? { ...DEFAULT_APP_SETTINGS, ...parsed } : DEFAULT_APP_SETTINGS;
     } catch {
       return DEFAULT_APP_SETTINGS;
     }
@@ -429,7 +496,8 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [categories, setCategories] = useState<string[]>(() => {
     try {
       const saved = localStorage.getItem(`${STORAGE_KEY}_categories`);
-      return saved ? JSON.parse(saved) : DEFAULT_CATEGORIES;
+      const parsed = saved ? JSON.parse(saved) : null;
+      return Array.isArray(parsed) && parsed.length > 0 ? parsed : DEFAULT_CATEGORIES;
     } catch {
       return DEFAULT_CATEGORIES;
     }
@@ -438,7 +506,8 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [monthlyBudget, setMonthlyBudget] = useState<number>(() => {
     try {
       const saved = localStorage.getItem(`${STORAGE_KEY}_budget`);
-      return saved ? JSON.parse(saved) : 350;
+      const parsed = saved ? Number(JSON.parse(saved)) : 350;
+      return !isNaN(parsed) && parsed >= 0 ? parsed : 350;
     } catch {
       return 350;
     }
@@ -618,7 +687,7 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       setChangeLogs((prev) => {
         const nextVersion = prev.length > 0 ? prev[0].versionNumber + 1 : 1;
         const newLog: VersionChangeLog = {
-          id: `log-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+          id: generateUniqueId('log'),
           versionNumber: nextVersion,
           timestamp: new Date().toISOString(),
           actionType,
@@ -638,7 +707,7 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   // CREATE SNAPSHOT CHECKPOINT (Available for batch actions and manual snapshots)
   const createSnapshot = useCallback(
     (name: string, description = '') => {
-      const snapId = `snap-${Date.now()}`;
+      const snapId = generateUniqueId('snap');
       const totalVal = items.reduce((sum, item) => sum + (item.purchasePrice || 0), 0);
       const nextVersion = changeLogs.length > 0 ? changeLogs[0].versionNumber + 1 : 1;
 
@@ -678,11 +747,31 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     [items, outfits, shoppingList, saleItems, monthlyBudget, changeLogs, snapshots.length, recordChange]
   );
 
-  // 1. ADD WARDROBE ITEM
+  // 1. ADD WARDROBE ITEM (With Humidor duplicate prevention & auto-consolidation)
   const addItem = useCallback(
-    (itemData: Omit<WardrobeItem, 'id' | 'createdAt' | 'updatedAt' | 'wearCount'>) => {
+    (itemData: Omit<WardrobeItem, 'id' | 'createdAt' | 'updatedAt' | 'wearCount'>, checkDuplicate: boolean = true) => {
       const now = new Date().toISOString();
-      const id = `item-${Date.now()}`;
+
+      // Humidor Auto-Merge: If an instance of this garment already exists, consolidate and update it rather than creating a redundant duplicate
+      if (checkDuplicate) {
+        const existingExact = items.find((it) => isGarmentDuplicate(itemData, it));
+
+        if (existingExact) {
+          updateItem(
+            existingExact.id,
+            {
+              ...itemData,
+              purchasePrice: itemData.purchasePrice || existingExact.purchasePrice,
+              imageUrl: itemData.imageUrl || existingExact.imageUrl,
+              category: normalizeCategoryName(itemData.category) as Category,
+            },
+            true
+          );
+          return existingExact.id;
+        }
+      }
+
+      const id = generateUniqueId('item');
       const newItem: WardrobeItem = {
         ...itemData,
         id,
@@ -707,43 +796,130 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       );
       return id;
     },
-    [captureUndoState, recordChange]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [items, captureUndoState, recordChange]
   );
 
-  // 2. UPDATE WARDROBE ITEM
+  // 2. UPDATE WARDROBE ITEM (With Humidor-grade automatic consolidation of any duplicate copies into single master record)
   const updateItem = useCallback(
-    (id: string, updates: Partial<WardrobeItem>) => {
+    (id: string, updates: Partial<WardrobeItem>, consolidateDuplicates: boolean = true) => {
       const targetItem = items.find((i) => i.id === id);
       if (targetItem) {
         captureUndoState(`Updated "${targetItem.brand} ${targetItem.name}"`);
       }
+      const now = new Date().toISOString();
+
       setItems((prev) => {
         const existing = prev.find((i) => i.id === id);
         if (!existing) return prev;
         const normalizedCategory = updates.category
           ? (normalizeCategoryName(updates.category) as Category)
           : existing.category;
-        const updatedItem = {
+
+        const updatedItem: WardrobeItem = {
           ...existing,
           ...updates,
           category: normalizedCategory,
-          updatedAt: new Date().toISOString(),
+          updatedAt: now,
         };
 
+        if (!consolidateDuplicates) {
+          return prev.map((item) => (item.id === id ? updatedItem : item));
+        }
+
+        // Humidor Duplicate Detection: Find ALL matching copies of this garment in inventory
+        const duplicateSecondaries = prev.filter((item) => {
+          if (item.id === id) return false;
+          return isGarmentDuplicate(updatedItem, item);
+        });
+
+        if (duplicateSecondaries.length === 0) {
+          return prev.map((item) => (item.id === id ? updatedItem : item));
+        }
+
+        // Consolidate all secondary duplicate copies into the single master updated item!
+        const secondaryIds = new Set(duplicateSecondaries.map((s) => s.id));
+        const allTags = Array.from(
+          new Set([...(updatedItem.tags || []), ...duplicateSecondaries.flatMap((s) => s.tags || [])])
+        );
+        const totalWears =
+          (updatedItem.wearCount || 0) +
+          duplicateSecondaries.reduce((acc, s) => acc + (s.wearCount || 0), 0);
+        const maxVal = Math.max(
+          updatedItem.currentValuation || updatedItem.purchasePrice || 0,
+          ...duplicateSecondaries.map((s) => s.currentValuation || s.purchasePrice || 0)
+        );
+        const fallbackImage =
+          updatedItem.imageUrl || duplicateSecondaries.find((s) => s.imageUrl)?.imageUrl || '';
+        const fallbackColor =
+          updatedItem.color || duplicateSecondaries.find((s) => s.color && s.color !== 'Unspecified')?.color || 'Unspecified';
+        const fallbackColorHex =
+          updatedItem.colorHex || duplicateSecondaries.find((s) => s.colorHex)?.colorHex;
+        const fallbackSize = updatedItem.size || duplicateSecondaries.find((s) => s.size)?.size;
+        const fallbackMaterial =
+          updatedItem.material || duplicateSecondaries.find((s) => s.material)?.material;
+        const fallbackCare =
+          updatedItem.careNotes || duplicateSecondaries.find((s) => s.careNotes)?.careNotes;
+        const fallbackLocation =
+          updatedItem.storageLocation || duplicateSecondaries.find((s) => s.storageLocation)?.storageLocation;
+        const fallbackSubcategory =
+          updatedItem.subcategory || duplicateSecondaries.find((s) => s.subcategory)?.subcategory;
+        const fallbackSeller =
+          updatedItem.seller || duplicateSecondaries.find((s) => s.seller)?.seller;
+
+        const notePieces = [
+          updatedItem.notes,
+          ...duplicateSecondaries.map((s) => s.notes).filter(Boolean),
+        ].filter(Boolean) as string[];
+        const mergedNotes = Array.from(new Set(notePieces)).join(' | ');
+
+        const masterConsolidatedItem: WardrobeItem = {
+          ...updatedItem,
+          imageUrl: fallbackImage,
+          color: fallbackColor,
+          colorHex: fallbackColorHex,
+          size: fallbackSize,
+          material: fallbackMaterial,
+          careNotes: fallbackCare,
+          storageLocation: fallbackLocation,
+          subcategory: fallbackSubcategory,
+          seller: fallbackSeller,
+          tags: allTags,
+          wearCount: totalWears,
+          currentValuation: maxVal,
+          notes: mergedNotes || undefined,
+          updatedAt: now,
+        };
+
+        // Remap any lookbook outfits referencing secondary IDs to point to the master item ID
+        setOutfits((outfitPrev) =>
+          outfitPrev.map((o) => ({
+            ...o,
+            itemIds: Array.from(
+              new Set(o.itemIds.map((itemRefId) => (secondaryIds.has(itemRefId) ? id : itemRefId)))
+            ),
+            updatedAt: now,
+          }))
+        );
+
+        return prev
+          .filter((item) => !secondaryIds.has(item.id))
+          .map((item) => (item.id === id ? masterConsolidatedItem : item));
+      });
+
+      if (targetItem) {
         recordChange(
           'ITEM_UPDATED',
           'wardrobe_item',
-          `${updatedItem.brand} ${updatedItem.name}`,
-          `Updated details for "${updatedItem.brand} ${updatedItem.name}".`,
+          `${updates.brand || targetItem.brand} ${updates.name || targetItem.name}`,
+          `Updated details and consolidated duplicates for "${updates.brand || targetItem.brand} ${updates.name || targetItem.name}".`,
           id,
           {
-            oldValue: existing,
-            newValue: updatedItem,
+            oldValue: targetItem,
+            newValue: { ...targetItem, ...updates },
           }
         );
-
-        return prev.map((item) => (item.id === id ? updatedItem : item));
-      });
+      }
     },
     [items, captureUndoState, recordChange]
   );
@@ -837,9 +1013,9 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     ) => {
       if (!itemsData || itemsData.length === 0) return [];
       const now = new Date().toISOString();
-      const created: WardrobeItem[] = itemsData.map((data, idx) => ({
+      const created: WardrobeItem[] = itemsData.map((data) => ({
         ...data,
-        id: `item-${Date.now()}-${idx}`,
+        id: generateUniqueId('item'),
         wearCount: 0,
         createdAt: now,
         updatedAt: now,
@@ -972,7 +1148,7 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const addOutfit = useCallback(
     (outfitData: Omit<LookbookOutfit, 'id' | 'createdAt' | 'updatedAt' | 'timesWorn'>) => {
       const now = new Date().toISOString();
-      const id = `look-${Date.now()}`;
+      const id = generateUniqueId('look');
       const newOutfit: LookbookOutfit = {
         ...outfitData,
         id,
@@ -1111,7 +1287,7 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   // 11. ADD SHOPPING ITEM
   const addShoppingItem = useCallback(
     (itemData: Omit<ShoppingItem, 'id' | 'addedDate'>) => {
-      const id = `shop-${Date.now()}`;
+      const id = generateUniqueId('shop');
       const rawShopItem: ShoppingItem = {
         ...itemData,
         category: normalizeCategoryName(itemData.category) as Category,
@@ -1235,10 +1411,10 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     (itemsData: Array<Omit<ShoppingItem, 'id' | 'addedDate'>>, customTitle?: string) => {
       if (!itemsData || itemsData.length === 0) return [];
       const today = new Date().toISOString().split('T')[0];
-      const created: ShoppingItem[] = itemsData.map((data, idx) => {
+      const created: ShoppingItem[] = itemsData.map((data) => {
         const raw: ShoppingItem = {
           ...data,
-          id: `shop-${Date.now()}-${idx}`,
+          id: generateUniqueId('shop'),
           addedDate: today,
         };
         return normalizeShoppingItem(raw);
@@ -1283,7 +1459,7 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const now = new Date().toISOString();
 
       // Create new wardrobe item
-      const wardrobeItemId = `item-${Date.now()}`;
+      const wardrobeItemId = generateUniqueId('item');
       const newWardrobeItem: WardrobeItem = {
         id: wardrobeItemId,
         name: shoppingItem.name,
@@ -1333,7 +1509,7 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const addSaleItem = useCallback(
     (saleData: Omit<SaleItem, 'id' | 'createdAt' | 'updatedAt'>) => {
       const now = new Date().toISOString();
-      const id = `sale-${Date.now()}`;
+      const id = generateUniqueId('sale');
       const newSaleItem: SaleItem = {
         ...saleData,
         category: normalizeCategoryName(saleData.category) as Category,
@@ -1442,9 +1618,9 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     (itemsData: Array<Omit<SaleItem, 'id' | 'createdAt' | 'updatedAt'>>, customTitle?: string) => {
       if (!itemsData || itemsData.length === 0) return [];
       const now = new Date().toISOString();
-      const created: SaleItem[] = itemsData.map((data, idx) => ({
+      const created: SaleItem[] = itemsData.map((data) => ({
         ...data,
-        id: `sale-${Date.now()}-${idx}`,
+        id: generateUniqueId('sale'),
         createdAt: now,
         updatedAt: now,
       }));
@@ -1554,7 +1730,7 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     ) => {
       const today = new Date().toISOString().split('T')[0];
       const now = new Date().toISOString();
-      const saleId = `sale-${Date.now()}`;
+      const saleId = generateUniqueId('sale');
 
       const newSaleItem: SaleItem = {
         id: saleId,
@@ -1635,7 +1811,7 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
       const today = new Date().toISOString().split('T')[0];
       const now = new Date().toISOString();
-      const saleId = `sale-${Date.now()}`;
+      const saleId = generateUniqueId('sale');
       const price = listingPrice !== undefined ? listingPrice : (shopItem.actualPricePaid || shopItem.estimatedPrice || 0);
 
       const newSaleItem: SaleItem = {
@@ -1737,7 +1913,7 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (!item) return '';
 
       const today = new Date().toISOString().split('T')[0];
-      const shopId = `shop-${Date.now()}`;
+      const shopId = generateUniqueId('shop');
       const newShopItem: ShoppingItem = {
         id: shopId,
         name: item.name,
@@ -1793,7 +1969,7 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
       const today = new Date().toISOString().split('T')[0];
       const now = new Date().toISOString();
-      const wardrobeId = `item-${Date.now()}`;
+      const wardrobeId = generateUniqueId('item');
 
       const newWardrobeItem: WardrobeItem = {
         id: wardrobeId,
@@ -1845,7 +2021,7 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (!sale) return '';
 
       const today = new Date().toISOString().split('T')[0];
-      const shopId = `shop-${Date.now()}`;
+      const shopId = generateUniqueId('shop');
 
       const newShopItem: ShoppingItem = {
         id: shopId,
@@ -1930,38 +2106,50 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     [moveSaleItemToWardrobe, moveSaleItemToShopping]
   );
 
-  // 17. MERGE DUPLICATES ACTIONS
+  // 17. MERGE DUPLICATES ACTIONS (HUMIDOR-GRADE MASTER CONSOLIDATION)
   const mergeWardrobeItems = useCallback(
     (
       primaryId: string,
       secondaryIds: string[],
       customMerged?: Partial<WardrobeItem>
     ) => {
-      if (!primaryId || !secondaryIds || secondaryIds.length === 0) return;
-      captureUndoState(`Merged ${secondaryIds.length + 1} wardrobe items`);
+      if (!primaryId) return;
+      captureUndoState(`Merged duplicate wardrobe items into master record`);
 
       const now = new Date().toISOString();
+      const cleanSecIds = (secondaryIds || []).filter((id) => id !== primaryId);
+      const secIdSet = new Set(cleanSecIds);
 
       setItems((prev) => {
         const primary = prev.find((i) => i.id === primaryId);
         if (!primary) return prev;
 
-        const secondaries = prev.filter((i) => secondaryIds.includes(i.id));
+        // Find all secondary duplicate items (by id or if there's any identical clone or garment match)
+        const secondaries = prev.filter(
+          (i) =>
+            (secIdSet.has(i.id) || (i.id === primaryId && i !== primary) || isGarmentDuplicate(primary, i)) &&
+            i !== primary
+        );
+
         const allTags = Array.from(
           new Set([
             ...(primary.tags || []),
             ...secondaries.flatMap((s) => s.tags || []),
+            ...(customMerged?.tags || []),
           ])
         );
+
         const combinedWearCount =
           (primary.wearCount || 0) +
           secondaries.reduce((acc, s) => acc + (s.wearCount || 0), 0);
+
         const maxValuation = Math.max(
           primary.currentValuation || primary.purchasePrice || 0,
           ...secondaries.map((s) => s.currentValuation || s.purchasePrice || 0)
         );
 
         // Smart parameter fallbacks from secondaries if primary lacks them
+        const fallbackImage = primary.imageUrl || secondaries.find((s) => s.imageUrl)?.imageUrl || '';
         const fallbackColor = primary.color || secondaries.find((s) => s.color)?.color || 'Unspecified';
         const fallbackColorHex = primary.colorHex || secondaries.find((s) => s.colorHex)?.colorHex;
         const fallbackSize = primary.size || secondaries.find((s) => s.size)?.size;
@@ -1971,40 +2159,46 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         const fallbackSubcategory = primary.subcategory || secondaries.find((s) => s.subcategory)?.subcategory;
         const fallbackSeller = primary.seller || secondaries.find((s) => s.seller)?.seller;
 
-        const mergedNotes = [
+        // Deduplicate and combine notes
+        const notePieces = [
           primary.notes,
           ...secondaries.map((s) => s.notes).filter(Boolean),
         ]
-          .filter(Boolean)
-          .join(' | ');
+          .filter(Boolean) as string[];
+        const uniqueNotes = Array.from(new Set(notePieces)).join(' | ');
 
         const mergedItem: WardrobeItem = {
           ...primary,
-          color: fallbackColor,
-          colorHex: fallbackColorHex,
-          size: fallbackSize,
-          material: fallbackMaterial,
-          careNotes: fallbackCare,
-          storageLocation: fallbackLocation,
-          subcategory: fallbackSubcategory,
-          seller: fallbackSeller,
+          imageUrl: customMerged?.imageUrl || fallbackImage,
+          color: customMerged?.color || fallbackColor,
+          colorHex: customMerged?.colorHex || fallbackColorHex,
+          size: customMerged?.size !== undefined ? customMerged.size : fallbackSize,
+          material: customMerged?.material !== undefined ? customMerged.material : fallbackMaterial,
+          careNotes: customMerged?.careNotes !== undefined ? customMerged.careNotes : fallbackCare,
+          storageLocation: customMerged?.storageLocation !== undefined ? customMerged.storageLocation : fallbackLocation,
+          subcategory: customMerged?.subcategory !== undefined ? customMerged.subcategory : fallbackSubcategory,
+          seller: customMerged?.seller !== undefined ? customMerged.seller : fallbackSeller,
           ...customMerged,
           tags: customMerged?.tags || allTags,
           wearCount: customMerged?.wearCount !== undefined ? customMerged.wearCount : combinedWearCount,
-          currentValuation: customMerged?.currentValuation || maxValuation,
-          notes: customMerged?.notes !== undefined ? customMerged.notes : mergedNotes || undefined,
+          currentValuation: customMerged?.currentValuation !== undefined ? customMerged.currentValuation : maxValuation,
+          notes: customMerged?.notes !== undefined ? customMerged.notes : uniqueNotes || undefined,
           updatedAt: now,
         };
 
-        const remaining = prev.filter((i) => !secondaryIds.includes(i.id));
-        return remaining.map((i) => (i.id === primaryId ? mergedItem : i));
+        const allSecIdSet = new Set([...Array.from(secIdSet), ...secondaries.map((s) => s.id)]);
+        allSecIdSet.delete(primaryId);
+
+        // Filter out ALL secondary instances AND ensure only ONE master instance exists
+        const remaining = prev.filter((i) => !allSecIdSet.has(i.id) && i !== primary && i.id !== primaryId);
+        return [mergedItem, ...remaining];
       });
 
       // Update Lookbook outfits referencing secondaries
       setOutfits((prev) =>
         prev.map((outfit) => {
           const updatedItemIds = outfit.itemIds.map((id) =>
-            secondaryIds.includes(id) ? primaryId : id
+            secIdSet.has(id) ? primaryId : id
           );
           return {
             ...outfit,
@@ -2017,8 +2211,8 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       recordChange(
         'ITEM_UPDATED',
         'wardrobe_item',
-        `Merged ${secondaryIds.length + 1} Wardrobe Items`,
-        `Consolidated duplicate items into master record.`,
+        `Merged Duplicate Items`,
+        `Consolidated duplicate items into 1 unified master record.`,
         primaryId
       );
     },
@@ -2031,18 +2225,23 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       secondaryIds: string[],
       customMerged?: Partial<ShoppingItem>
     ) => {
-      if (!primaryId || !secondaryIds || secondaryIds.length === 0) return;
-      captureUndoState(`Merged ${secondaryIds.length + 1} shopping items`);
+      if (!primaryId) return;
+      captureUndoState(`Merged duplicate shopping items`);
+      const cleanSecIds = (secondaryIds || []).filter((id) => id !== primaryId);
+      const secIdSet = new Set(cleanSecIds);
 
       setShoppingList((prev) => {
         const primary = prev.find((i) => i.id === primaryId);
         if (!primary) return prev;
 
-        const secondaries = prev.filter((i) => secondaryIds.includes(i.id));
+        const secondaries = prev.filter(
+          (i) => (secIdSet.has(i.id) || (i.id === primaryId && i !== primary)) && i !== primary
+        );
         const allTags = Array.from(
           new Set([
             ...(primary.tags || []),
             ...secondaries.flatMap((s) => s.tags || []),
+            ...(customMerged?.tags || []),
           ])
         );
         const allMatching = Array.from(
@@ -2052,41 +2251,44 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           ])
         );
 
+        const fallbackImage = primary.imageUrl || secondaries.find((s) => s.imageUrl)?.imageUrl || '';
         const fallbackColor = primary.color || secondaries.find((s) => s.color)?.color;
         const fallbackSize = primary.size || secondaries.find((s) => s.size)?.size;
         const fallbackMaterial = primary.material || secondaries.find((s) => s.material)?.material;
         const fallbackSeller = primary.seller || secondaries.find((s) => s.seller)?.seller;
         const fallbackRetailer = primary.retailerName || secondaries.find((s) => s.retailerName)?.retailerName;
 
-        const mergedReason = [
+        const notePieces = [
           primary.reasonOrGap,
           ...secondaries.map((s) => s.reasonOrGap).filter(Boolean),
-        ]
-          .filter(Boolean)
-          .join(' | ');
+        ].filter(Boolean) as string[];
+        const mergedReason = Array.from(new Set(notePieces)).join(' | ');
 
         const mergedItem: ShoppingItem = {
           ...primary,
-          color: fallbackColor,
-          size: fallbackSize,
-          material: fallbackMaterial,
-          seller: fallbackSeller,
-          retailerName: fallbackRetailer,
+          imageUrl: customMerged?.imageUrl || fallbackImage,
+          color: customMerged?.color || fallbackColor,
+          size: customMerged?.size !== undefined ? customMerged.size : fallbackSize,
+          material: customMerged?.material !== undefined ? customMerged.material : fallbackMaterial,
+          seller: customMerged?.seller !== undefined ? customMerged.seller : fallbackSeller,
+          retailerName: customMerged?.retailerName !== undefined ? customMerged.retailerName : fallbackRetailer,
           ...customMerged,
           tags: customMerged?.tags || allTags,
           matchingWardrobeItemIds: customMerged?.matchingWardrobeItemIds || allMatching,
-          reasonOrGap: customMerged?.reasonOrGap || mergedReason,
+          reasonOrGap: customMerged?.reasonOrGap !== undefined ? customMerged.reasonOrGap : mergedReason,
         };
 
-        const remaining = prev.filter((i) => !secondaryIds.includes(i.id));
-        return remaining.map((i) => (i.id === primaryId ? mergedItem : i));
+        const allSecIdSet = new Set([...Array.from(secIdSet), ...secondaries.map((s) => s.id)]);
+        allSecIdSet.delete(primaryId);
+        const remaining = prev.filter((i) => !allSecIdSet.has(i.id) && i !== primary && i.id !== primaryId);
+        return [mergedItem, ...remaining];
       });
 
       recordChange(
         'WISHLIST_UPDATED',
         'shopping_item',
-        `Merged ${secondaryIds.length + 1} Shopping Items`,
-        `Consolidated duplicate wishlist items.`,
+        `Merged Shopping Items`,
+        `Consolidated duplicate wishlist items into 1 master record.`,
         primaryId
       );
     },
@@ -2099,55 +2301,63 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       secondaryIds: string[],
       customMerged?: Partial<SaleItem>
     ) => {
-      if (!primaryId || !secondaryIds || secondaryIds.length === 0) return;
-      captureUndoState(`Merged ${secondaryIds.length + 1} sale items`);
+      if (!primaryId) return;
+      captureUndoState(`Merged duplicate sale items`);
       const now = new Date().toISOString();
+      const cleanSecIds = (secondaryIds || []).filter((id) => id !== primaryId);
+      const secIdSet = new Set(cleanSecIds);
 
       setSaleItems((prev) => {
         const primary = prev.find((i) => i.id === primaryId);
         if (!primary) return prev;
 
-        const secondaries = prev.filter((i) => secondaryIds.includes(i.id));
+        const secondaries = prev.filter(
+          (i) => (secIdSet.has(i.id) || (i.id === primaryId && i !== primary)) && i !== primary
+        );
         const allTags = Array.from(
           new Set([
             ...(primary.tags || []),
             ...secondaries.flatMap((s) => s.tags || []),
+            ...(customMerged?.tags || []),
           ])
         );
 
+        const fallbackImage = primary.imageUrl || secondaries.find((s) => s.imageUrl)?.imageUrl || '';
         const fallbackColor = primary.color || secondaries.find((s) => s.color)?.color;
         const fallbackSize = primary.size || secondaries.find((s) => s.size)?.size;
         const fallbackDescription = primary.description || secondaries.find((s) => s.description)?.description;
         const fallbackBuyer = primary.buyerUsername || secondaries.find((s) => s.buyerUsername)?.buyerUsername;
 
-        const mergedNotes = [
+        const notePieces = [
           primary.notes,
           ...secondaries.map((s) => s.notes).filter(Boolean),
-        ]
-          .filter(Boolean)
-          .join(' | ');
+        ].filter(Boolean) as string[];
+        const mergedNotes = Array.from(new Set(notePieces)).join(' | ');
 
         const mergedItem: SaleItem = {
           ...primary,
-          color: fallbackColor,
-          size: fallbackSize,
-          description: fallbackDescription,
-          buyerUsername: fallbackBuyer,
+          imageUrl: customMerged?.imageUrl || fallbackImage,
+          color: customMerged?.color || fallbackColor,
+          size: customMerged?.size !== undefined ? customMerged.size : fallbackSize,
+          description: customMerged?.description !== undefined ? customMerged.description : fallbackDescription,
+          buyerUsername: customMerged?.buyerUsername !== undefined ? customMerged.buyerUsername : fallbackBuyer,
           ...customMerged,
           tags: customMerged?.tags || allTags,
           notes: customMerged?.notes !== undefined ? customMerged.notes : mergedNotes || undefined,
           updatedAt: now,
         };
 
-        const remaining = prev.filter((i) => !secondaryIds.includes(i.id));
-        return remaining.map((i) => (i.id === primaryId ? mergedItem : i));
+        const allSecIdSet = new Set([...Array.from(secIdSet), ...secondaries.map((s) => s.id)]);
+        allSecIdSet.delete(primaryId);
+        const remaining = prev.filter((i) => !allSecIdSet.has(i.id) && i !== primary && i.id !== primaryId);
+        return [mergedItem, ...remaining];
       });
 
       recordChange(
         'SALE_UPDATED',
         'sale_item',
-        `Merged ${secondaryIds.length + 1} Sale Items`,
-        `Consolidated duplicate listings into primary record.`,
+        `Merged Sale Items`,
+        `Consolidated duplicate listings into 1 master record.`,
         primaryId
       );
     },
@@ -2161,37 +2371,71 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       secondaryItems: Array<{ collection: 'wardrobe' | 'shopping' | 'selling'; id: string }>,
       customMerged?: any
     ) => {
+      if (!primaryId) return;
       captureUndoState(`Merged cross-collection duplicate items`);
-      secondaryItems.forEach((sec) => {
-        if (sec.collection === 'wardrobe') {
-          setItems((prev) => prev.filter((i) => i.id !== sec.id));
-          setOutfits((prev) =>
-            prev.map((o) => ({
-              ...o,
-              itemIds: o.itemIds.filter((id) => id !== sec.id),
-            }))
-          );
-        } else if (sec.collection === 'shopping') {
-          setShoppingList((prev) => prev.filter((i) => i.id !== sec.id));
-        } else if (sec.collection === 'selling') {
-          setSaleItems((prev) => prev.filter((i) => i.id !== sec.id));
-        }
-      });
+      const now = new Date().toISOString();
 
-      if (customMerged) {
-        if (primaryCollection === 'wardrobe') {
-          setItems((prev) =>
-            prev.map((i) => (i.id === primaryId ? { ...i, ...customMerged, updatedAt: new Date().toISOString() } : i))
-          );
-        } else if (primaryCollection === 'shopping') {
-          setShoppingList((prev) =>
-            prev.map((i) => (i.id === primaryId ? { ...i, ...customMerged } : i))
-          );
-        } else if (primaryCollection === 'selling') {
-          setSaleItems((prev) =>
-            prev.map((i) => (i.id === primaryId ? { ...i, ...customMerged, updatedAt: new Date().toISOString() } : i))
-          );
-        }
+      const secWardrobeIds = new Set(
+        secondaryItems.filter((s) => s.collection === 'wardrobe' && s.id !== primaryId).map((s) => s.id)
+      );
+      const secShoppingIds = new Set(
+        secondaryItems.filter((s) => s.collection === 'shopping' && s.id !== primaryId).map((s) => s.id)
+      );
+      const secSaleIds = new Set(
+        secondaryItems.filter((s) => s.collection === 'selling' && s.id !== primaryId).map((s) => s.id)
+      );
+
+      if (primaryCollection === 'wardrobe') {
+        setItems((prev) => {
+          const primary = prev.find((i) => i.id === primaryId);
+          if (!primary) return prev;
+          const mergedItem: WardrobeItem = {
+            ...primary,
+            ...(customMerged || {}),
+            updatedAt: now,
+          };
+          const remaining = prev.filter((i) => !secWardrobeIds.has(i.id) && i.id !== primaryId);
+          return [mergedItem, ...remaining];
+        });
+        setShoppingList((prev) => prev.filter((s) => !secShoppingIds.has(s.id)));
+        setSaleItems((prev) => prev.filter((s) => !secSaleIds.has(s.id)));
+        setOutfits((prev) =>
+          prev.map((o) => ({
+            ...o,
+            itemIds: Array.from(
+              new Set(
+                o.itemIds.map((id) => (secWardrobeIds.has(id) ? primaryId : id))
+              )
+            ),
+          }))
+        );
+      } else if (primaryCollection === 'shopping') {
+        setShoppingList((prev) => {
+          const primary = prev.find((s) => s.id === primaryId);
+          if (!primary) return prev;
+          const mergedItem: ShoppingItem = {
+            ...primary,
+            ...(customMerged || {}),
+          };
+          const remaining = prev.filter((s) => !secShoppingIds.has(s.id) && s.id !== primaryId);
+          return [mergedItem, ...remaining];
+        });
+        setItems((prev) => prev.filter((i) => !secWardrobeIds.has(i.id)));
+        setSaleItems((prev) => prev.filter((s) => !secSaleIds.has(s.id)));
+      } else if (primaryCollection === 'selling') {
+        setSaleItems((prev) => {
+          const primary = prev.find((s) => s.id === primaryId);
+          if (!primary) return prev;
+          const mergedItem: SaleItem = {
+            ...primary,
+            ...(customMerged || {}),
+            updatedAt: now,
+          };
+          const remaining = prev.filter((s) => !secSaleIds.has(s.id) && s.id !== primaryId);
+          return [mergedItem, ...remaining];
+        });
+        setItems((prev) => prev.filter((i) => !secWardrobeIds.has(i.id)));
+        setShoppingList((prev) => prev.filter((s) => !secShoppingIds.has(s.id)));
       }
     },
     [captureUndoState]
@@ -2203,56 +2447,284 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         primaryCollection: 'wardrobe' | 'shopping' | 'selling';
         primaryId: string;
         secondary: Array<{ collection: 'wardrobe' | 'shopping' | 'selling'; id: string }>;
+        customMerged?: any;
       }>
     ) => {
       if (!clusters || clusters.length === 0) return 0;
       captureUndoState(`Auto-merged ${clusters.length} duplicate clusters`);
 
-      let totalRemoved = 0;
-      clusters.forEach((cluster) => {
-        totalRemoved += cluster.secondary.length;
-        if (
-          cluster.primaryCollection === 'wardrobe' &&
-          cluster.secondary.every((s) => s.collection === 'wardrobe')
-        ) {
-          mergeWardrobeItems(
-            cluster.primaryId,
-            cluster.secondary.map((s) => s.id)
+      const now = new Date().toISOString();
+
+      // Collect all secondary IDs to remove across all clusters
+      const wardrobeToRemove = new Set<string>();
+      const shoppingToRemove = new Set<string>();
+      const sellingToRemove = new Set<string>();
+
+      // Collect updates for primaries
+      const wardrobeUpdates = new Map<string, Partial<WardrobeItem>>();
+      const shoppingUpdates = new Map<string, Partial<ShoppingItem>>();
+      const sellingUpdates = new Map<string, Partial<SaleItem>>();
+
+      clusters.forEach((cl) => {
+        cl.secondary.forEach((sec) => {
+          if (sec.id === cl.primaryId) return; // Never mark primary for removal
+          if (sec.collection === 'wardrobe') wardrobeToRemove.add(sec.id);
+          if (sec.collection === 'shopping') shoppingToRemove.add(sec.id);
+          if (sec.collection === 'selling') sellingToRemove.add(sec.id);
+        });
+
+        // Extra safeguard: explicitly remove primaryId from all removal sets
+        wardrobeToRemove.delete(cl.primaryId);
+        shoppingToRemove.delete(cl.primaryId);
+        sellingToRemove.delete(cl.primaryId);
+
+        // Compute merged attributes from secondaries if not explicitly passed
+        if (cl.primaryCollection === 'wardrobe') {
+          const currentPrimary = items.find((i) => i.id === cl.primaryId);
+          const currentSecondaries = items.filter((i) =>
+            cl.secondary.some((s) => s.collection === 'wardrobe' && s.id === i.id)
           );
-        } else if (
-          cluster.primaryCollection === 'shopping' &&
-          cluster.secondary.every((s) => s.collection === 'shopping')
-        ) {
-          mergeShoppingItems(
-            cluster.primaryId,
-            cluster.secondary.map((s) => s.id)
+
+          if (currentPrimary) {
+            const allTags = Array.from(
+              new Set([
+                ...(currentPrimary.tags || []),
+                ...currentSecondaries.flatMap((s) => s.tags || []),
+                ...(cl.customMerged?.tags || []),
+              ])
+            );
+            const totalWears =
+              (currentPrimary.wearCount || 0) +
+              currentSecondaries.reduce((acc, s) => acc + (s.wearCount || 0), 0);
+            const maxVal = Math.max(
+              currentPrimary.currentValuation || currentPrimary.purchasePrice || 0,
+              ...currentSecondaries.map((s) => s.currentValuation || s.purchasePrice || 0)
+            );
+            const fallbackImage =
+              currentPrimary.imageUrl || currentSecondaries.find((s) => s.imageUrl)?.imageUrl || '';
+            const fallbackColor =
+              currentPrimary.color || currentSecondaries.find((s) => s.color)?.color || 'Unspecified';
+
+            const notePieces = [
+              currentPrimary.notes,
+              ...currentSecondaries.map((s) => s.notes).filter(Boolean),
+            ].filter(Boolean) as string[];
+            const mergedNotes = Array.from(new Set(notePieces)).join(' | ');
+
+            wardrobeUpdates.set(cl.primaryId, {
+              imageUrl: cl.customMerged?.imageUrl || fallbackImage,
+              color: cl.customMerged?.color || fallbackColor,
+              tags: cl.customMerged?.tags || allTags,
+              wearCount: cl.customMerged?.wearCount !== undefined ? cl.customMerged.wearCount : totalWears,
+              currentValuation: cl.customMerged?.currentValuation !== undefined ? cl.customMerged.currentValuation : maxVal,
+              notes: cl.customMerged?.notes !== undefined ? cl.customMerged.notes : mergedNotes || undefined,
+              ...(cl.customMerged || {}),
+            });
+          }
+        } else if (cl.primaryCollection === 'shopping') {
+          const currentPrimary = shoppingList.find((s) => s.id === cl.primaryId);
+          const currentSecondaries = shoppingList.filter((s) =>
+            cl.secondary.some((sec) => sec.collection === 'shopping' && sec.id === s.id)
           );
-        } else if (
-          cluster.primaryCollection === 'selling' &&
-          cluster.secondary.every((s) => s.collection === 'selling')
-        ) {
-          mergeSaleItems(
-            cluster.primaryId,
-            cluster.secondary.map((s) => s.id)
+
+          if (currentPrimary) {
+            const allTags = Array.from(
+              new Set([
+                ...(currentPrimary.tags || []),
+                ...currentSecondaries.flatMap((s) => s.tags || []),
+                ...(cl.customMerged?.tags || []),
+              ])
+            );
+            const notePieces = [
+              currentPrimary.reasonOrGap,
+              ...currentSecondaries.map((s) => s.reasonOrGap).filter(Boolean),
+            ].filter(Boolean) as string[];
+            const mergedReason = Array.from(new Set(notePieces)).join(' | ');
+
+            shoppingUpdates.set(cl.primaryId, {
+              tags: cl.customMerged?.tags || allTags,
+              reasonOrGap: cl.customMerged?.reasonOrGap !== undefined ? cl.customMerged.reasonOrGap : mergedReason,
+              ...(cl.customMerged || {}),
+            });
+          }
+        } else if (cl.primaryCollection === 'selling') {
+          const currentPrimary = saleItems.find((s) => s.id === cl.primaryId);
+          const currentSecondaries = saleItems.filter((s) =>
+            cl.secondary.some((sec) => sec.collection === 'selling' && sec.id === s.id)
           );
-        } else {
-          mergeCrossCollectionItems(
-            cluster.primaryCollection,
-            cluster.primaryId,
-            cluster.secondary
-          );
+
+          if (currentPrimary) {
+            const allTags = Array.from(
+              new Set([
+                ...(currentPrimary.tags || []),
+                ...currentSecondaries.flatMap((s) => s.tags || []),
+                ...(cl.customMerged?.tags || []),
+              ])
+            );
+            const notePieces = [
+              currentPrimary.notes,
+              ...currentSecondaries.map((s) => s.notes).filter(Boolean),
+            ].filter(Boolean) as string[];
+            const mergedNotes = Array.from(new Set(notePieces)).join(' | ');
+
+            sellingUpdates.set(cl.primaryId, {
+              tags: cl.customMerged?.tags || allTags,
+              notes: cl.customMerged?.notes !== undefined ? cl.customMerged.notes : mergedNotes || undefined,
+              ...(cl.customMerged || {}),
+            });
+          }
         }
       });
 
-      return totalRemoved;
+      // Update wardrobe in ONE atomic pass
+      setItems((prev) => {
+        const updated = prev
+          .filter((i) => !wardrobeToRemove.has(i.id))
+          .map((i) => {
+            if (wardrobeUpdates.has(i.id)) {
+              return { ...i, ...wardrobeUpdates.get(i.id), updatedAt: now };
+            }
+            return i;
+          });
+        const seen = new Set<string>();
+        return updated.filter((i) => {
+          if (seen.has(i.id)) return false;
+          seen.add(i.id);
+          return true;
+        });
+      });
+
+      // Update outfits lookbook references
+      setOutfits((prev) =>
+        prev.map((o) => {
+          const updatedItemIds = o.itemIds.map((id) => {
+            const cl = clusters.find((c) =>
+              c.secondary.some((s) => s.collection === 'wardrobe' && s.id === id)
+            );
+            return cl ? cl.primaryId : id;
+          });
+          return {
+            ...o,
+            itemIds: Array.from(new Set(updatedItemIds)),
+            updatedAt: now,
+          };
+        })
+      );
+
+      // Update shopping in ONE atomic pass
+      setShoppingList((prev) => {
+        const updated = prev
+          .filter((s) => !shoppingToRemove.has(s.id))
+          .map((s) => {
+            if (shoppingUpdates.has(s.id)) {
+              return { ...s, ...shoppingUpdates.get(s.id) };
+            }
+            return s;
+          });
+        const seen = new Set<string>();
+        return updated.filter((s) => {
+          if (seen.has(s.id)) return false;
+          seen.add(s.id);
+          return true;
+        });
+      });
+
+      // Update selling in ONE atomic pass
+      setSaleItems((prev) => {
+        const updated = prev
+          .filter((s) => !sellingToRemove.has(s.id))
+          .map((s) => {
+            if (sellingUpdates.has(s.id)) {
+              return { ...s, ...sellingUpdates.get(s.id), updatedAt: now };
+            }
+            return s;
+          });
+        const seen = new Set<string>();
+        return updated.filter((s) => {
+          if (seen.has(s.id)) return false;
+          seen.add(s.id);
+          return true;
+        });
+      });
+
+      return clusters.reduce((acc, c) => acc + c.secondary.length, 0);
     },
-    [
-      captureUndoState,
-      mergeWardrobeItems,
-      mergeShoppingItems,
-      mergeSaleItems,
-      mergeCrossCollectionItems,
-    ]
+    [captureUndoState, items, shoppingList, saleItems]
+  );
+
+  // UNIVERSAL 1-CLICK AUTO MERGE ALL SAME INSTANCES (HUMIDOR-GRADE AUTO CONSOLIDATOR)
+  const autoMergeAllDuplicates = useCallback(
+    (
+      scope: 'all' | 'wardrobe' | 'shopping' | 'selling' = 'all',
+      exactOnly: boolean = false
+    ): { mergedCount: number; removedCount: number; message: string } => {
+      const now = new Date().toISOString();
+      let totalMergedClusters = 0;
+      let totalRemovedSecondary = 0;
+
+      // 1. Process Wardrobe with Humidor-grade deduplication engine
+      if (scope === 'all' || scope === 'wardrobe') {
+        const { consolidated, remappedIds, mergedCount } = consolidateWardrobeDuplicates(items);
+        if (mergedCount > 0) {
+          totalRemovedSecondary += mergedCount;
+          totalMergedClusters += 1;
+
+          captureUndoState(`Auto-merged ${mergedCount} duplicate wardrobe items into master records`);
+          setItems(consolidated);
+
+          setOutfits((prev) =>
+            prev.map((o) => ({
+              ...o,
+              itemIds: Array.from(
+                new Set(o.itemIds.map((id) => remappedIds.get(id) || id))
+              ),
+              updatedAt: now,
+            }))
+          );
+        }
+      }
+
+      // 2. Process Shopping
+      if (scope === 'all' || scope === 'shopping') {
+        const { consolidated, mergedCount } = consolidateShoppingDuplicates(shoppingList);
+        if (mergedCount > 0) {
+          totalRemovedSecondary += mergedCount;
+          totalMergedClusters += 1;
+          setShoppingList(consolidated);
+        }
+      }
+
+      // 3. Process Selling
+      if (scope === 'all' || scope === 'selling') {
+        const { consolidated, mergedCount } = consolidateSaleDuplicates(saleItems);
+        if (mergedCount > 0) {
+          totalRemovedSecondary += mergedCount;
+          totalMergedClusters += 1;
+          setSaleItems(consolidated);
+        }
+      }
+
+      const message =
+        totalRemovedSecondary > 0
+          ? `Consolidated ${totalRemovedSecondary} duplicate copies into clean master records.`
+          : 'No duplicate items found to consolidate.';
+
+      if (totalRemovedSecondary > 0) {
+        recordChange(
+          'ITEM_UPDATED',
+          'wardrobe_item',
+          `Auto-Merged Duplicates`,
+          message
+        );
+      }
+
+      return {
+        mergedCount: totalMergedClusters,
+        removedCount: totalRemovedSecondary,
+        message,
+      };
+    },
+    [items, shoppingList, saleItems, captureUndoState, recordChange]
   );
 
   // BATCH UPDATE SHOPPING ITEMS
@@ -2762,7 +3234,7 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     setSaleItems([]);
     setSnapshots([]);
     const resetLog: VersionChangeLog = {
-      id: `log-${Date.now()}`,
+      id: generateUniqueId('log'),
       versionNumber: 1,
       timestamp: new Date().toISOString(),
       actionType: 'ITEM_DELETED',
@@ -2966,6 +3438,7 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       mergeSaleItems,
       mergeCrossCollectionItems,
       batchAutoMergeDuplicates,
+      autoMergeAllDuplicates,
       createSnapshot,
       restoreSnapshot,
       deleteSnapshot,
@@ -3050,6 +3523,7 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       mergeSaleItems,
       mergeCrossCollectionItems,
       batchAutoMergeDuplicates,
+      autoMergeAllDuplicates,
       createSnapshot,
       restoreSnapshot,
       deleteSnapshot,

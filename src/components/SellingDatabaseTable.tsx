@@ -24,6 +24,7 @@ import {
   Pencil,
   Check,
   FolderUp,
+  Sparkles,
 } from 'lucide-react';
 
 interface SellingDatabaseTableProps {
@@ -36,6 +37,7 @@ interface SellingDatabaseTableProps {
   displaySettings: SellingDisplaySettings;
   onEditItem: (item: SaleItem) => void;
   onMarkSold: (item: SaleItem) => void;
+  onOpenAiGenerator?: (item: SaleItem) => void;
 }
 
 type SortField =
@@ -106,6 +108,7 @@ export const SellingDatabaseTable: React.FC<SellingDatabaseTableProps> = ({
   displaySettings,
   onEditItem,
   onMarkSold,
+  onOpenAiGenerator,
 }) => {
   const {
     updateSaleItem,
@@ -1045,6 +1048,16 @@ export const SellingDatabaseTable: React.FC<SellingDatabaseTableProps> = ({
                           title="Mark Item as Sold"
                         >
                           <CheckCircle className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                      {onOpenAiGenerator && (
+                        <button
+                          type="button"
+                          onClick={() => onOpenAiGenerator(item)}
+                          className="p-1 rounded text-[#767670] hover:text-purple-600 hover:bg-purple-50 cursor-pointer"
+                          title="Generate AI Listing Description"
+                        >
+                          <Sparkles className="w-3.5 h-3.5" />
                         </button>
                       )}
                       <button

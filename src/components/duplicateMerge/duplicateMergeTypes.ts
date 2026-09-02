@@ -5,6 +5,7 @@ export type ItemSource = 'wardrobe' | 'shopping' | 'selling';
 export type StatusCategory = 'active' | 'cancelled_passed' | 'completed_sold' | 'archived';
 
 export interface DuplicateItemRef {
+  refKey: string;
   id: string;
   source: ItemSource;
   name: string;

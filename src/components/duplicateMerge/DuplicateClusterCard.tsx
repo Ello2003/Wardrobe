@@ -42,7 +42,12 @@ export const DuplicateClusterCard: React.FC<DuplicateClusterCardProps> = ({
   onExcludeItem,
   formatCurrency,
 }) => {
-  const primaryItem = cluster.items.find((it) => it.id === cluster.primaryId) || cluster.items[0];
+  const primaryItem =
+    cluster.items.find(
+      (it) => it.id === cluster.primaryId && it.source === cluster.primarySource
+    ) ||
+    cluster.items.find((it) => it.id === cluster.primaryId) ||
+    cluster.items[0];
 
   return (
     <div
@@ -209,13 +214,15 @@ export const DuplicateClusterCard: React.FC<DuplicateClusterCardProps> = ({
       {/* View Mode 1: Side-by-Side Cards Grid */}
       {viewMode === 'cards' ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 pt-3">
-          {cluster.items.map((item) => {
-            const isPrimary = item.id === primaryItem.id;
+          {cluster.items.map((item, idx) => {
+            const isPrimary = item.refKey
+              ? item.refKey === primaryItem.refKey
+              : item.id === primaryItem.id && item.source === primaryItem.source;
             const itemSwatch = item.colorHex || getColorSwatchHex(item.color || '');
 
             return (
               <div
-                key={item.id}
+                key={item.refKey || `${item.source}-${item.id}-${idx}`}
                 onClick={() => onSelectPrimary(cluster.id, item.id, item.source)}
                 className={`border p-3.5 rounded-sm relative flex flex-col justify-between cursor-pointer transition-all ${
                   isPrimary
@@ -355,33 +362,38 @@ export const DuplicateClusterCard: React.FC<DuplicateClusterCardProps> = ({
             <thead>
               <tr className="bg-[#F8F7F4] border-b border-[#E5E5E1] text-[#767670] text-[10px] uppercase">
                 <th className="p-2 border-r border-[#E5E5E1] w-28">Parameter</th>
-                {cluster.items.map((item, idx) => (
-                  <th
-                    key={item.id}
-                    className={`p-2 border-r border-[#E5E5E1] min-w-[200px] ${
-                      item.id === primaryItem.id ? 'bg-amber-50/80 text-[#8C7355] font-bold' : ''
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <span>Copy #{idx + 1} ({item.source})</span>
-                      <input
-                        type="radio"
-                        name={`matrix-primary-${cluster.id}`}
-                        checked={item.id === primaryItem.id}
-                        onChange={() => onSelectPrimary(cluster.id, item.id, item.source)}
-                        className="accent-[#8C7355]"
-                      />
-                    </div>
-                  </th>
-                ))}
+                {cluster.items.map((item, idx) => {
+                  const isPrimary = item.refKey
+                    ? item.refKey === primaryItem.refKey
+                    : item.id === primaryItem.id && item.source === primaryItem.source;
+                  return (
+                    <th
+                      key={item.refKey || `${item.source}-${item.id}-${idx}`}
+                      className={`p-2 border-r border-[#E5E5E1] min-w-[200px] ${
+                        isPrimary ? 'bg-amber-50/80 text-[#8C7355] font-bold' : ''
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span>Copy #{idx + 1} ({item.source})</span>
+                        <input
+                          type="radio"
+                          name={`matrix-primary-${cluster.id}`}
+                          checked={isPrimary}
+                          onChange={() => onSelectPrimary(cluster.id, item.id, item.source)}
+                          className="accent-[#8C7355]"
+                        />
+                      </div>
+                    </th>
+                  );
+                })}
               </tr>
             </thead>
             <tbody className="divide-y divide-[#E5E5E1]">
               {/* Photo */}
               <tr>
                 <td className="p-2 bg-[#F8F7F4] font-bold text-[#5A5A55] border-r border-[#E5E5E1]">Photo</td>
-                {cluster.items.map((item) => (
-                  <td key={item.id} className="p-2 border-r border-[#E5E5E1]">
+                {cluster.items.map((item, idx) => (
+                  <td key={item.refKey || `${item.source}-${item.id}-${idx}`} className="p-2 border-r border-[#E5E5E1]">
                     <div className="w-12 h-14 bg-white border border-[#E5E5E1] rounded-xs overflow-hidden">
                       <GarmentImage src={item.imageUrl} alt={item.name} className="w-full h-full object-cover" />
                     </div>
@@ -394,8 +406,8 @@ export const DuplicateClusterCard: React.FC<DuplicateClusterCardProps> = ({
                 <td className="p-2 bg-[#F8F7F4] font-bold text-[#5A5A55] border-r border-[#E5E5E1]">
                   Status {cluster.hasStatusMismatch && <span className="text-amber-700">⚠️</span>}
                 </td>
-                {cluster.items.map((item) => (
-                  <td key={item.id} className="p-2 border-r border-[#E5E5E1]">
+                {cluster.items.map((item, idx) => (
+                  <td key={item.refKey || `${item.source}-${item.id}-${idx}`} className="p-2 border-r border-[#E5E5E1]">
                     <StatusBadge
                       status={item.status}
                       statusCategory={item.statusCategory}
@@ -408,8 +420,8 @@ export const DuplicateClusterCard: React.FC<DuplicateClusterCardProps> = ({
               {/* Name */}
               <tr>
                 <td className="p-2 bg-[#F8F7F4] font-bold text-[#5A5A55] border-r border-[#E5E5E1]">Name / Title</td>
-                {cluster.items.map((item) => (
-                  <td key={item.id} className="p-2 border-r border-[#E5E5E1] font-serif font-bold text-[#1A1A1A]">
+                {cluster.items.map((item, idx) => (
+                  <td key={item.refKey || `${item.source}-${item.id}-${idx}`} className="p-2 border-r border-[#E5E5E1] font-serif font-bold text-[#1A1A1A]">
                     {item.name}
                   </td>
                 ))}
@@ -420,8 +432,8 @@ export const DuplicateClusterCard: React.FC<DuplicateClusterCardProps> = ({
                 <td className="p-2 bg-[#F8F7F4] font-bold text-[#5A5A55] border-r border-[#E5E5E1]">
                   Colour {cluster.hasColorMismatch && <span className="text-amber-700">⚠️</span>}
                 </td>
-                {cluster.items.map((item) => (
-                  <td key={item.id} className="p-2 border-r border-[#E5E5E1]">
+                {cluster.items.map((item, idx) => (
+                  <td key={item.refKey || `${item.source}-${item.id}-${idx}`} className="p-2 border-r border-[#E5E5E1]">
                     <div className="flex items-center gap-1.5 font-bold">
                       <span
                         className="w-2.5 h-2.5 rounded-full border border-black/20 shrink-0"
@@ -438,8 +450,8 @@ export const DuplicateClusterCard: React.FC<DuplicateClusterCardProps> = ({
                 <td className="p-2 bg-[#F8F7F4] font-bold text-[#5A5A55] border-r border-[#E5E5E1]">
                   Size {cluster.hasSizeMismatch && <span className="text-amber-700">⚠️</span>}
                 </td>
-                {cluster.items.map((item) => (
-                  <td key={item.id} className="p-2 border-r border-[#E5E5E1]">
+                {cluster.items.map((item, idx) => (
+                  <td key={item.refKey || `${item.source}-${item.id}-${idx}`} className="p-2 border-r border-[#E5E5E1]">
                     {item.size || '—'}
                   </td>
                 ))}
@@ -450,8 +462,8 @@ export const DuplicateClusterCard: React.FC<DuplicateClusterCardProps> = ({
                 <td className="p-2 bg-[#F8F7F4] font-bold text-[#5A5A55] border-r border-[#E5E5E1]">
                   Material {cluster.hasMaterialMismatch && <span className="text-amber-700">⚠️</span>}
                 </td>
-                {cluster.items.map((item) => (
-                  <td key={item.id} className="p-2 border-r border-[#E5E5E1]">
+                {cluster.items.map((item, idx) => (
+                  <td key={item.refKey || `${item.source}-${item.id}-${idx}`} className="p-2 border-r border-[#E5E5E1]">
                     {item.material || '—'}
                   </td>
                 ))}
@@ -460,8 +472,8 @@ export const DuplicateClusterCard: React.FC<DuplicateClusterCardProps> = ({
               {/* Price */}
               <tr>
                 <td className="p-2 bg-[#F8F7F4] font-bold text-[#5A5A55] border-r border-[#E5E5E1]">Price / Valuation</td>
-                {cluster.items.map((item) => (
-                  <td key={item.id} className="p-2 border-r border-[#E5E5E1] font-bold">
+                {cluster.items.map((item, idx) => (
+                  <td key={item.refKey || `${item.source}-${item.id}-${idx}`} className="p-2 border-r border-[#E5E5E1] font-bold">
                     {formatCurrency(item.price)}
                   </td>
                 ))}
@@ -470,8 +482,8 @@ export const DuplicateClusterCard: React.FC<DuplicateClusterCardProps> = ({
               {/* Wear Count */}
               <tr>
                 <td className="p-2 bg-[#F8F7F4] font-bold text-[#5A5A55] border-r border-[#E5E5E1]">Wear Count</td>
-                {cluster.items.map((item) => (
-                  <td key={item.id} className="p-2 border-r border-[#E5E5E1]">
+                {cluster.items.map((item, idx) => (
+                  <td key={item.refKey || `${item.source}-${item.id}-${idx}`} className="p-2 border-r border-[#E5E5E1]">
                     {item.wearCount !== undefined ? `${item.wearCount} wears` : '—'}
                   </td>
                 ))}
@@ -480,8 +492,8 @@ export const DuplicateClusterCard: React.FC<DuplicateClusterCardProps> = ({
               {/* Notes */}
               <tr>
                 <td className="p-2 bg-[#F8F7F4] font-bold text-[#5A5A55] border-r border-[#E5E5E1]">Notes / Reason</td>
-                {cluster.items.map((item) => (
-                  <td key={item.id} className="p-2 border-r border-[#E5E5E1] text-[11px] text-[#767670] italic">
+                {cluster.items.map((item, idx) => (
+                  <td key={item.refKey || `${item.source}-${item.id}-${idx}`} className="p-2 border-r border-[#E5E5E1] text-[11px] text-[#767670] italic">
                     {item.notes || '—'}
                   </td>
                 ))}

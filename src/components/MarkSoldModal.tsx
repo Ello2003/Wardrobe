@@ -41,7 +41,7 @@ export const MarkSoldModal: React.FC<MarkSoldModalProps> = ({
 
   useEffect(() => {
     if (saleItem) {
-      setSoldPrice(saleItem.listingPrice.toString());
+      setSoldPrice(((saleItem.listingPrice ?? 0)).toString());
       setSoldDate(new Date().toISOString().split('T')[0]);
       setBuyerUsername(saleItem.buyerUsername || '');
       setOrderNumber(saleItem.orderNumber || '');

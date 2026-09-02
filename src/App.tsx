@@ -282,14 +282,14 @@ const MainAppContent: React.FC = () => {
       {/* High Density Minimal Footer and Toast notifications */}
       {undoToast && (
         <div className="fixed bottom-4 right-4 bg-zinc-900 text-white px-4 py-3 rounded-lg shadow-xl flex items-center gap-3 animate-fade-in z-50 text-sm">
-          <span>{undoToast}</span>
+          <span>{undoToast.message || undoToast.actionTitle}</span>
           <button 
             onClick={undoLastAction}
-            className="flex items-center gap-1 text-amber-400 hover:text-amber-300 font-medium transition"
+            className="flex items-center gap-1 text-amber-400 hover:text-amber-300 font-medium transition cursor-pointer"
           >
             <Undo2 className="w-4 h-4" /> Undo
           </button>
-          <button onClick={dismissUndoToast} className="text-zinc-400 hover:text-white transition">
+          <button onClick={dismissUndoToast} className="text-zinc-400 hover:text-white transition cursor-pointer">
             <X className="w-4 h-4" />
           </button>
         </div>
@@ -312,8 +312,20 @@ const MainAppContent: React.FC = () => {
 // Root wrapper that exports the Context Wrapper interface
 export default function App() {
   return (
-    <WardrobeProvider>
-      <MainAppContent />
-    </WardrobeProvider>
+    <ErrorBoundary
+      fallbackTitle="Wardrobe & Lookbook Studio Recovery"
+      onClose={() => {
+        try {
+          localStorage.clear();
+        } catch {
+          // ignore
+        }
+        window.location.reload();
+      }}
+    >
+      <WardrobeProvider>
+        <MainAppContent />
+      </WardrobeProvider>
+    </ErrorBoundary>
   );
 }
