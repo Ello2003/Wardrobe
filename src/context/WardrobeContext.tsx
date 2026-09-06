@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   WardrobeItem,
   LookbookOutfit,
@@ -20,6 +20,11 @@ import {
   normalizeCategoryName,
 } from '../types';
 import {
+  VintedOrder,
+  VintedExtractedItem,
+  inferCategoryFromTitle,
+} from '../services/vintedWorkerService';
+import {
   INITIAL_WARDROBE_ITEMS,
   INITIAL_LOOKBOOK_OUTFITS,
   INITIAL_SHOPPING_LIST,
@@ -33,6 +38,10 @@ import {
   consolidateShoppingDuplicates,
   consolidateSaleDuplicates,
 } from '../components/duplicateMerge/duplicateUtils';
+import {
+  determineLifecycleTags,
+  isCancelledStatus,
+} from '../utils/tagUtils';
 
 // Global counter and entropy to ensure collision-free IDs even inside tight synchronous loops (e.g. bulk moves)
 let globalIdCounter = 0;
@@ -274,13 +283,48 @@ interface WardrobeContextType {
     exactOnly?: boolean
   ) => { mergedCount: number; removedCount: number; message: string };
 
-  // Snapshot & Versioning Actions
-  createSnapshot: (name: string, description?: string) => string;
+  // Snapshot & Rollback Actions
+  createSnapshot: (name: string, description?: string, isAuto?: boolean) => string;
   restoreSnapshot: (snapshotId: string) => boolean;
   deleteSnapshot: (snapshotId: string) => void;
+  cleanupAutoSnapshots: (keepCount?: number) => number;
+  lastAutoSnapshotTime: string | null;
+  triggerAutoSnapshot: (reason?: string) => string;
+
+  // Live Audit Timeline Restoration Actions
+  restoreTimelineEntryItem: (logId: string) => { success: boolean; message: string; restoredItem?: any };
+  restoreTimelineState: (logId: string) => { success: boolean; message: string };
+  canRestoreEntry: (log: VersionChangeLog) => {
+    canRestoreItem: boolean;
+    canRollbackState: boolean;
+    itemExistsNow: boolean;
+    actionLabel: string;
+    description: string;
+  };
 
   // Budget & System Actions
   syncVintedOrderStatuses: () => number;
+  syncVintedAccountOrders: (
+    orders: VintedOrder[],
+    options?: {
+      routePurchasedTo?: 'wardrobe' | 'shopping';
+      routeSoldTo?: 'selling';
+      skipDuplicates?: boolean;
+    }
+  ) => {
+    addedPurchased: number;
+    addedSold: number;
+    skippedDuplicates: number;
+    totalPurchasedVal: number;
+    totalSoldVal: number;
+  };
+  importVintedExtractedListings: (
+    items: VintedExtractedItem[],
+    destination?: 'selling' | 'shopping' | 'wardrobe'
+  ) => {
+    importedCount: number;
+    totalVal: number;
+  };
   updateMonthlyBudget: (newBudgetGbp: number) => void;
   exportDataJSON: () => void;
   importDataJSON: (jsonString: string) => { success: boolean; message: string };
@@ -290,11 +334,16 @@ interface WardrobeContextType {
   // Computed Metrics
   stats: {
     totalItems: number;
+    activeInventoryCount: number;
+    archivedItemsCount: number;
     totalValuationGbp: number;
     averageCostPerWearGbp: number;
     totalWearsRecorded: number;
     totalOutfitsCount: number;
     wishlistTotalGbp: number;
+    purchasedItemsCount: number;
+    wishlistItemsCount: number;
+    totalShoppingItemsCount: number;
     budgetRemainingGbp: number;
     topWornItems: WardrobeItem[];
     underutilizedItems: WardrobeItem[];
@@ -487,7 +536,35 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     try {
       const saved = localStorage.getItem(`${STORAGE_KEY}_settings`);
       const parsed = saved ? JSON.parse(saved) : null;
-      return parsed && typeof parsed === 'object' ? { ...DEFAULT_APP_SETTINGS, ...parsed } : DEFAULT_APP_SETTINGS;
+      let initial = parsed && typeof parsed === 'object' ? { ...DEFAULT_APP_SETTINGS, ...parsed } : DEFAULT_APP_SETTINGS;
+
+      // Automatically migrate or restore any legacy worker-endpoint or vinted-auth from localStorage
+      if (!initial.vintedWorkerAuth?.workerEndpoint) {
+        const legacyWorker = localStorage.getItem('worker-endpoint');
+        let legacyAuth: any = null;
+        try {
+          const raw = localStorage.getItem('vinted-auth');
+          if (raw) legacyAuth = JSON.parse(raw);
+        } catch {}
+
+        if (legacyWorker || legacyAuth) {
+          initial = {
+            ...initial,
+            vintedWorkerAuth: {
+              workerEndpoint: legacyWorker || initial.vintedWorkerAuth?.workerEndpoint || '',
+              domain: legacyAuth?.domain || initial.vintedWorkerAuth?.domain || 'co.uk',
+              accessToken: legacyAuth?.access_token || initial.vintedWorkerAuth?.accessToken || '',
+              csrfToken: legacyAuth?.xcsrf_token || initial.vintedWorkerAuth?.csrfToken || '',
+              refreshToken: legacyAuth?.refresh_token || initial.vintedWorkerAuth?.refreshToken || '',
+              cookie: legacyAuth?.cookie || initial.vintedWorkerAuth?.cookie || '',
+              autoRouteOrders: true,
+              defaultImportDestination: 'wardrobe',
+            },
+          };
+        }
+      }
+
+      return initial;
     } catch {
       return DEFAULT_APP_SETTINGS;
     }
@@ -521,6 +598,23 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const next = { ...prev, ...updates };
       try {
         localStorage.setItem(`${STORAGE_KEY}_settings`, JSON.stringify(next));
+
+        // Keep legacy keys in sync for any external scripts or worker calls
+        if (next.vintedWorkerAuth) {
+          if (next.vintedWorkerAuth.workerEndpoint) {
+            localStorage.setItem('worker-endpoint', next.vintedWorkerAuth.workerEndpoint);
+          }
+          localStorage.setItem(
+            'vinted-auth',
+            JSON.stringify({
+              domain: next.vintedWorkerAuth.domain || 'co.uk',
+              access_token: next.vintedWorkerAuth.accessToken || '',
+              xcsrf_token: next.vintedWorkerAuth.csrfToken || '',
+              refresh_token: next.vintedWorkerAuth.refreshToken || '',
+              cookie: next.vintedWorkerAuth.cookie || '',
+            })
+          );
+        }
       } catch (e) {
         console.error('Failed to save settings', e);
       }
@@ -671,10 +765,49 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   }, [monthlyBudget]);
 
+  // Synchronized state references for consistent access across callbacks and auto-save
+  const itemsRef = useRef(items);
+  const outfitsRef = useRef(outfits);
+  const shoppingListRef = useRef(shoppingList);
+  const saleItemsRef = useRef(saleItems);
+  const categoriesRef = useRef(categories);
+  const monthlyBudgetRef = useRef(monthlyBudget);
+  const snapshotsRef = useRef(snapshots);
+  const changeLogsRef = useRef(changeLogs);
+
+  useEffect(() => { itemsRef.current = items; }, [items]);
+  useEffect(() => { outfitsRef.current = outfits; }, [outfits]);
+  useEffect(() => { shoppingListRef.current = shoppingList; }, [shoppingList]);
+  useEffect(() => { saleItemsRef.current = saleItems; }, [saleItems]);
+  useEffect(() => { categoriesRef.current = categories; }, [categories]);
+  useEffect(() => { monthlyBudgetRef.current = monthlyBudget; }, [monthlyBudget]);
+  useEffect(() => { snapshotsRef.current = snapshots; }, [snapshots]);
+  useEffect(() => { changeLogsRef.current = changeLogs; }, [changeLogs]);
+
+  // Periodic Auto-Snapshot state & change tracker
+  const [lastAutoSnapshotTime, setLastAutoSnapshotTime] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem(`${STORAGE_KEY}_last_auto_snapshot`) || null;
+    } catch {
+      return null;
+    }
+  });
+
+  const hasChangesForAutoSnapshotRef = useRef<boolean>(false);
+  const isInitialMountRef = useRef<boolean>(true);
+
+  useEffect(() => {
+    if (isInitialMountRef.current) {
+      isInitialMountRef.current = false;
+      return;
+    }
+    hasChangesForAutoSnapshotRef.current = true;
+  }, [items, outfits, shoppingList, saleItems, monthlyBudget]);
+
   // Current version number = total logs count
   const currentVersion = changeLogs.length > 0 ? changeLogs[0].versionNumber : 1;
 
-  // Helper to append a structured change log entry
+  // Helper to append a structured change log entry with point-in-time snapshot
   const recordChange = useCallback(
     (
       actionType: VersionChangeLog['actionType'],
@@ -682,8 +815,18 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       entityTitle: string,
       summary: string,
       entityId?: string,
-      details?: VersionChangeLog['details']
+      details?: VersionChangeLog['details'],
+      customSnapshotData?: VersionChangeLog['snapshotData']
     ) => {
+      // Capture live closet snapshot data for instant rollback
+      const liveSnapshot: VersionChangeLog['snapshotData'] = customSnapshotData || {
+        items: JSON.parse(JSON.stringify(itemsRef.current)),
+        outfits: JSON.parse(JSON.stringify(outfitsRef.current)),
+        shoppingList: JSON.parse(JSON.stringify(shoppingListRef.current)),
+        saleItems: JSON.parse(JSON.stringify(saleItemsRef.current)),
+        monthlyBudget: monthlyBudgetRef.current,
+      };
+
       setChangeLogs((prev) => {
         const nextVersion = prev.length > 0 ? prev[0].versionNumber + 1 : 1;
         const newLog: VersionChangeLog = {
@@ -696,63 +839,159 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           entityTitle,
           summary,
           details,
+          snapshotData: liveSnapshot,
           author: 'Graeme (User)',
         };
-        return [newLog, ...prev];
+        // To preserve local storage space, keep full snapshotData on latest 35 logs, strip older
+        return [newLog, ...prev].map((l, index) => {
+          if (index > 35 && l.snapshotData) {
+            const { snapshotData, ...rest } = l;
+            return rest;
+          }
+          return l;
+        });
       });
     },
     []
   );
 
-  // CREATE SNAPSHOT CHECKPOINT (Available for batch actions and manual snapshots)
+  // CREATE SNAPSHOT CHECKPOINT (Available for batch actions, manual snapshots, and periodic auto-rollbacks)
   const createSnapshot = useCallback(
-    (name: string, description = '') => {
+    (name: string, description = '', isAuto = false) => {
       const snapId = generateUniqueId('snap');
-      const totalVal = items.reduce((sum, item) => sum + (item.purchasePrice || 0), 0);
-      const nextVersion = changeLogs.length > 0 ? changeLogs[0].versionNumber + 1 : 1;
+      const curItems = itemsRef.current;
+      const curOutfits = outfitsRef.current;
+      const curShopping = shoppingListRef.current;
+      const curSales = saleItemsRef.current;
+      const curBudget = monthlyBudgetRef.current;
+
+      const totalVal = curItems.reduce((sum, item) => sum + (item.purchasePrice || 0), 0);
+      const nextVersion = changeLogsRef.current.length > 0 ? changeLogsRef.current[0].versionNumber + 1 : 1;
+
+      const defaultName = isAuto
+        ? `Auto-Checkpoint (${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`
+        : `Wardrobe Snapshot #${snapshotsRef.current.length + 1}`;
+
+      const defaultDesc = isAuto
+        ? `Periodic automated rollback save (${curItems.length} items, ${curOutfits.length} looks, ${curShopping.length} wishlist, ${curSales.length} sales).`
+        : `Checkpoint of ${curItems.length} items (£${totalVal} valuation), ${curOutfits.length} looks, ${curShopping.length} wishlist pieces, ${curSales.length} sales listings.`;
 
       const newSnapshot: WardrobeSnapshot = {
         id: snapId,
         versionNumber: nextVersion,
-        name: name.trim() || `Wardrobe Snapshot #${snapshots.length + 1}`,
-        description: description || `Checkpoint of ${items.length} items (£${totalVal} valuation), ${outfits.length} looks, ${shoppingList.length} wishlist pieces, ${saleItems.length} sales listings.`,
+        name: (name && name.trim()) || defaultName,
+        description: description || defaultDesc,
         createdAt: new Date().toISOString(),
-        itemCount: items.length,
+        itemCount: curItems.length,
         totalValuation: totalVal,
-        outfitCount: outfits.length,
-        wishlistCount: shoppingList.length,
+        outfitCount: curOutfits.length,
+        wishlistCount: curShopping.length,
+        saleItemCount: curSales.length,
+        isAuto,
         data: {
-          items: JSON.parse(JSON.stringify(items)),
-          outfits: JSON.parse(JSON.stringify(outfits)),
-          shoppingList: JSON.parse(JSON.stringify(shoppingList)),
-          saleItems: JSON.parse(JSON.stringify(saleItems)),
-          monthlyBudget,
+          items: JSON.parse(JSON.stringify(curItems)),
+          outfits: JSON.parse(JSON.stringify(curOutfits)),
+          shoppingList: JSON.parse(JSON.stringify(curShopping)),
+          saleItems: JSON.parse(JSON.stringify(curSales)),
+          monthlyBudget: curBudget,
         },
       };
 
-      setSnapshots((prev) => [newSnapshot, ...prev]);
+      setSnapshots((prev) => {
+        const next = [newSnapshot, ...prev];
+        const maxAuto = settings.maxAutoSnapshots || 20;
+        let autoCount = 0;
+        return next.filter((snap) => {
+          if (!snap.isAuto) return true;
+          autoCount++;
+          return autoCount <= maxAuto;
+        });
+      });
+
+      if (isAuto) {
+        hasChangesForAutoSnapshotRef.current = false;
+        const nowIso = new Date().toISOString();
+        setLastAutoSnapshotTime(nowIso);
+        try {
+          localStorage.setItem(`${STORAGE_KEY}_last_auto_snapshot`, nowIso);
+        } catch {}
+      }
+
       recordChange(
         'SNAPSHOT_CREATED',
         'snapshot',
         newSnapshot.name,
-        `Created wardrobe version snapshot "${newSnapshot.name}" (${newSnapshot.itemCount} items, £${totalVal} total value).`,
+        isAuto
+          ? `Periodic automated rollback save (${newSnapshot.itemCount} items, £${totalVal} value).`
+          : `Created wardrobe version snapshot "${newSnapshot.name}" (${newSnapshot.itemCount} items, £${totalVal} total value).`,
         snapId,
         {
           financialImpact: totalVal,
+          newValue: newSnapshot,
         }
       );
 
       return snapId;
     },
-    [items, outfits, shoppingList, saleItems, monthlyBudget, changeLogs, snapshots.length, recordChange]
+    [settings.maxAutoSnapshots, recordChange]
   );
+
+  // Trigger automated snapshot checkpoint
+  const triggerAutoSnapshot = useCallback(
+    (reason?: string) => {
+      const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      const name = `Auto-Checkpoint (${timeStr})`;
+      const desc = reason
+        ? `Automatic save: ${reason} (${itemsRef.current.length} items, £${itemsRef.current.reduce((s, i) => s + (i.purchasePrice || 0), 0)} valuation).`
+        : `Periodic automated rollback save (${itemsRef.current.length} items, £${itemsRef.current.reduce((s, i) => s + (i.purchasePrice || 0), 0)} valuation).`;
+      return createSnapshot(name, desc, true);
+    },
+    [createSnapshot]
+  );
+
+  // Periodic Timer for Automated Rollbacks
+  useEffect(() => {
+    if (settings.autoSnapshotEnabled === false) return;
+
+    const intervalMinutes = Math.max(1, settings.autoSnapshotIntervalMinutes || 10);
+    const intervalMs = intervalMinutes * 60 * 1000;
+
+    const checkInterval = setInterval(() => {
+      if (settings.autoSnapshotEnabled === false) return;
+      if (!hasChangesForAutoSnapshotRef.current) return;
+
+      const lastSaved = lastAutoSnapshotTime ? new Date(lastAutoSnapshotTime).getTime() : 0;
+      const now = Date.now();
+
+      if (now - lastSaved >= intervalMs) {
+        triggerAutoSnapshot();
+      }
+    }, 20000);
+
+    return () => clearInterval(checkInterval);
+  }, [settings.autoSnapshotEnabled, settings.autoSnapshotIntervalMinutes, lastAutoSnapshotTime, triggerAutoSnapshot]);
+
+  // Clean up auto snapshots if user wants to tidy up
+  const cleanupAutoSnapshots = useCallback((keepCount = 5) => {
+    let removed = 0;
+    setSnapshots((prev) => {
+      const autoSnaps = prev.filter((s) => s.isAuto);
+      const manualSnaps = prev.filter((s) => !s.isAuto);
+      if (autoSnaps.length <= keepCount) return prev;
+
+      const keptAutoSnaps = autoSnaps.slice(0, keepCount);
+      removed = autoSnaps.length - keptAutoSnaps.length;
+      return [...manualSnaps, ...keptAutoSnaps];
+    });
+    return removed;
+  }, []);
 
   // 1. ADD WARDROBE ITEM (With Humidor duplicate prevention & auto-consolidation)
   const addItem = useCallback(
-    (itemData: Omit<WardrobeItem, 'id' | 'createdAt' | 'updatedAt' | 'wearCount'>, checkDuplicate: boolean = true) => {
+    (itemData: Omit<WardrobeItem, 'id' | 'createdAt' | 'updatedAt' | 'wearCount'>, checkDuplicate: boolean = false) => {
       const now = new Date().toISOString();
 
-      // Humidor Auto-Merge: If an instance of this garment already exists, consolidate and update it rather than creating a redundant duplicate
+      // Humidor Auto-Merge: If an instance of this garment already exists and checkDuplicate is requested
       if (checkDuplicate) {
         const existingExact = items.find((it) => isGarmentDuplicate(itemData, it));
 
@@ -765,7 +1004,7 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
               imageUrl: itemData.imageUrl || existingExact.imageUrl,
               category: normalizeCategoryName(itemData.category) as Category,
             },
-            true
+            false
           );
           return existingExact.id;
         }
@@ -800,9 +1039,9 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     [items, captureUndoState, recordChange]
   );
 
-  // 2. UPDATE WARDROBE ITEM (With Humidor-grade automatic consolidation of any duplicate copies into single master record)
+  // 2. UPDATE WARDROBE ITEM (With Humidor-grade duplicate safety; preserves distinct items)
   const updateItem = useCallback(
-    (id: string, updates: Partial<WardrobeItem>, consolidateDuplicates: boolean = true) => {
+    (id: string, updates: Partial<WardrobeItem>, consolidateDuplicates: boolean = false) => {
       const targetItem = items.find((i) => i.id === id);
       if (targetItem) {
         captureUndoState(`Updated "${targetItem.brand} ${targetItem.name}"`);
@@ -827,7 +1066,7 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           return prev.map((item) => (item.id === id ? updatedItem : item));
         }
 
-        // Humidor Duplicate Detection: Find ALL matching copies of this garment in inventory
+        // Humidor Duplicate Detection: Only merge if explicit consolidation was opted into
         const duplicateSecondaries = prev.filter((item) => {
           if (item.id === id) return false;
           return isGarmentDuplicate(updatedItem, item);
@@ -1220,7 +1459,11 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           'lookbook_outfit',
           lookToDelete.title,
           `Deleted look "${lookToDelete.title}" from Lookbook.`,
-          id
+          id,
+          {
+            oldValue: lookToDelete,
+            previousEntity: lookToDelete,
+          }
         );
 
         return prev.filter((o) => o.id !== id);
@@ -1363,7 +1606,12 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           'shopping_item',
           `${toDelete.brand} ${toDelete.name}`,
           `Removed "${toDelete.brand} ${toDelete.name}" from shopping list.`,
-          id
+          id,
+          {
+            financialImpact: -toDelete.estimatedPrice,
+            oldValue: toDelete,
+            previousEntity: toDelete,
+          }
         );
 
         return prev.filter((s) => s.id !== id);
@@ -1400,7 +1648,14 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         'WISHLIST_DELETED',
         'shopping_item',
         `${itemsToDelete.length} Wishlist Items`,
-        `Bulk removed ${itemsToDelete.length} items from shopping list (£${totalVal.toFixed(2)} total value).`
+        `Bulk removed ${itemsToDelete.length} items from shopping list (£${totalVal.toFixed(2)} total value).`,
+        undefined,
+        {
+          financialImpact: -totalVal,
+          oldValue: itemsToDelete,
+          previousEntity: itemsToDelete,
+          deletedEntities: itemsToDelete,
+        }
       );
     },
     [shoppingList, createSnapshot, captureUndoState, recordChange]
@@ -1588,6 +1843,8 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         id,
         {
           financialImpact: -existing.listingPrice,
+          oldValue: existing,
+          previousEntity: existing,
         }
       );
     },
@@ -1608,7 +1865,12 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         'sale_item',
         `${itemsToDelete.length} Sale Listings`,
         `Bulk deleted ${itemsToDelete.length} listings from the Sales manager.`,
-        undefined
+        undefined,
+        {
+          oldValue: itemsToDelete,
+          previousEntity: itemsToDelete,
+          deletedEntities: itemsToDelete,
+        }
       );
     },
     [saleItems, captureUndoState, recordChange]
@@ -2858,7 +3120,12 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         'lookbook_outfit',
         `${affected.length} Outfits`,
         `Bulk deleted ${affected.length} looks from Lookbook.`,
-        undefined
+        undefined,
+        {
+          oldValue: affected,
+          previousEntity: affected,
+          deletedEntities: affected,
+        }
       );
     },
     [outfits, captureUndoState, recordChange]
@@ -2984,11 +3251,14 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const snap = snapshots.find((s) => s.id === snapshotId);
       if (!snap || !snap.data) return false;
 
+      // Before restoring, capture undo state so rollback can be undone
+      captureUndoState(`Restored snapshot "${snap.name}"`);
+
       setItems(snap.data.items || []);
       setOutfits(snap.data.outfits || []);
       setShoppingList(snap.data.shoppingList || []);
       if (snap.data.saleItems && Array.isArray(snap.data.saleItems)) setSaleItems(snap.data.saleItems);
-      if (snap.data.monthlyBudget) setMonthlyBudget(snap.data.monthlyBudget);
+      if (typeof snap.data.monthlyBudget === 'number') setMonthlyBudget(snap.data.monthlyBudget);
 
       recordChange(
         'SNAPSHOT_RESTORED',
@@ -3000,13 +3270,369 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
       return true;
     },
-    [snapshots, recordChange]
+    [snapshots, captureUndoState, recordChange]
   );
 
   // 17. DELETE SNAPSHOT
   const deleteSnapshot = useCallback((snapshotId: string) => {
     setSnapshots((prev) => prev.filter((s) => s.id !== snapshotId));
   }, []);
+
+  // 17b. RESTORE SPECIFIC ITEM / ENTITY FROM A TIMELINE ENTRY
+  const restoreTimelineEntryItem = useCallback(
+    (logId: string): { success: boolean; message: string; restoredItem?: any } => {
+      const log = changeLogs.find((l) => l.id === logId);
+      if (!log) return { success: false, message: 'Change log entry not found.' };
+
+      const entityData = log.details?.previousEntity || log.details?.oldValue || log.details?.deletedEntities;
+      const currentData = log.details?.currentEntity || log.details?.newValue;
+
+      // A) Handle DELETED items (Re-insert item back into collection)
+      if (log.actionType.includes('DELETED')) {
+        if (!entityData) {
+          // If no stored entity data, try recovering from snapshotData if present
+          if (log.snapshotData) {
+            if (log.entityType === 'wardrobe_item' && log.entityId) {
+              const matchedInSnap = log.snapshotData.items?.find((i) => i.id === log.entityId);
+              if (matchedInSnap) {
+                captureUndoState(`Restored "${log.entityTitle}" from audit entry`);
+                setItems((prev) => [matchedInSnap, ...prev.filter((i) => i.id !== matchedInSnap.id)]);
+                recordChange(
+                  'ITEM_ADDED',
+                  'wardrobe_item',
+                  log.entityTitle,
+                  `Restored garment "${log.entityTitle}" back to wardrobe from audit Rev #${log.versionNumber}.`,
+                  matchedInSnap.id
+                );
+                return { success: true, message: `Successfully restored "${log.entityTitle}" back to active wardrobe.`, restoredItem: matchedInSnap };
+              }
+            }
+          }
+          return { success: false, message: 'No item data preserved in this log entry to restore.' };
+        }
+
+        captureUndoState(`Restored ${log.entityTitle} from audit entry Rev #${log.versionNumber}`);
+
+        if (log.entityType === 'wardrobe_item') {
+          const itemsToRestore: WardrobeItem[] = Array.isArray(entityData) ? entityData : [entityData];
+          setItems((prev) => {
+            const existingIds = new Set(prev.map((i) => i.id));
+            const newItems = itemsToRestore.filter((i) => !existingIds.has(i.id));
+            const updated = prev.map((i) => {
+              const matched = itemsToRestore.find((r) => r.id === i.id);
+              return matched || i;
+            });
+            return [...newItems, ...updated];
+          });
+          recordChange(
+            'ITEM_ADDED',
+            'wardrobe_item',
+            log.entityTitle,
+            `Restored ${itemsToRestore.length} garment(s) ("${log.entityTitle}") back to wardrobe from audit Rev #${log.versionNumber}.`,
+            itemsToRestore[0]?.id
+          );
+          return {
+            success: true,
+            message: `Successfully restored ${itemsToRestore.length} garment(s) ("${log.entityTitle}") back to active wardrobe.`,
+            restoredItem: itemsToRestore[0],
+          };
+        }
+
+        if (log.entityType === 'lookbook_outfit') {
+          const outfitsToRestore: LookbookOutfit[] = Array.isArray(entityData) ? entityData : [entityData];
+          setOutfits((prev) => {
+            const existingIds = new Set(prev.map((o) => o.id));
+            const newOutfits = outfitsToRestore.filter((o) => !existingIds.has(o.id));
+            return [...newOutfits, ...prev];
+          });
+          recordChange(
+            'LOOK_CREATED',
+            'lookbook_outfit',
+            log.entityTitle,
+            `Restored look "${log.entityTitle}" back to Lookbook from audit Rev #${log.versionNumber}.`,
+            outfitsToRestore[0]?.id
+          );
+          return {
+            success: true,
+            message: `Successfully restored look "${log.entityTitle}" back to Lookbook.`,
+            restoredItem: outfitsToRestore[0],
+          };
+        }
+
+        if (log.entityType === 'shopping_item') {
+          const shopItemsToRestore: ShoppingItem[] = Array.isArray(entityData) ? entityData : [entityData];
+          setShoppingList((prev) => {
+            const existingIds = new Set(prev.map((s) => s.id));
+            const newShopItems = shopItemsToRestore.filter((s) => !existingIds.has(s.id));
+            return [...newShopItems, ...prev];
+          });
+          recordChange(
+            'WISHLIST_ADDED',
+            'shopping_item',
+            log.entityTitle,
+            `Restored "${log.entityTitle}" back to wishlist from audit Rev #${log.versionNumber}.`,
+            shopItemsToRestore[0]?.id
+          );
+          return {
+            success: true,
+            message: `Successfully restored "${log.entityTitle}" back to shopping wishlist.`,
+            restoredItem: shopItemsToRestore[0],
+          };
+        }
+
+        if (log.entityType === 'sale_item') {
+          const saleItemsToRestore: SaleItem[] = Array.isArray(entityData) ? entityData : [entityData];
+          setSaleItems((prev) => {
+            const existingIds = new Set(prev.map((s) => s.id));
+            const newSaleItems = saleItemsToRestore.filter((s) => !existingIds.has(s.id));
+            return [...newSaleItems, ...prev];
+          });
+          recordChange(
+            'SALE_ADDED',
+            'sale_item',
+            log.entityTitle,
+            `Restored "${log.entityTitle}" back to sales listings from audit Rev #${log.versionNumber}.`,
+            saleItemsToRestore[0]?.id
+          );
+          return {
+            success: true,
+            message: `Successfully restored sale listing "${log.entityTitle}".`,
+            restoredItem: saleItemsToRestore[0],
+          };
+        }
+      }
+
+      // B) Handle UPDATED items (Revert attributes to previousEntity)
+      if (log.actionType.includes('UPDATED')) {
+        if (!entityData) {
+          return { success: false, message: 'No prior attributes preserved in this log entry to revert.' };
+        }
+
+        captureUndoState(`Reverted ${log.entityTitle} from audit Rev #${log.versionNumber}`);
+
+        if (log.entityType === 'wardrobe_item') {
+          const prevItem = entityData as WardrobeItem;
+          setItems((prev) => {
+            const exists = prev.some((i) => i.id === prevItem.id);
+            if (exists) {
+              return prev.map((i) => (i.id === prevItem.id ? { ...prevItem, updatedAt: new Date().toISOString() } : i));
+            }
+            return [prevItem, ...prev];
+          });
+          recordChange(
+            'ITEM_UPDATED',
+            'wardrobe_item',
+            log.entityTitle,
+            `Reverted "${log.entityTitle}" back to previous attributes from audit Rev #${log.versionNumber}.`,
+            prevItem.id
+          );
+          return { success: true, message: `Reverted "${log.entityTitle}" back to its prior attributes.` };
+        }
+
+        if (log.entityType === 'lookbook_outfit') {
+          const prevLook = entityData as LookbookOutfit;
+          setOutfits((prev) => {
+            const exists = prev.some((o) => o.id === prevLook.id);
+            if (exists) {
+              return prev.map((o) => (o.id === prevLook.id ? { ...prevLook, updatedAt: new Date().toISOString() } : o));
+            }
+            return [prevLook, ...prev];
+          });
+          return { success: true, message: `Reverted look "${log.entityTitle}" to prior state.` };
+        }
+
+        if (log.entityType === 'shopping_item') {
+          const prevShop = entityData as ShoppingItem;
+          setShoppingList((prev) => {
+            const exists = prev.some((s) => s.id === prevShop.id);
+            if (exists) {
+              return prev.map((s) => (s.id === prevShop.id ? { ...prevShop, updatedAt: new Date().toISOString() } : s));
+            }
+            return [prevShop, ...prev];
+          });
+          return { success: true, message: `Reverted wishlist item "${log.entityTitle}".` };
+        }
+
+        if (log.entityType === 'sale_item') {
+          const prevSale = entityData as SaleItem;
+          setSaleItems((prev) => {
+            const exists = prev.some((s) => s.id === prevSale.id);
+            if (exists) {
+              return prev.map((s) => (s.id === prevSale.id ? { ...prevSale, updatedAt: new Date().toISOString() } : s));
+            }
+            return [prevSale, ...prev];
+          });
+          return { success: true, message: `Reverted sale listing "${log.entityTitle}".` };
+        }
+
+        if (log.entityType === 'budget') {
+          const budgetVal = typeof entityData === 'number' ? entityData : Number(entityData);
+          if (!isNaN(budgetVal)) {
+            setMonthlyBudget(budgetVal);
+            return { success: true, message: `Restored monthly budget to £${budgetVal}.` };
+          }
+        }
+      }
+
+      // C) Handle ADDED items (Undo addition by removing the created item)
+      if (log.actionType.includes('ADDED') || log.actionType === 'LOOK_CREATED') {
+        const idToRemove = log.entityId || (currentData && currentData.id);
+        if (!idToRemove) return { success: false, message: 'Entity ID not found for this log entry.' };
+
+        captureUndoState(`Removed added item ${log.entityTitle} from audit Rev #${log.versionNumber}`);
+
+        if (log.entityType === 'wardrobe_item') {
+          setItems((prev) => prev.filter((i) => i.id !== idToRemove));
+          return { success: true, message: `Removed added garment "${log.entityTitle}" from active wardrobe.` };
+        }
+        if (log.entityType === 'lookbook_outfit') {
+          setOutfits((prev) => prev.filter((o) => o.id !== idToRemove));
+          return { success: true, message: `Removed look "${log.entityTitle}".` };
+        }
+        if (log.entityType === 'shopping_item') {
+          setShoppingList((prev) => prev.filter((s) => s.id !== idToRemove));
+          return { success: true, message: `Removed wishlist item "${log.entityTitle}".` };
+        }
+        if (log.entityType === 'sale_item') {
+          setSaleItems((prev) => prev.filter((s) => s.id !== idToRemove));
+          return { success: true, message: `Removed sale listing "${log.entityTitle}".` };
+        }
+      }
+
+      return { success: false, message: 'No item-level restoration action is available for this log type.' };
+    },
+    [changeLogs, captureUndoState, recordChange]
+  );
+
+  // 17c. RESTORE FULL WARDROBE STATE AT TIMELINE ENTRY (Time-travel rollback to entry)
+  const restoreTimelineState = useCallback(
+    (logId: string): { success: boolean; message: string } => {
+      const log = changeLogs.find((l) => l.id === logId);
+      if (!log) return { success: false, message: 'Timeline entry not found.' };
+
+      // Determine snapshot data from this log, a linked snapshot, or nearest point-in-time
+      let targetSnapshotData = log.snapshotData;
+
+      if (!targetSnapshotData) {
+        // Look for matching snapshot by version or timestamp
+        const linkedSnap = snapshots.find(
+          (s) => s.versionNumber === log.versionNumber || s.createdAt.slice(0, 16) === log.timestamp.slice(0, 16)
+        );
+        if (linkedSnap && linkedSnap.data) {
+          targetSnapshotData = linkedSnap.data;
+        }
+      }
+
+      if (!targetSnapshotData) {
+        // Nearest earlier or later changeLog with snapshotData
+        const fallbackLog =
+          changeLogs.find((l) => l.versionNumber <= log.versionNumber && l.snapshotData) ||
+          changeLogs.find((l) => l.snapshotData);
+        if (fallbackLog?.snapshotData) {
+          targetSnapshotData = fallbackLog.snapshotData;
+        }
+      }
+
+      if (!targetSnapshotData) {
+        // Ultimate baseline fallback
+        targetSnapshotData = {
+          items: INITIAL_WARDROBE_ITEMS,
+          outfits: INITIAL_LOOKBOOK_OUTFITS,
+          shoppingList: INITIAL_SHOPPING_LIST,
+          saleItems: INITIAL_SALE_ITEMS,
+          monthlyBudget: 350,
+        };
+      }
+
+      // Automatic safety rollback point before rewinding
+      createSnapshot(
+        `[Pre-Rollback Safety] Prior to Rev #${log.versionNumber}`,
+        `Automatic safety checkpoint captured prior to rewinding closet to Rev #${log.versionNumber} ("${log.entityTitle}").`,
+        true
+      );
+
+      const restoredItems = targetSnapshotData.items || [];
+      const restoredOutfits = targetSnapshotData.outfits || [];
+      const restoredShopping = targetSnapshotData.shoppingList || [];
+      const restoredSales = targetSnapshotData.saleItems || [];
+      const restoredBudget = typeof targetSnapshotData.monthlyBudget === 'number' ? targetSnapshotData.monthlyBudget : 350;
+
+      // Update refs synchronously
+      itemsRef.current = restoredItems;
+      outfitsRef.current = restoredOutfits;
+      shoppingListRef.current = restoredShopping;
+      saleItemsRef.current = restoredSales;
+
+      // Update states
+      setItems(restoredItems);
+      setOutfits(restoredOutfits);
+      setShoppingList(restoredShopping);
+      setSaleItems(restoredSales);
+      setMonthlyBudget(restoredBudget);
+
+      recordChange(
+        'SNAPSHOT_RESTORED',
+        'snapshot',
+        `Timeline Rollback: Rev #${log.versionNumber}`,
+        `Rewound entire wardrobe, looks, wishlist, and sales to state recorded at Revision #${log.versionNumber} ("${log.entityTitle}").`,
+        undefined,
+        undefined,
+        targetSnapshotData
+      );
+
+      return {
+        success: true,
+        message: `Entire closet state successfully restored to Revision #${log.versionNumber} ("${log.entityTitle}").`,
+      };
+    },
+    [changeLogs, snapshots, createSnapshot, restoreSnapshot, restoreTimelineEntryItem, recordChange]
+  );
+
+  // 17d. CAN RESTORE ENTRY HELPER
+  const canRestoreEntry = useCallback(
+    (log: VersionChangeLog) => {
+      const hasSnapshot = Boolean(log.snapshotData);
+      const isDeleted = log.actionType.includes('DELETED');
+      const isUpdated = log.actionType.includes('UPDATED');
+      const isAdded = log.actionType.includes('ADDED') || log.actionType === 'LOOK_CREATED';
+      const hasEntityData = Boolean(log.details?.previousEntity || log.details?.oldValue || log.details?.deletedEntities);
+
+      let itemExistsNow = false;
+      if (log.entityId) {
+        if (log.entityType === 'wardrobe_item') itemExistsNow = items.some((i) => i.id === log.entityId);
+        else if (log.entityType === 'lookbook_outfit') itemExistsNow = outfits.some((o) => o.id === log.entityId);
+        else if (log.entityType === 'shopping_item') itemExistsNow = shoppingList.some((s) => s.id === log.entityId);
+        else if (log.entityType === 'sale_item') itemExistsNow = saleItems.some((s) => s.id === log.entityId);
+      }
+
+      let canRestoreItem = false;
+      let actionLabel = 'Restore';
+      let description = '';
+
+      if (isDeleted && (hasEntityData || (log.snapshotData && log.entityId))) {
+        canRestoreItem = true;
+        actionLabel = 'Restore Item';
+        description = 'Re-insert this deleted piece back into active collection';
+      } else if (isUpdated && hasEntityData) {
+        canRestoreItem = true;
+        actionLabel = 'Revert Changes';
+        description = 'Revert attributes back to state prior to this edit';
+      } else if (isAdded && itemExistsNow) {
+        canRestoreItem = true;
+        actionLabel = 'Undo Addition';
+        description = 'Remove this added item from collection';
+      }
+
+      return {
+        canRestoreItem,
+        canRollbackState: hasSnapshot,
+        itemExistsNow,
+        actionLabel,
+        description,
+      };
+    },
+    [items, outfits, shoppingList, saleItems]
+  );
 
   // 18. UPDATE MONTHLY BUDGET
   const updateMonthlyBudget = useCallback(
@@ -3058,6 +3684,447 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
     return updatedCount;
   }, [recordChange]);
+
+  // 18c. SYNC VINTED ACCOUNT ORDERS (Direct Cloudflare Worker Orders API Proxy Sync)
+  const syncVintedAccountOrders = useCallback(
+    (
+      orders: VintedOrder[],
+      options?: {
+        routePurchasedTo?: 'wardrobe' | 'shopping';
+        routeSoldTo?: 'selling';
+        skipDuplicates?: boolean;
+      }
+    ) => {
+      if (!orders || orders.length === 0) {
+        return {
+          addedPurchased: 0,
+          addedSold: 0,
+          skippedDuplicates: 0,
+          totalPurchasedVal: 0,
+          totalSoldVal: 0,
+        };
+      }
+
+      const routePurchasedTo = options?.routePurchasedTo || 'wardrobe';
+      const skipDuplicates = options?.skipDuplicates !== false;
+
+      // Existing order numbers / IDs to prevent duplicate insertion
+      const existingWardrobeOrderIds = new Set(
+        items.map((i) => i.orderNumber).filter(Boolean)
+      );
+      const existingSaleOrderIds = new Set(
+        saleItems.map((s) => s.orderNumber).filter(Boolean)
+      );
+      const existingShoppingOrderIds = new Set(
+        shoppingList.map((s) => s.orderNumber).filter(Boolean)
+      );
+
+      const now = new Date().toISOString();
+      const domain = settings.vintedWorkerAuth?.domain || 'co.uk';
+
+      const newWardrobeItems: WardrobeItem[] = [];
+      const newShoppingItems: ShoppingItem[] = [];
+      const newSaleItems: SaleItem[] = [];
+      let skippedDuplicates = 0;
+      let totalPurchasedVal = 0;
+      let totalSoldVal = 0;
+
+      for (const order of orders) {
+        const orderId = order.orderId ? String(order.orderId).trim() : '';
+        const orderPrice =
+          typeof order.price === 'number'
+            ? order.price
+            : parseFloat(String(order.price || '0').replace(/[^0-9.]/g, '')) || 0;
+        const rawDate = order.date ? String(order.date).slice(0, 10) : now.slice(0, 10);
+        const orderTitle = (order.title || 'Vinted Order').trim();
+        const inferredCategory = normalizeCategoryName(inferCategoryFromTitle(orderTitle), categories);
+
+        if (order.type === 'sold' || (order.type as any) === 'active' || order.status === 'Listed') {
+          if (skipDuplicates && orderId && existingSaleOrderIds.has(orderId)) {
+            skippedDuplicates++;
+            continue;
+          }
+
+          const isActiveListing = (order.type as any) === 'active' || order.status === 'Listed';
+          const rawStatus = (order.transactionStatus || order.status || '').toLowerCase();
+          const isCancelled = isCancelledStatus(rawStatus);
+
+          const saleTags = determineLifecycleTags({
+            destination: 'selling',
+            sellingStatus: isActiveListing ? 'Listed' : (isCancelled ? 'Draft' : 'Sold'),
+            orderStatus: order.transactionStatus || order.status,
+            transactionType: 'Sale',
+            isVinted: true,
+            existingTags: isActiveListing ? ['vinted-active', 'listed'] : ['order-history'],
+          });
+
+          const saleItem: SaleItem = {
+            id: generateUniqueId('sale'),
+            name: orderTitle,
+            brand: 'Vinted',
+            category: inferredCategory,
+            condition: 'Good',
+            originalPricePaid: 0,
+            listingPrice: orderPrice,
+            soldPrice: isActiveListing ? undefined : orderPrice,
+            platform: 'Vinted',
+            status: isActiveListing ? 'Listed' : (isCancelled ? 'Draft' : 'Sold'),
+            shippingStatus: isActiveListing ? 'Not Required' : (isCancelled ? 'Not Required' : 'Delivered'),
+            imageUrl: order.image || '',
+            tags: saleTags,
+            listedDate: rawDate,
+            soldDate: isActiveListing ? undefined : rawDate,
+            orderNumber: orderId,
+            platformListingUrl: orderId ? `https://www.vinted.${domain}/items/${orderId}` : '',
+            notes: isActiveListing
+              ? `Vinted active listing synced via connected session`
+              : (order.transactionStatus ? `Vinted order · ${order.transactionStatus}` : 'Vinted order'),
+            createdAt: now,
+            updatedAt: now,
+          };
+          newSaleItems.push(saleItem);
+          if (!isActiveListing) {
+            totalSoldVal += orderPrice;
+          }
+          if (orderId) existingSaleOrderIds.add(orderId);
+        } else {
+          // Purchased order
+          const rawStatus = (order.transactionStatus || order.status || '').toLowerCase();
+          const isCancelled = isCancelledStatus(rawStatus);
+
+          if (routePurchasedTo === 'shopping') {
+            if (skipDuplicates && orderId && existingShoppingOrderIds.has(orderId)) {
+              skippedDuplicates++;
+              continue;
+            }
+
+            const shopTags = determineLifecycleTags({
+              destination: 'shopping',
+              shoppingStatus: isCancelled ? 'Cancelled' : 'Purchased',
+              orderStatus: order.transactionStatus || order.status,
+              transactionType: 'Purchase',
+              isVinted: true,
+              existingTags: ['second-hand'],
+            });
+
+            const shopItem: ShoppingItem = {
+              id: generateUniqueId('shop'),
+              name: orderTitle,
+              brand: 'Vinted',
+              category: inferredCategory,
+              estimatedPrice: orderPrice,
+              actualPricePaid: orderPrice,
+              priority: 'Essential / Must-Have',
+              status: isCancelled ? 'Cancelled' : 'Purchased',
+              season: 'All-Season',
+              matchingWardrobeItemIds: [],
+              reasonOrGap: order.transactionStatus ? `Vinted purchase · ${order.transactionStatus}` : 'Vinted purchase',
+              targetStoreUrl: orderId ? `https://www.vinted.${domain}/items/${orderId}` : '',
+              imageUrl: order.image || '',
+              tags: shopTags,
+              addedDate: rawDate,
+              createdAt: now,
+              purchasedDate: rawDate,
+              orderNumber: orderId,
+              vintedUrl: orderId ? `https://www.vinted.${domain}/items/${orderId}` : '',
+            };
+            newShoppingItems.push(shopItem);
+            totalPurchasedVal += orderPrice;
+            if (orderId) existingShoppingOrderIds.add(orderId);
+          } else {
+            // Add to Wardrobe
+            if (skipDuplicates && orderId && existingWardrobeOrderIds.has(orderId)) {
+              skippedDuplicates++;
+              continue;
+            }
+
+            const wardrobeTags = determineLifecycleTags({
+              destination: 'wardrobe',
+              orderStatus: order.transactionStatus || order.status,
+              transactionType: 'Purchase',
+              isVinted: true,
+              existingTags: ['pre-owned'],
+            });
+
+            const wItem: WardrobeItem = {
+              id: generateUniqueId('item'),
+              name: orderTitle,
+              brand: 'Vinted',
+              category: inferredCategory,
+              color: 'Various',
+              season: ['All-Season'],
+              purchasePrice: orderPrice,
+              purchaseDate: rawDate,
+              wearCount: 0,
+              imageUrl: order.image || '',
+              retailerName: 'Vinted',
+              orderNumber: orderId,
+              vintedUrl: orderId ? `https://www.vinted.${domain}/items/${orderId}` : '',
+              condition: 'Good',
+              isFavorite: false,
+              isArchived: false,
+              tags: wardrobeTags,
+              notes: order.transactionStatus
+                ? `Vinted order #${orderId} · ${order.transactionStatus}`
+                : `Vinted order #${orderId}`,
+              createdAt: now,
+              updatedAt: now,
+            };
+            newWardrobeItems.push(wItem);
+            totalPurchasedVal += orderPrice;
+            if (orderId) existingWardrobeOrderIds.add(orderId);
+          }
+        }
+      }
+
+      const totalNewCount = newWardrobeItems.length + newShoppingItems.length + newSaleItems.length;
+      if (totalNewCount === 0) {
+        return {
+          addedPurchased: 0,
+          addedSold: 0,
+          skippedDuplicates,
+          totalPurchasedVal: 0,
+          totalSoldVal: 0,
+        };
+      }
+
+      // Safety Auto-Snapshot before applying sync
+      createSnapshot(
+        `[Auto-Snapshot] Pre-Vinted Sync Checkpoint`,
+        `Safety rollback point created before syncing ${totalNewCount} orders from Vinted account.`
+      );
+
+      captureUndoState(`Vinted Sync: ${totalNewCount} orders imported`);
+
+      if (newWardrobeItems.length > 0) {
+        setItems((prev) => [...newWardrobeItems, ...prev]);
+      }
+      if (newShoppingItems.length > 0) {
+        setShoppingList((prev) => [...newShoppingItems, ...prev]);
+      }
+      if (newSaleItems.length > 0) {
+        setSaleItems((prev) => [...newSaleItems, ...prev]);
+      }
+
+      // Record comprehensive Version History entry
+      recordChange(
+        'VINTED_SYNC',
+        newWardrobeItems.length > 0 ? 'wardrobe_item' : newSaleItems.length > 0 ? 'sale_item' : 'shopping_item',
+        `Vinted Sync (${totalNewCount} Orders)`,
+        `Synchronized ${newWardrobeItems.length + newShoppingItems.length} purchased orders (£${totalPurchasedVal.toFixed(2)}) & ${newSaleItems.length} sold listings (£${totalSoldVal.toFixed(2)}) from Vinted account.${skippedDuplicates > 0 ? ` Skipped ${skippedDuplicates} duplicate orders.` : ''}`,
+        undefined,
+        {
+          financialImpact: totalPurchasedVal,
+          newValue: {
+            purchasedCount: newWardrobeItems.length + newShoppingItems.length,
+            soldCount: newSaleItems.length,
+            skippedDuplicates,
+            totalPurchasedVal,
+            totalSoldVal,
+          },
+          deletedEntities: [...newWardrobeItems, ...newShoppingItems, ...newSaleItems],
+        }
+      );
+
+      return {
+        addedPurchased: newWardrobeItems.length + newShoppingItems.length,
+        addedSold: newSaleItems.length,
+        skippedDuplicates,
+        totalPurchasedVal,
+        totalSoldVal,
+      };
+    },
+    [
+      items,
+      saleItems,
+      shoppingList,
+      categories,
+      settings.vintedWorkerAuth,
+      createSnapshot,
+      captureUndoState,
+      recordChange,
+    ]
+  );
+
+  // 18d. IMPORT VINTED EXTRACTED LISTINGS (Active listings via Cloudflare Worker)
+  const importVintedExtractedListings = useCallback(
+    (
+      itemsToImport: VintedExtractedItem[],
+      destination: 'selling' | 'shopping' | 'wardrobe' = 'selling'
+    ) => {
+      if (!itemsToImport || itemsToImport.length === 0) {
+        return { importedCount: 0, totalVal: 0 };
+      }
+
+      const now = new Date().toISOString();
+      let totalVal = 0;
+
+      // 1. Safety snapshot
+      createSnapshot(
+        `[Auto-Snapshot] Pre-Vinted Active Listings Import`,
+        `Safety checkpoint before importing ${itemsToImport.length} active Vinted listing(s) to ${destination}.`
+      );
+
+      captureUndoState(`Imported ${itemsToImport.length} Vinted active listings`);
+
+      if (destination === 'selling') {
+        const newSales: SaleItem[] = itemsToImport.map((ex) => {
+          const price =
+            typeof ex.price === 'number'
+              ? ex.price
+              : parseFloat(String(ex.price || '0').replace(/[^0-9.]/g, '')) || 0;
+          totalVal += price;
+          const cat = normalizeCategoryName(inferCategoryFromTitle(ex.title), categories);
+          return {
+            id: generateUniqueId('sale'),
+            name: ex.title || 'Vinted Listing',
+            brand: ex.brand || 'Vinted',
+            category: cat,
+            condition: (ex.condition?.toLowerCase().includes('tag') ? 'Pristine / New' : 'Good') as Condition,
+            color: ex.colour || '',
+            originalPricePaid: 0,
+            listingPrice: price,
+            platform: 'Vinted',
+            status: 'Listed',
+            platformListingUrl: ex.url,
+            imageUrl: ex.image || '',
+            description: ex.description || '',
+            tags: determineLifecycleTags({
+              destination: 'selling',
+              sellingStatus: (ex.status as SellingStatus) || 'Listed',
+              isVinted: true,
+              existingTags: ex.tags || ['active-listing'],
+              sourceType: 'account-scrape',
+            }),
+            listedDate: now.slice(0, 10),
+            createdAt: now,
+            updatedAt: now,
+            notes: ex.seller ? `Seller: @${ex.seller}` : '',
+          };
+        });
+
+        setSaleItems((prev) => [...newSales, ...prev]);
+
+        recordChange(
+          'VINTED_EXTRACT',
+          'sale_item',
+          `${newSales.length} Active Vinted Listings`,
+          `Added ${newSales.length} live Vinted listings to Resale manager (£${totalVal.toFixed(2)} total listed).`,
+          undefined,
+          {
+            financialImpact: totalVal,
+            newValue: newSales,
+            deletedEntities: newSales,
+          }
+        );
+      } else if (destination === 'shopping') {
+        const newShop: ShoppingItem[] = itemsToImport.map((ex) => {
+          const price =
+            typeof ex.price === 'number'
+              ? ex.price
+              : parseFloat(String(ex.price || '0').replace(/[^0-9.]/g, '')) || 0;
+          totalVal += price;
+          const cat = normalizeCategoryName(inferCategoryFromTitle(ex.title), categories);
+          return {
+            id: generateUniqueId('shop'),
+            name: ex.title || 'Vinted Item',
+            brand: ex.brand || 'Vinted',
+            category: cat,
+            estimatedPrice: price,
+            priority: 'High',
+            status: 'To Buy',
+            season: 'All-Season',
+            matchingWardrobeItemIds: [],
+            reasonOrGap:
+              [ex.description, ex.seller ? `Seller: @${ex.seller}` : '', ex.condition]
+                .filter(Boolean)
+                .join(' · ') || 'Active Vinted listing watched',
+            targetStoreUrl: ex.url,
+            imageUrl: ex.image || '',
+            tags: determineLifecycleTags({
+              destination: 'shopping',
+              shoppingStatus: 'To Buy',
+              isVinted: true,
+              existingTags: ex.tags || ['watching'],
+              sourceType: 'account-scrape',
+            }),
+            addedDate: now.slice(0, 10),
+            createdAt: now,
+            vintedUrl: ex.url,
+          };
+        });
+
+        setShoppingList((prev) => [...newShop, ...prev]);
+
+        recordChange(
+          'VINTED_EXTRACT',
+          'shopping_item',
+          `${newShop.length} Vinted Items Watched`,
+          `Added ${newShop.length} active Vinted pieces to Wishlist / To Buy (£${totalVal.toFixed(2)} estimated).`,
+          undefined,
+          {
+            financialImpact: totalVal,
+            newValue: newShop,
+            deletedEntities: newShop,
+          }
+        );
+      } else {
+        // Wardrobe
+        const newWardrobe: WardrobeItem[] = itemsToImport.map((ex) => {
+          const price =
+            typeof ex.price === 'number'
+              ? ex.price
+              : parseFloat(String(ex.price || '0').replace(/[^0-9.]/g, '')) || 0;
+          totalVal += price;
+          const cat = normalizeCategoryName(inferCategoryFromTitle(ex.title), categories);
+          return {
+            id: generateUniqueId('item'),
+            name: ex.title || 'Vinted Garment',
+            brand: ex.brand || 'Vinted',
+            category: cat,
+            color: ex.colour || 'Various',
+            season: ['All-Season'],
+            purchasePrice: price,
+            purchaseDate: now.slice(0, 10),
+            wearCount: 0,
+            imageUrl: ex.image || '',
+            retailerName: 'Vinted',
+            vintedUrl: ex.url,
+            condition: (ex.condition?.toLowerCase().includes('tag') ? 'Pristine / New' : 'Good') as Condition,
+            isFavorite: false,
+            isArchived: false,
+            tags: determineLifecycleTags({
+              destination: 'wardrobe',
+              isVinted: true,
+              existingTags: ex.tags || ['pre-owned'],
+              sourceType: 'account-scrape',
+            }),
+            notes: [ex.description, ex.seller ? `Seller: @${ex.seller}` : ''].filter(Boolean).join(' · '),
+            createdAt: now,
+            updatedAt: now,
+          };
+        });
+
+        setItems((prev) => [...newWardrobe, ...prev]);
+
+        recordChange(
+          'VINTED_EXTRACT',
+          'wardrobe_item',
+          `${newWardrobe.length} Vinted Garments Added`,
+          `Added ${newWardrobe.length} garments extracted from Vinted into wardrobe (£${totalVal.toFixed(2)}).`,
+          undefined,
+          {
+            financialImpact: totalVal,
+            newValue: newWardrobe,
+            deletedEntities: newWardrobe,
+          }
+        );
+      }
+
+      return { importedCount: itemsToImport.length, totalVal };
+    },
+    [categories, createSnapshot, captureUndoState, recordChange]
+  );
 
   // 19. EXPORT DATA JSON BACKUP
   const exportDataJSON = useCallback(() => {
@@ -3267,15 +4334,22 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   // Comprehensive Computed Statistics
   const stats = useMemo(() => {
     const activeItems = items.filter((i) => !i.isArchived);
-    const totalItems = activeItems.length;
+    const archivedItems = items.filter((i) => i.isArchived);
+    const totalItems = items.length;
+    const activeInventoryCount = activeItems.length;
+    const archivedItemsCount = archivedItems.length;
     const totalValuationGbp = activeItems.reduce((sum, i) => sum + (i.purchasePrice || 0), 0);
     const totalWearsRecorded = activeItems.reduce((sum, i) => sum + (i.wearCount || 0), 0);
     const averageCostPerWearGbp =
       totalWearsRecorded > 0 ? totalValuationGbp / totalWearsRecorded : totalValuationGbp;
 
-    const wishlistTotalGbp = shoppingList
-      .filter((s) => s.status === 'To Buy' || s.status === 'In Basket')
-      .reduce((sum, s) => sum + (s.estimatedPrice || 0), 0);
+    const purchasedList = shoppingList.filter((s) => s.status === 'Purchased');
+    const wishlistQueue = shoppingList.filter((s) => s.status === 'To Buy' || s.status === 'In Basket');
+    const purchasedItemsCount = purchasedList.length;
+    const wishlistItemsCount = wishlistQueue.length;
+    const totalShoppingItemsCount = shoppingList.length;
+
+    const wishlistTotalGbp = wishlistQueue.reduce((sum, s) => sum + (s.estimatedPrice || 0), 0);
 
     const budgetRemainingGbp = monthlyBudget - spentThisMonth;
 
@@ -3348,11 +4422,16 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
     return {
       totalItems,
+      activeInventoryCount,
+      archivedItemsCount,
       totalValuationGbp,
       averageCostPerWearGbp,
       totalWearsRecorded,
       totalOutfitsCount: outfits.length,
       wishlistTotalGbp,
+      purchasedItemsCount,
+      wishlistItemsCount,
+      totalShoppingItemsCount,
       budgetRemainingGbp,
       topWornItems,
       underutilizedItems,
@@ -3442,7 +4521,15 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       createSnapshot,
       restoreSnapshot,
       deleteSnapshot,
+      cleanupAutoSnapshots,
+      lastAutoSnapshotTime,
+      triggerAutoSnapshot,
+      restoreTimelineEntryItem,
+      restoreTimelineState,
+      canRestoreEntry,
       syncVintedOrderStatuses,
+      syncVintedAccountOrders,
+      importVintedExtractedListings,
       updateMonthlyBudget,
       exportDataJSON,
       importDataJSON,
@@ -3527,7 +4614,15 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       createSnapshot,
       restoreSnapshot,
       deleteSnapshot,
+      cleanupAutoSnapshots,
+      lastAutoSnapshotTime,
+      triggerAutoSnapshot,
+      restoreTimelineEntryItem,
+      restoreTimelineState,
+      canRestoreEntry,
       syncVintedOrderStatuses,
+      syncVintedAccountOrders,
+      importVintedExtractedListings,
       updateMonthlyBudget,
       exportDataJSON,
       importDataJSON,

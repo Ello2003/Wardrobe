@@ -7,7 +7,7 @@ import {
   Edit2,
   Layers,
   Tag,
-  DollarSign,
+  PoundSterling,
 } from 'lucide-react';
 import { WardrobeItem } from '../types';
 import { useWardrobe } from '../context/WardrobeContext';
@@ -291,7 +291,7 @@ export const ItemDetailModal: React.FC<ItemDetailModalProps> = ({ item, onClose,
               className="flex items-center gap-1 px-3 py-1.5 text-xs font-semibold bg-amber-50 hover:bg-amber-100 text-amber-900 rounded-md border border-amber-300 transition-colors cursor-pointer shadow-2xs"
               title="List piece on Resale Studio"
             >
-              <DollarSign className="w-3 h-3 text-amber-700" />
+              <PoundSterling className="w-3 h-3 text-amber-700" />
               List for Sale
             </button>
 

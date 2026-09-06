@@ -3,12 +3,21 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Wardrobe &amp; Lookbook Studio</title>
-    <meta name="description" content="Comprehensive wardrobe inventory tracking, purchases &amp; wishlist planning, resale selling manager with P&amp;L profit tracking, lookbook styling studio" />
-    <meta property="og:title" content="Wardrobe &amp; Lookbook Studio" />
-    <meta property="og:description" content="Comprehensive wardrobe inventory tracking, purchases &amp; wishlist planning, resale selling manager with P&amp;L profit tracking, lookbook styling studio" />
+    <title>Wardrobe &amp; Style Studio</title>
+    <meta name="description" content="Track fabric compositions, cost-per-wear economics, care guides, and styling combinations in GBP (£)." />
+    <meta property="og:title" content="Wardrobe &amp; Style Studio" />
+    <meta property="og:description" content="Track fabric compositions, cost-per-wear economics, care guides, and styling combinations in GBP (£)." />
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
+    <script>
+      // Intercept window errors early to prevent cross-origin Script error bubbles
+      window.addEventListener('error', function(event) {
+        console.error('[Window Error]:', event.error || event.message);
+      });
+      window.addEventListener('unhandledrejection', function(event) {
+        console.error('[Unhandled Rejection]:', event.reason);
+      });
+    </script>
   </head>
   <body>
     <div id="root"></div>

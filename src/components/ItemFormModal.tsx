@@ -38,7 +38,7 @@ export const ItemFormModal: React.FC<ItemFormModalProps> = ({
   const [imageUrl, setImageUrl] = useState('');
   const [isPhotoDragging, setIsPhotoDragging] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [autoConsolidate, setAutoConsolidate] = useState(true);
+  const [autoConsolidate, setAutoConsolidate] = useState(false);
 
   // Quick Auto-Import inside modal
   const [importUrl, setImportUrl] = useState('');
@@ -432,7 +432,7 @@ export const ItemFormModal: React.FC<ItemFormModalProps> = ({
                     </span>
                   </div>
                   <p className="text-[11px] text-amber-800 leading-relaxed">
-                    Saving will consolidate all {detectedDuplicates.length + 1} instances into this single master record, safely combining wear counts, merged tags, and notes into 1 clean item.
+                    Similar piece(s) exist in your wardrobe. By default, distinct items (such as different colors or separate garments) are kept separate. You can opt in below if you want to consolidate them into 1 master item.
                   </p>
                   <label className="flex items-center gap-2 pt-1 font-medium text-xs text-amber-950 cursor-pointer">
                     <input

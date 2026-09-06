@@ -11,7 +11,7 @@ import {
   Sparkles,
   ShoppingBag,
   Tag,
-  DollarSign,
+  PoundSterling,
   Calendar,
   Check,
 } from 'lucide-react';

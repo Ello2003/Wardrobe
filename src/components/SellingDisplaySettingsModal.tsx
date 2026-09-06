@@ -5,7 +5,7 @@ import {
   RotateCcw,
   Eye,
   EyeOff,
-  DollarSign,
+  PoundSterling,
   TrendingUp,
   Tag,
   Truck,

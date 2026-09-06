@@ -25,6 +25,7 @@ import {
   Check,
   FolderUp,
   Sparkles,
+  ShoppingBag,
 } from 'lucide-react';
 
 interface SellingDatabaseTableProps {
@@ -38,6 +39,8 @@ interface SellingDatabaseTableProps {
   onEditItem: (item: SaleItem) => void;
   onMarkSold: (item: SaleItem) => void;
   onOpenAiGenerator?: (item: SaleItem) => void;
+  onSelectCategory?: (category: string) => void;
+  onSelectTag?: (tag: string) => void;
 }
 
 type SortField =
@@ -109,6 +112,8 @@ export const SellingDatabaseTable: React.FC<SellingDatabaseTableProps> = ({
   onEditItem,
   onMarkSold,
   onOpenAiGenerator,
+  onSelectCategory,
+  onSelectTag,
 }) => {
   const {
     updateSaleItem,
@@ -282,7 +287,7 @@ export const SellingDatabaseTable: React.FC<SellingDatabaseTableProps> = ({
         isResizing ? 'select-none' : ''
       }`}
     >
-      <table className={`w-full text-left border-collapse ${textSize} text-[#1A1A1A]`}>
+      <table className={`w-full min-w-max text-left border-collapse ${textSize} text-[#1A1A1A]`}>
         {/* Table Header */}
         <thead
           className={`bg-[#F8F7F4] text-[#5A5A55] font-mono text-[10px] uppercase tracking-wider border-b border-[#E5E5E1] select-none ${
@@ -542,7 +547,16 @@ export const SellingDatabaseTable: React.FC<SellingDatabaseTableProps> = ({
 
         {/* Table Body */}
         <tbody className="divide-y divide-[#E5E5E1]">
-          {sortedItems.map((item, idx) => {
+          {sortedItems.length === 0 ? (
+            <tr>
+              <td colSpan={25} className="py-12 text-center text-[#767670] bg-white">
+                <ShoppingBag className="w-8 h-8 mx-auto text-[#A5A59E] mb-2" />
+                <p className="font-serif font-bold text-[#1A1A1A]">No resale listings match your criteria</p>
+                <p className="text-xs text-[#767670] mt-1 font-mono">Try adjusting your filters or listing an item from your wardrobe.</p>
+              </td>
+            </tr>
+          ) : (
+            sortedItems.map((item, idx) => {
             const isEditingTitle = editingCellId === `${item.id}_title`;
             const isEditingBrand = editingCellId === `${item.id}_brand`;
             const isEditingListing = editingCellId === `${item.id}_listingPrice`;
@@ -715,7 +729,15 @@ export const SellingDatabaseTable: React.FC<SellingDatabaseTableProps> = ({
                     style={{ width: `${getWidth('category')}px` }}
                     className={`${densityPadding} text-[11px] text-[#5A5A55] truncate`}
                   >
-                    <span className="px-1.5 py-0.5 bg-[#FAF9F6] border border-[#E5E5E1] rounded-xs">
+                    <span
+                      onClick={() => onSelectCategory?.(item.category)}
+                      className={`px-1.5 py-0.5 bg-[#FAF9F6] border border-[#E5E5E1] rounded-xs ${
+                        onSelectCategory
+                          ? 'cursor-pointer hover:border-[#8C7355] hover:text-[#8C7355] transition-colors'
+                          : ''
+                      }`}
+                      title={onSelectCategory ? `Filter by category "${item.category}"` : undefined}
+                    >
                       {item.category}
                     </span>
                   </td>
@@ -992,7 +1014,13 @@ export const SellingDatabaseTable: React.FC<SellingDatabaseTableProps> = ({
                           key={t}
                           className="inline-flex items-center gap-0.5 text-[10px] font-mono px-1 py-0.5 bg-[#F2F1ED] border border-[#E5E5E1] rounded-xs"
                         >
-                          #{t}
+                          <span
+                            onClick={() => onSelectTag?.(t)}
+                            className={onSelectTag ? 'cursor-pointer hover:text-[#8C7355] hover:underline' : ''}
+                            title={onSelectTag ? `Filter by tag #${t}` : undefined}
+                          >
+                            #{t}
+                          </span>
                           <button
                             type="button"
                             onClick={() => handleDeleteTag(item.id, t)}
@@ -1089,7 +1117,7 @@ export const SellingDatabaseTable: React.FC<SellingDatabaseTableProps> = ({
                 )}
               </tr>
             );
-          })}
+          }))}
         </tbody>
       </table>
     </div>

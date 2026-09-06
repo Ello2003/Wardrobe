@@ -2192,9 +2192,25 @@ Requirements:
           careNotes: item.careNotes || 'Hand wash or gentle cycle for pre-loved garment.',
           notes: item.notes || `Vinted piece (${file.name}).`,
           sourceFile: file.name,
-          tags: Array.isArray(item.tags) && item.tags.length > 0
-            ? Array.from(new Set([...item.tags, 'vinted', (item.transactionType || 'sale').toLowerCase(), 'second-hand', 'pre-owned']))
-            : ['vinted', (item.transactionType || 'sale').toLowerCase(), 'second-hand', 'pre-owned', cat.toLowerCase()],
+          tags: (() => {
+            const rawStatus = (item.orderStatus || '').toLowerCase();
+            const isCancelled = rawStatus.includes('cancel') || rawStatus.includes('refund') || rawStatus.includes('returned') || rawStatus.includes('failed');
+            const isSold = (item.transactionType === 'Sale' || rawStatus.includes('sold')) && !isCancelled;
+            const isListed = (file.name.toLowerCase().includes('listing') || item.orderStatus === 'Listed' || item.orderStatus === 'Active') && !isSold && !isCancelled;
+            const isBought = (item.transactionType === 'Purchase' || rawStatus.includes('completed') || rawStatus.includes('delivered')) && !isCancelled;
+
+            const lifecycleTags: string[] = [];
+            if (isCancelled) lifecycleTags.push('Cancelled', 'cancelled');
+            if (isSold) lifecycleTags.push('Sold', 'sold');
+            if (isListed) lifecycleTags.push('Listed', 'listed');
+            if (isBought) lifecycleTags.push('Bought', 'bought');
+
+            const baseTags = Array.isArray(item.tags) && item.tags.length > 0
+              ? item.tags
+              : ['vinted', (item.transactionType || 'sale').toLowerCase(), 'second-hand', 'pre-owned', cat.toLowerCase()];
+
+            return Array.from(new Set([...baseTags, ...lifecycleTags, 'vinted']));
+          })(),
         };
       });
 
@@ -2224,6 +2240,605 @@ Requirements:
     res.status(500).json({ error: 'Failed to process Vinted data files.' });
   }
 });
+
+// Cloudflare Worker Proxy: Authenticated Vinted Orders History (POST /orders)
+app.post('/api/vinted-proxy/orders', async (req, res) => {
+  const { workerEndpoint, domain, access_token, xcsrf_token, cookie, refresh_token, type, status, page, per_page } = req.body;
+  if (!workerEndpoint) {
+    return res.status(400).json({ error: 'workerEndpoint is required' });
+  }
+  const cleanEndpoint = String(workerEndpoint).trim().replace(/\/$/, '');
+  try {
+    const targetUrl = `${cleanEndpoint}/orders`;
+    const response = await fetch(targetUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        domain: domain || 'co.uk',
+        access_token,
+        xcsrf_token,
+        cookie,
+        refresh_token,
+        type: type || 'all',
+        status: status || 'all',
+        page: page || 1,
+        per_page: per_page || 50,
+      }),
+    });
+    const data = await response.json();
+    return res.status(response.status).json(data);
+  } catch (err: any) {
+    console.error('Vinted proxy orders error:', err);
+    return res.status(500).json({ error: err?.message || 'Failed to proxy orders to worker' });
+  }
+});
+
+// Cloudflare Worker Proxy: Public Vinted Item Page Extraction (GET ?url=...)
+app.get('/api/vinted-proxy/extract', async (req, res) => {
+  const workerEndpoint = req.query.workerEndpoint as string;
+  const url = req.query.url as string;
+  if (!workerEndpoint || !url) {
+    return res.status(400).json({ error: 'workerEndpoint and url query parameters are required' });
+  }
+  const cleanEndpoint = String(workerEndpoint).trim().replace(/\/$/, '');
+  try {
+    const targetUrl = `${cleanEndpoint}?url=${encodeURIComponent(url)}`;
+    const response = await fetch(targetUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
+      },
+    });
+    const data = await response.json();
+    return res.status(response.status).json(data);
+  } catch (err: any) {
+    console.error('Vinted proxy extract error:', err);
+    return res.status(500).json({ error: err?.message || 'Failed to proxy URL extract to worker' });
+  }
+});
+
+// Cloudflare Worker / Server Proxy: Scrape Listings from Vinted Account (POST /scrape-account)
+app.post('/api/vinted-proxy/scrape-account', async (req, res) => {
+  try {
+    const {
+      accountUrlOrUsername,
+      domain = 'co.uk',
+      workerEndpoint,
+      rawHtml,
+      statusFilter = 'all', // 'all' | 'listed' | 'sold'
+      accessToken,
+      cookie,
+    } = req.body;
+
+    const rawInput = String(accountUrlOrUsername || '').trim();
+    if (!rawInput && !rawHtml) {
+      return res.status(400).json({ error: 'Please provide a Vinted account URL, username, or paste page HTML.' });
+    }
+
+    // Determine domain and user ID / slug from URL or username
+    let effectiveDomain = domain || 'co.uk';
+    const domainMatch = rawInput.match(/vinted\.(co\.uk|fr|de|it|es|com|be|nl|at|pl|pt|lt|cz|sk|ro|hu|se|fi)/i);
+    if (domainMatch) {
+      effectiveDomain = domainMatch[1].toLowerCase();
+    }
+
+    // Clean username or member ID
+    let memberId = '';
+    let username = '';
+
+    const memberIdMatch = rawInput.match(/\/member(?:s)?\/([0-9]+)(?:-([a-zA-Z0-9_.-]+))?/i);
+    if (memberIdMatch) {
+      memberId = memberIdMatch[1];
+      username = memberIdMatch[2] || '';
+    } else if (/^[0-9]+$/.test(rawInput)) {
+      memberId = rawInput;
+    } else {
+      username = rawInput.replace(/^@/, '').replace(/https?:\/\/[^/]+\//, '').replace(/^member\//, '');
+    }
+
+    let pageHtml = rawHtml || '';
+    let userMetadata: any = {
+      id: memberId || undefined,
+      username: username || 'Vinted User',
+      profileUrl: memberId
+        ? `https://www.vinted.${effectiveDomain}/member/${memberId}${username ? `-${username}` : ''}`
+        : rawInput.startsWith('http') ? rawInput : `https://www.vinted.${effectiveDomain}/member/${username}`,
+    };
+
+    let itemsFromApi: any[] = [];
+
+    // 1. Try Cloudflare Worker proxy if configured
+    const cleanEndpoint = workerEndpoint ? String(workerEndpoint).trim().replace(/\/$/, '') : '';
+
+    const fetchViaWorkerProxy = async (vintedUrl: string, asJson: boolean = false): Promise<any> => {
+      if (!cleanEndpoint) return null;
+      try {
+        const targetUrl = `${cleanEndpoint}?url=${encodeURIComponent(vintedUrl)}`;
+        const headers: Record<string, string> = {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+          Accept: asJson ? 'application/json, text/plain, */*' : 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'en-GB,en;q=0.9',
+        };
+        if (cookie) headers['Cookie'] = cookie;
+        if (accessToken) headers['Authorization'] = `Bearer ${accessToken}`;
+
+        const res = await fetch(targetUrl, {
+          headers,
+          signal: AbortSignal.timeout(12000),
+        });
+        if (!res.ok) return null;
+        return asJson ? await res.json() : await res.text();
+      } catch (e: any) {
+        console.warn('Worker proxy URL fetch note:', vintedUrl, e?.message);
+        return null;
+      }
+    };
+
+    // 1a. If member ID is not known yet, try resolving current authenticated user via Worker session
+    if (!memberId && cleanEndpoint && (accessToken || cookie)) {
+      try {
+        const curUser = await fetchViaWorkerProxy(`https://www.vinted.${effectiveDomain}/api/v2/users/current`, true);
+        if (curUser?.user?.id) {
+          memberId = String(curUser.user.id);
+          username = curUser.user.login || curUser.user.username || username;
+          userMetadata = {
+            ...userMetadata,
+            id: memberId,
+            username,
+            photo: curUser.user.photo?.url || curUser.user.profile_photo?.url,
+            itemsCount: curUser.user.item_count,
+            feedbackCount: curUser.user.feedback_count,
+            profileUrl: `https://www.vinted.${effectiveDomain}/member/${memberId}${username ? `-${username}` : ''}`,
+          };
+        }
+      } catch (e: any) {
+        console.warn('Could not query current user via worker session:', e?.message);
+      }
+    }
+
+    // 1b. Try worker POST endpoints (orders with type 'active', /items, or /scrape-account)
+    if (cleanEndpoint && !pageHtml) {
+      // Try /orders with type: 'active'
+      try {
+        const workerOrdersRes = await fetch(`${cleanEndpoint}/orders`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            domain: effectiveDomain,
+            access_token: accessToken,
+            cookie,
+            type: 'active',
+            status: 'all',
+            page: 1,
+            per_page: 100,
+          }),
+          signal: AbortSignal.timeout(8000),
+        });
+        if (workerOrdersRes.ok) {
+          const oData = await workerOrdersRes.json();
+          if (oData && Array.isArray(oData.orders) && oData.orders.length > 0) {
+            itemsFromApi = oData.orders;
+          }
+        }
+      } catch (wErr: any) {
+        // Continue to /scrape-account check
+      }
+
+      // Try /scrape-account
+      if (itemsFromApi.length === 0) {
+        try {
+          const workerRes = await fetch(`${cleanEndpoint}/scrape-account`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              accountUrlOrUsername: rawInput || memberId || username,
+              domain: effectiveDomain,
+              statusFilter,
+              accessToken,
+              cookie,
+            }),
+            signal: AbortSignal.timeout(10000),
+          });
+
+          if (workerRes.ok) {
+            const wData = await workerRes.json();
+            if (wData && Array.isArray(wData.listings) && wData.listings.length > 0) {
+              return res.json(wData);
+            }
+          }
+        } catch (wErr: any) {
+          console.warn('Worker scrape-account endpoint note:', wErr?.message);
+        }
+      }
+    }
+
+    // 2. If member ID exists, attempt Vinted API fetch (via Cloudflare Worker proxy first, then direct fallback)
+    if (memberId && !pageHtml && itemsFromApi.length === 0) {
+      const apiUrl = `https://www.vinted.${effectiveDomain}/api/v2/users/${memberId}/items?page=1&per_page=100&order=relevance`;
+      
+      // Try via Worker edge proxy
+      if (cleanEndpoint) {
+        const workerApiData = await fetchViaWorkerProxy(apiUrl, true);
+        if (workerApiData && Array.isArray(workerApiData.items) && workerApiData.items.length > 0) {
+          itemsFromApi = workerApiData.items;
+          if (workerApiData.user) {
+            userMetadata = {
+              ...userMetadata,
+              username: workerApiData.user.login || workerApiData.user.username || userMetadata.username,
+              photo: workerApiData.user.photo?.url || workerApiData.user.profile_photo?.url || userMetadata.photo,
+              itemsCount: workerApiData.user.item_count || workerApiData.items.length,
+              feedbackCount: workerApiData.user.feedback_count || userMetadata.feedbackCount,
+            };
+          }
+        }
+      }
+
+      // Fallback to direct fetch from server if worker did not return items
+      if (itemsFromApi.length === 0) {
+        try {
+          const apiHeaders: Record<string, string> = {
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+            Accept: 'application/json, text/plain, */*',
+            'Accept-Language': 'en-GB,en;q=0.9',
+          };
+          if (cookie) apiHeaders['Cookie'] = cookie;
+          if (accessToken) apiHeaders['Authorization'] = `Bearer ${accessToken}`;
+
+          const apiRes = await fetch(apiUrl, {
+            headers: apiHeaders,
+            signal: AbortSignal.timeout(8000),
+          });
+
+          if (apiRes.ok) {
+            const apiData = await apiRes.json();
+            if (apiData && Array.isArray(apiData.items) && apiData.items.length > 0) {
+              itemsFromApi = apiData.items;
+            }
+            if (apiData.user) {
+              userMetadata = {
+                ...userMetadata,
+                username: apiData.user.login || apiData.user.username || userMetadata.username,
+                photo: apiData.user.photo?.url || apiData.user.profile_photo?.url || userMetadata.photo,
+                itemsCount: apiData.user.item_count || apiData.items?.length,
+                feedbackCount: apiData.user.feedback_count || userMetadata.feedbackCount,
+              };
+            }
+          }
+        } catch (apiErr: any) {
+          console.warn('Vinted API direct fetch note:', apiErr?.message);
+        }
+      }
+    }
+
+    // 3. If API didn't return items and no rawHtml, fetch web page (via Worker proxy first to bypass Cloudflare verification)
+    if (itemsFromApi.length === 0 && !pageHtml && userMetadata.profileUrl) {
+      if (cleanEndpoint) {
+        const workerHtml = await fetchViaWorkerProxy(userMetadata.profileUrl, false);
+        if (typeof workerHtml === 'string' && workerHtml.length > 200 && !workerHtml.includes('Cloudflare') && !workerHtml.includes('challenge-running')) {
+          pageHtml = workerHtml;
+        } else if (typeof workerHtml === 'string' && workerHtml.length > 200) {
+          pageHtml = workerHtml;
+        }
+      }
+
+      // Direct fallback
+      if (!pageHtml) {
+        try {
+          const pageRes = await fetch(userMetadata.profileUrl, {
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+              Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+              'Accept-Language': 'en-GB,en;q=0.9',
+            },
+            signal: AbortSignal.timeout(8000),
+          });
+          if (pageRes.ok) {
+            pageHtml = await pageRes.text();
+          }
+        } catch (fetchErr: any) {
+          console.warn('Web page direct fetch note:', fetchErr?.message);
+        }
+      }
+    }
+
+    const scrapedListings: any[] = [];
+
+    // Process items if retrieved via API JSON
+    if (itemsFromApi.length > 0) {
+      for (const item of itemsFromApi) {
+        const itemPrice = typeof item.price === 'number'
+          ? item.price
+          : parseFloat(String(item.price?.amount || item.price || '0').replace(/[^0-9.]/g, '')) || 0;
+        const itemTitle = item.title || item.name || 'Vinted Listing';
+        const isItemSold = !!(item.is_sold || item.status === 'sold' || item.status_id === 2);
+        const itemStatus = isItemSold ? 'Sold' : 'Listed';
+
+        if (statusFilter === 'listed' && isItemSold) continue;
+        if (statusFilter === 'sold' && !isItemSold) continue;
+
+        const imgUrl = item.photo?.url || item.photos?.[0]?.url || item.image || item.imageUrl || '';
+        const allImgs = Array.isArray(item.photos)
+          ? item.photos.map((p: any) => p.url).filter(Boolean)
+          : imgUrl ? [imgUrl] : [];
+
+        const cat = item.category?.title || item.category || 'Tops';
+        const brand = item.brand_title || item.brand?.title || item.brand || 'Vinted';
+
+        const tags = ['vinted'];
+        if (isItemSold) {
+          tags.push('Sold', 'sold');
+        } else {
+          tags.push('Listed', 'listed', 'active-listing');
+        }
+
+        const itemId = String(item.id || item.orderId || `vinted-acc-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`);
+
+        scrapedListings.push({
+          id: itemId,
+          title: itemTitle,
+          brand,
+          category: cat,
+          size: item.size_title || item.size || '',
+          price: itemPrice,
+          currency: item.currency || 'GBP',
+          color: item.color || '',
+          condition: item.status_description || item.condition || 'Good',
+          status: itemStatus,
+          url: item.url ? (item.url.startsWith('http') ? item.url : `https://www.vinted.${effectiveDomain}${item.url}`) : `https://www.vinted.${effectiveDomain}/items/${itemId}`,
+          imageUrl: imgUrl,
+          allImages: allImgs,
+          description: item.description || '',
+          seller: userMetadata.username,
+          tags,
+        });
+      }
+    }
+
+    // Process from HTML (Next.js data, JSON-LD, or DOM regex)
+    if (scrapedListings.length === 0 && pageHtml) {
+      // 4a. Check Next.js __NEXT_DATA__
+      const nextDataMatch = pageHtml.match(/<script\s+id=["']__NEXT_DATA__["']\s+type=["']application\/json["']>([\s\S]*?)<\/script>/i);
+      if (nextDataMatch) {
+        try {
+          const nextData = JSON.parse(nextDataMatch[1]);
+          const pageProps = nextData?.props?.pageProps;
+          const userObj = pageProps?.user || pageProps?.member;
+          if (userObj) {
+            userMetadata = {
+              ...userMetadata,
+              username: userObj.login || userObj.username || userMetadata.username,
+              photo: userObj.photo?.url || userObj.profile_photo?.url || userMetadata.photo,
+              itemsCount: userObj.item_count || userMetadata.itemsCount,
+            };
+          }
+
+          const itemsList = pageProps?.items || pageProps?.catalogItems || pageProps?.userItems || [];
+          if (Array.isArray(itemsList) && itemsList.length > 0) {
+            for (const item of itemsList) {
+              const itemPrice = typeof item.price === 'number'
+                ? item.price
+                : parseFloat(String(item.price?.amount || item.price || '0').replace(/[^0-9.]/g, '')) || 0;
+              const isItemSold = !!(item.is_sold || item.status === 'sold' || item.status_id === 2);
+              const itemStatus = isItemSold ? 'Sold' : 'Listed';
+
+              if (statusFilter === 'listed' && isItemSold) continue;
+              if (statusFilter === 'sold' && !isItemSold) continue;
+
+              const imgUrl = item.photo?.url || item.photos?.[0]?.url || '';
+              const allImgs = Array.isArray(item.photos)
+                ? item.photos.map((p: any) => p.url).filter(Boolean)
+                : imgUrl ? [imgUrl] : [];
+
+              const tags = ['vinted'];
+              if (isItemSold) {
+                tags.push('Sold', 'sold');
+              } else {
+                tags.push('Listed', 'listed', 'active-listing');
+              }
+
+              scrapedListings.push({
+                id: String(item.id || `vinted-acc-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`),
+                title: item.title || 'Vinted Listing',
+                brand: item.brand_title || 'Vinted',
+                category: item.category?.title || 'Tops',
+                size: item.size_title || '',
+                price: itemPrice,
+                currency: item.currency || 'GBP',
+                color: item.color || '',
+                condition: item.status_description || 'Good',
+                status: itemStatus,
+                url: item.url ? (item.url.startsWith('http') ? item.url : `https://www.vinted.${effectiveDomain}${item.url}`) : `https://www.vinted.${effectiveDomain}/items/${item.id}`,
+                imageUrl: imgUrl,
+                allImages: allImgs,
+                description: item.description || '',
+                seller: userMetadata.username,
+                tags,
+              });
+            }
+          }
+        } catch (nextErr) {
+          console.warn('Next data parse warning:', nextErr);
+        }
+      }
+
+      // 4b. Regex fallback on HTML
+      if (scrapedListings.length === 0) {
+        const itemCardRegex = /<a\s+[^>]*href=["'](\/(?:items|es|fr|de|it|nl)\/[0-9]+-[^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+        let cardMatch;
+        const seenUrls = new Set<string>();
+
+        while ((cardMatch = itemCardRegex.exec(pageHtml)) !== null && scrapedListings.length < 80) {
+          const itemPath = cardMatch[1];
+          const cardHtml = cardMatch[2];
+          if (seenUrls.has(itemPath)) continue;
+          seenUrls.add(itemPath);
+
+          // Extract title
+          const titleMatch = cardHtml.match(/title=["']([^"']+)["']/i) || cardHtml.match(/alt=["']([^"']+)["']/i);
+          const title = titleMatch ? titleMatch[1].trim() : 'Vinted Item';
+
+          // Extract price
+          const priceMatch = cardHtml.match(/(?:£|€|\$)\s*([0-9]+(?:[.,][0-9]{2})?)/) || cardHtml.match(/([0-9]+(?:[.,][0-9]{2})?)\s*(?:£|€|\$)/);
+          const price = priceMatch ? parseFloat(priceMatch[1].replace(',', '.')) : 0;
+
+          // Extract image
+          const imgMatch = cardHtml.match(/src=["'](https:\/\/[^"'\s>]*(?:vinted\.net|vinted-assets)[^"'\s>]*)["']/i);
+          const imgUrl = imgMatch ? imgMatch[1] : '';
+
+          // Check if sold
+          const isSold = /sold|vendue|vendu|verkauft|badge--sold|status--sold/i.test(cardHtml);
+          const itemStatus = isSold ? 'Sold' : 'Listed';
+
+          if (statusFilter === 'listed' && isSold) continue;
+          if (statusFilter === 'sold' && !isSold) continue;
+
+          const tags = ['vinted'];
+          if (isSold) {
+            tags.push('Sold', 'sold');
+          } else {
+            tags.push('Listed', 'listed', 'active-listing');
+          }
+
+          scrapedListings.push({
+            id: String(scrapedListings.length + 1),
+            title,
+            brand: 'Vinted',
+            category: 'Tops',
+            size: '',
+            price,
+            currency: 'GBP',
+            color: '',
+            condition: 'Good',
+            status: itemStatus,
+            url: `https://www.vinted.${effectiveDomain}${itemPath}`,
+            imageUrl: imgUrl,
+            allImages: imgUrl ? [imgUrl] : [],
+            description: '',
+            seller: userMetadata.username,
+            tags,
+          });
+        }
+      }
+
+      // 4c. Gemini Fallback if available and still nothing found
+      if (scrapedListings.length === 0) {
+        const ai = getGeminiClient();
+        if (ai) {
+          try {
+            const cleanText = pageHtml
+              .replace(/<style[\s\S]*?<\/style>/gi, '')
+              .replace(/<script[\s\S]*?<\/script>/gi, '')
+              .replace(/<[^>]+>/g, ' ')
+              .replace(/\s+/g, ' ')
+              .slice(0, 15000);
+
+            const prompt = `Extract all fashion listings, clothes, shoes, bags from this Vinted account page:
+${cleanText}
+
+For each item return:
+- title
+- price (number)
+- brand
+- category
+- size
+- status ("Listed" or "Sold")
+- tags (must include 'vinted' and 'Listed' or 'Sold')`;
+
+            const schema = {
+              type: Type.OBJECT,
+              properties: {
+                user: {
+                  type: Type.OBJECT,
+                  properties: {
+                    username: { type: Type.STRING },
+                    itemsCount: { type: Type.NUMBER },
+                  },
+                },
+                items: {
+                  type: Type.ARRAY,
+                  items: {
+                    type: Type.OBJECT,
+                    properties: {
+                      title: { type: Type.STRING },
+                      price: { type: Type.NUMBER },
+                      brand: { type: Type.STRING },
+                      category: { type: Type.STRING },
+                      size: { type: Type.STRING },
+                      status: { type: Type.STRING },
+                      tags: { type: Type.ARRAY, items: { type: Type.STRING } },
+                    },
+                    required: ['title', 'price', 'status'],
+                  },
+                },
+              },
+              required: ['items'],
+            };
+
+            const response = await generateContentWithFallback(
+              ai,
+              prompt,
+              'You extract Vinted closet listings. Always include tags: Listed, Sold, Vinted.',
+              schema
+            );
+
+            const aiParsed = JSON.parse(response.text || '{}');
+            if (aiParsed && Array.isArray(aiParsed.items)) {
+              for (const it of aiParsed.items) {
+                const isSold = String(it.status).toLowerCase().includes('sold');
+                const itStatus = isSold ? 'Sold' : 'Listed';
+                const tags = ['vinted', itStatus, itStatus.toLowerCase()];
+                scrapedListings.push({
+                  id: `vinted-acc-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+                  title: it.title,
+                  brand: it.brand || 'Vinted',
+                  category: it.category || 'Tops',
+                  size: it.size || '',
+                  price: it.price || 0,
+                  currency: 'GBP',
+                  color: '',
+                  condition: 'Good',
+                  status: itStatus,
+                  url: userMetadata.profileUrl,
+                  imageUrl: '',
+                  allImages: [],
+                  description: '',
+                  seller: userMetadata.username,
+                  tags,
+                });
+              }
+            }
+          } catch (aiErr) {
+            console.warn('Gemini account scrape fallback error:', aiErr);
+          }
+        }
+      }
+    }
+
+    if (scrapedListings.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: `Could not extract listings from ${userMetadata.username || 'this Vinted account'}. Vinted may require Cloudflare verification, or the closet has no visible items. You can paste the page HTML into the source tab to scrape with 100% precision.`,
+        user: userMetadata,
+        listings: [],
+        totalCount: 0,
+      });
+    }
+
+    return res.json({
+      success: true,
+      user: userMetadata,
+      listings: scrapedListings,
+      totalCount: scrapedListings.length,
+      errors: [],
+    });
+  } catch (err: any) {
+    console.error('Vinted proxy scrape-account error:', err);
+    return res.status(500).json({
+      success: false,
+      error: err?.message || 'Failed to scrape Vinted account listings.',
+    });
+  }
+});
+
 
 // Vite & Static Asset Handling
 async function startServer() {

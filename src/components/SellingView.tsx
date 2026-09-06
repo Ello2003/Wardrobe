@@ -19,7 +19,6 @@ import {
   MinusSquare,
   X,
   Download,
-  DollarSign,
   TrendingUp,
   TrendingDown,
   Layers,
@@ -37,6 +36,9 @@ import {
   Table as TableIcon,
   GitMerge,
   ArrowRightLeft,
+  Link2,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 import {
   SaleItem,
@@ -46,6 +48,7 @@ import {
   Category,
 } from '../types';
 import { useWardrobe } from '../context/WardrobeContext';
+import { safeConfirm } from '../utils/safeConfirm';
 import { MarkSoldModal } from './MarkSoldModal';
 import { SellFromWardrobeModal } from './SellFromWardrobeModal';
 import { SaleFormModal } from './SaleFormModal';
@@ -123,14 +126,28 @@ export const SellingView: React.FC = () => {
   const [selectedBrand, setSelectedBrand] = useState<string>('All');
   const [selectedPlatform, setSelectedPlatform] = useState<string>('All');
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
+  const [selectedTag, setSelectedTag] = useState<string>('All');
   const [sortBy, setSortBy] = useState<string>('newest');
-  const [viewMode, setViewMode] = useState<'grid' | 'table'>(displaySettings.viewMode || 'grid');
+  const [viewMode, setViewMode] = useState<'grid' | 'table'>(
+    displaySettings.viewMode === 'database' || (displaySettings.viewMode as any) === 'table' ? 'table' : 'grid'
+  );
 
   // Sync viewMode changes to displaySettings
   const handleSetViewMode = (mode: 'grid' | 'table') => {
     setViewMode(mode);
     handleUpdateDisplaySettings({ ...displaySettings, viewMode: mode });
   };
+
+  // Keep viewMode synchronized when displaySettings changes
+  useEffect(() => {
+    if (displaySettings.viewMode) {
+      const mode =
+        displaySettings.viewMode === 'database' || (displaySettings.viewMode as any) === 'table'
+          ? 'table'
+          : 'grid';
+      setViewMode(mode);
+    }
+  }, [displaySettings.viewMode]);
 
   // Unique Brands with counts (safely string-sorted, avoiding tuple crashes)
   const uniqueBrands = useMemo(() => {
@@ -144,11 +161,70 @@ export const SellingView: React.FC = () => {
       .sort((a, b) => a.brand.localeCompare(b.brand, undefined, { sensitivity: 'base' }));
   }, [saleItems]);
 
+  // Unique Tags with counts across sales listings
+  const uniqueTags = useMemo(() => {
+    const counts = new Map<string, number>();
+    saleItems.forEach((it) => {
+      (it.tags || []).forEach((t) => {
+        const clean = t.trim();
+        if (clean) {
+          counts.set(clean, (counts.get(clean) || 0) + 1);
+        }
+      });
+    });
+    return Array.from(counts.entries())
+      .map(([tag, count]) => ({ tag, count }))
+      .sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag));
+  }, [saleItems]);
+
+  // Category counts across sales listings
+  const categoryCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    saleItems.forEach((it) => {
+      const cat = (it.category || '').trim();
+      if (cat) {
+        counts.set(cat.toLowerCase(), (counts.get(cat.toLowerCase()) || 0) + 1);
+      }
+    });
+    return counts;
+  }, [saleItems]);
+
   // Multi-selection state
   const [selectedSaleIds, setSelectedSaleIds] = useState<Set<string>>(new Set());
 
+  // Filter Panel collapsible state
+  const [isFilterPanelOpen, setIsFilterPanelOpen] = useState(true);
+
+  // Tag editing state
+  const [newTagInputItemId, setNewTagInputItemId] = useState<string | null>(null);
+  const [newTagText, setNewTagText] = useState('');
+
+  const handleAddTag = (itemId: string) => {
+    if (!newTagText.trim()) {
+      setNewTagInputItemId(null);
+      return;
+    }
+    const clean = newTagText.trim().replace(/^#/, '');
+    const current = saleItems.find((s) => s.id === itemId);
+    if (current && !(current.tags || []).includes(clean)) {
+      updateSaleItem(itemId, { tags: [...(current.tags || []), clean] });
+    }
+    setNewTagText('');
+    setNewTagInputItemId(null);
+  };
+
+  const handleDeleteTag = (itemId: string, tagToDelete: string) => {
+    const current = saleItems.find((s) => s.id === itemId);
+    if (current) {
+      updateSaleItem(itemId, {
+        tags: (current.tags || []).filter((t) => t !== tagToDelete),
+      });
+    }
+  };
+
   // Modal states
   const [isAutoImportOpen, setIsAutoImportOpen] = useState(false);
+  const [autoImportTab, setAutoImportTab] = useState<'url' | 'photo' | 'text' | 'vinted'>('url');
   const [isSellFromWardrobeOpen, setIsSellFromWardrobeOpen] = useState(false);
   const [isSaleFormOpen, setIsSaleFormOpen] = useState(false);
   const [isBulkEditOpen, setIsBulkEditOpen] = useState(false);
@@ -207,6 +283,14 @@ export const SellingView: React.FC = () => {
         return false;
       }
 
+      // Tag filter
+      if (selectedTag !== 'All') {
+        const hasTag = (item.tags || []).some(
+          (t) => t.trim().toLowerCase() === selectedTag.trim().toLowerCase()
+        );
+        if (!hasTag) return false;
+      }
+
       // Search query filter evaluation
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
@@ -244,7 +328,25 @@ export const SellingView: React.FC = () => {
       if (sortBy === 'price_asc') return priceA - priceB;
       return 0;
     });
-  }, [saleItems, selectedStatusTab, selectedPlatform, selectedBrand, selectedCategory, searchQuery, sortBy]);
+  }, [saleItems, selectedStatusTab, selectedPlatform, selectedBrand, selectedCategory, selectedTag, searchQuery, sortBy]);
+
+  // Check if any filters are active
+  const hasActiveFilters =
+    selectedStatusTab !== 'All' ||
+    selectedBrand !== 'All' ||
+    selectedPlatform !== 'All' ||
+    selectedCategory !== 'All' ||
+    selectedTag !== 'All' ||
+    searchQuery.trim() !== '';
+
+  const handleResetAllFilters = () => {
+    setSelectedStatusTab('All');
+    setSelectedBrand('All');
+    setSelectedPlatform('All');
+    setSelectedCategory('All');
+    setSelectedTag('All');
+    setSearchQuery('');
+  };
 
   const toggleSelectSale = (id: string) => {
     setSelectedSaleIds((prev) => {
@@ -256,7 +358,7 @@ export const SellingView: React.FC = () => {
   };
 
   const handleBulkDelete = () => {
-    if (window.confirm(`Are you sure you want to delete ${selectedSaleIds.size} listings?`)) {
+    if (safeConfirm(`Are you sure you want to delete ${selectedSaleIds.size} listings?`)) {
       deleteMultipleSaleItems(Array.from(selectedSaleIds));
       setSelectedSaleIds(new Set());
     }
@@ -276,183 +378,527 @@ export const SellingView: React.FC = () => {
     setSelectedSaleIds(new Set());
   };
 
+  const areAllSelected =
+    filteredSales.length > 0 &&
+    filteredSales.every((it) => selectedSaleIds.has(it.id));
+
+  const handleToggleSelectAll = () => {
+    if (areAllSelected) {
+      setSelectedSaleIds(new Set());
+    } else {
+      setSelectedSaleIds(new Set(filteredSales.map((it) => it.id)));
+    }
+  };
+
   return (
     <div className="space-y-6">
-      {/* Search and Action Bar */}
-      <div className="flex flex-wrap justify-between items-center gap-4 bg-white p-4 rounded-xl border border-zinc-200 shadow-sm">
-        <div className="relative max-w-xs w-full">
-          <Search className="absolute left-3 top-2.5 h-4 w-4 text-zinc-400" />
-          <input
-            type="text"
-            placeholder="Search listings..."
-            className="pl-9 pr-4 py-2 w-full text-sm bg-zinc-50 border border-zinc-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-zinc-400"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-          />
-        </div>
-
-        <div className="flex items-center gap-2 flex-wrap">
-          {/* View Mode Toggle */}
-          <div className="flex items-center bg-zinc-100 p-0.5 rounded-lg border border-zinc-200">
-            <button
-              onClick={() => handleSetViewMode('grid')}
-              className={`p-1.5 rounded-md text-xs font-medium transition cursor-pointer ${
-                viewMode === 'grid'
-                  ? 'bg-white text-zinc-900 shadow-xs'
-                  : 'text-zinc-500 hover:text-zinc-900'
-              }`}
-              title="Grid View"
-            >
-              <LayoutGrid className="w-4 h-4" />
-            </button>
-            <button
-              onClick={() => handleSetViewMode('table')}
-              className={`p-1.5 rounded-md text-xs font-medium transition cursor-pointer ${
-                viewMode === 'table'
-                  ? 'bg-white text-zinc-900 shadow-xs'
-                  : 'text-zinc-500 hover:text-zinc-900'
-              }`}
-              title="Table View"
-            >
-              <TableIcon className="w-4 h-4" />
-            </button>
+      {/* Header & Quick Actions Toolbar */}
+      <div className="bg-white border border-[#E5E5E1] p-4 shadow-xs">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <h1 className="text-xl font-serif font-bold text-[#1A1A1A]">Sales & Resale Studio</h1>
+              <span className="font-mono text-xs px-2 py-0.5 bg-[#F2F1ED] border border-[#E5E5E1] text-[#5A5A55]">
+                {saleItems.length} listings total
+              </span>
+            </div>
+            <p className="text-xs text-[#767670] mt-0.5">
+              Showing {filteredSales.length} matching pieces • Pipeline Valuation:{' '}
+              <strong className="text-[#1A1A1A] font-mono">
+                {formatCurrency(
+                  filteredSales.reduce(
+                    (s, i) => s + (i.listingPrice ?? i.soldPrice ?? i.originalPricePaid ?? 0),
+                    0
+                  )
+                )}
+              </strong>
+            </p>
           </div>
 
-          <button
-            onClick={() => setIsDisplaySettingsOpen(true)}
-            className="p-2 border border-zinc-200 rounded-lg text-zinc-600 hover:bg-zinc-50 transition cursor-pointer"
-            title="Display Settings"
-          >
-            <SlidersHorizontal className="w-4 h-4" />
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            {/* View Mode Toggle: Grid vs Database Table (Icon-Only) */}
+            <div className="flex items-center border border-[#E5E5E1] p-0.5 bg-[#F8F7F4]">
+              <button
+                type="button"
+                onClick={() => handleSetViewMode('grid')}
+                className={`p-1.5 text-xs transition-colors cursor-pointer ${
+                  viewMode === 'grid'
+                    ? 'bg-white text-[#1A1A1A] shadow-xs font-bold'
+                    : 'text-[#767670] hover:text-[#1A1A1A]'
+                }`}
+                title="Grid Cards View"
+                aria-label="Grid Cards View"
+              >
+                <LayoutGrid className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSetViewMode('table')}
+                className={`p-1.5 text-xs transition-colors cursor-pointer ${
+                  viewMode === 'table'
+                    ? 'bg-white text-[#1A1A1A] shadow-xs font-bold'
+                    : 'text-[#767670] hover:text-[#1A1A1A]'
+                }`}
+                title="Database Table Spreadsheet View"
+                aria-label="Database Table Spreadsheet View"
+              >
+                <TableIcon className="w-3.5 h-3.5" />
+              </button>
+            </div>
 
-          <button
-            onClick={() => setIsDuplicateMergeOpen(true)}
-            className="flex items-center gap-1.5 px-3 py-2 border border-zinc-200 rounded-lg text-sm font-medium text-zinc-700 hover:bg-zinc-50 transition cursor-pointer"
-            title="Scan and merge duplicate listings"
-          >
-            <GitMerge className="w-4 h-4 text-[#8C7355]" />
-            Merge Duplicates
-          </button>
+            {/* Display Settings Toggle (Icon Only) */}
+            <button
+              type="button"
+              onClick={() => setIsDisplaySettingsOpen(true)}
+              id="selling-display-settings-btn"
+              className="p-1.5 border border-[#D5D5D0] bg-white text-[#4A4A45] hover:border-[#8C7355] hover:text-[#1A1A1A] transition-all cursor-pointer shadow-xs"
+              title="Configure display settings and density"
+              aria-label="Display Settings"
+            >
+              <SlidersHorizontal className="w-3.5 h-3.5 text-[#8C7355]" />
+            </button>
 
-          <button
-            onClick={() => setIsAutoImportOpen(true)}
-            className="flex items-center gap-1.5 px-3 py-2 border border-zinc-200 rounded-lg text-sm font-medium text-zinc-700 hover:bg-zinc-50 transition cursor-pointer"
-            title="Import from URL or receipt"
-          >
-            <FileUp className="w-4 h-4 text-zinc-600" />
-            Import
-          </button>
+            {/* Multi-Select / Deselect Controls */}
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={handleToggleSelectAll}
+                disabled={filteredSales.length === 0}
+                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono border transition-all cursor-pointer shadow-xs disabled:opacity-50 disabled:cursor-not-allowed ${
+                  areAllSelected
+                    ? 'bg-[#1A1A1A] text-white border-[#1A1A1A]'
+                    : 'bg-[#F8F7F4] text-[#5A5A55] border-[#E5E5E1] hover:text-[#1A1A1A] hover:bg-[#EAE8E3]'
+                }`}
+                title={
+                  areAllSelected
+                    ? 'Deselect all visible listings'
+                    : 'Select all visible listings'
+                }
+              >
+                <CheckSquare className="w-3.5 h-3.5" />
+                <span>
+                  {areAllSelected
+                    ? 'Deselect All'
+                    : `Select All (${filteredSales.length})`}
+                </span>
+              </button>
 
-          <button
-            onClick={() => setIsSellFromWardrobeOpen(true)}
-            className="flex items-center gap-1.5 px-3 py-2 border border-zinc-200 rounded-lg text-sm font-medium hover:bg-zinc-50 transition cursor-pointer"
-          >
-            <Shirt className="w-4 h-4 text-zinc-600" />
-            Sell from Wardrobe
-          </button>
+              {selectedSaleIds.size > 0 && !areAllSelected && (
+                <button
+                  type="button"
+                  onClick={() => setSelectedSaleIds(new Set())}
+                  className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-mono border border-[#E5E5E1] bg-white text-[#767670] hover:text-rose-700 hover:border-rose-300 hover:bg-rose-50 transition-all cursor-pointer shadow-xs"
+                  title="Clear selection"
+                >
+                  <X className="w-3.5 h-3.5" />
+                  <span>Clear ({selectedSaleIds.size})</span>
+                </button>
+              )}
+            </div>
 
-          <button
-            onClick={() => {
-              setSaleItemToEdit(null);
-              setIsSaleFormOpen(true);
-            }}
-            className="flex items-center gap-1.5 px-4 py-2 bg-zinc-900 hover:bg-zinc-800 text-white rounded-lg text-sm font-medium shadow transition cursor-pointer"
-          >
-            <Plus className="w-4 h-4" /> Add Listing
-          </button>
+            {/* Sell from Wardrobe */}
+            <button
+              onClick={() => setIsSellFromWardrobeOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono font-medium border border-[#E5E5E1] bg-white text-[#4A4A45] hover:border-[#8C7355] hover:text-[#1A1A1A] transition-all cursor-pointer shadow-xs"
+              title="List pieces directly from your existing wardrobe"
+            >
+              <Shirt className="w-3.5 h-3.5 text-[#8C7355]" />
+              <span>Sell from Wardrobe</span>
+            </button>
+
+            {/* Add Listing */}
+            <button
+              onClick={() => {
+                setSaleItemToEdit(null);
+                setIsSaleFormOpen(true);
+              }}
+              id="sales-add-btn"
+              className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-medium uppercase tracking-wider bg-[#8C7355] hover:bg-[#735D43] text-white shadow-xs transition-all cursor-pointer"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Add Listing</span>
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* Grid Filtering Tabs */}
-      <div className="flex flex-wrap items-center gap-3">
-        <select
-          value={selectedStatusTab}
-          onChange={(e) => setSelectedStatusTab(e.target.value)}
-          className="bg-white border border-zinc-200 rounded-lg p-2 text-xs focus:ring-1 focus:ring-zinc-400 cursor-pointer"
-        >
-          <option value="All">All Statuses</option>
-          <option value="Active">Active / Listed</option>
-          <option value="Sold">Sold / Shipped</option>
-          <option value="Draft">Drafts</option>
-        </select>
+      {/* Category Filter & Tag Chips Bar */}
+      <div className="bg-white border border-[#E5E5E1] p-3 space-y-2.5 shadow-xs">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Tag className="w-3.5 h-3.5 text-[#8C7355]" />
+            <span className="text-xs font-mono font-bold text-[#1A1A1A] uppercase tracking-wider">
+              Categories
+            </span>
+            <span className="text-[10px] font-mono text-[#767670]">
+              ({categories.length} available)
+            </span>
+          </div>
 
-        <select
-          value={selectedBrand}
-          onChange={(e) => setSelectedBrand(e.target.value)}
-          className="bg-white border border-zinc-200 rounded-lg p-2 text-xs focus:ring-1 focus:ring-zinc-400 cursor-pointer"
-        >
-          <option value="All">All Brands</option>
-          {uniqueBrands.map((ub) => (
-            <option key={ub.brand} value={ub.brand}>
-              {ub.brand} ({ub.count})
-            </option>
-          ))}
-        </select>
+          <div className="flex items-center gap-3">
+            {selectedCategory !== 'All' && (
+              <button
+                type="button"
+                onClick={() => setSelectedCategory('All')}
+                className="text-[10px] font-mono text-[#8C7355] hover:text-[#1A1A1A] hover:underline cursor-pointer flex items-center gap-1"
+              >
+                <X className="w-3 h-3" />
+                Clear category ({selectedCategory})
+              </button>
+            )}
+            {selectedTag !== 'All' && (
+              <button
+                type="button"
+                onClick={() => setSelectedTag('All')}
+                className="text-[10px] font-mono text-[#1A1A1A] hover:text-rose-600 hover:underline cursor-pointer flex items-center gap-1"
+              >
+                <X className="w-3 h-3" />
+                Clear tag (#{selectedTag})
+              </button>
+            )}
+          </div>
+        </div>
 
-        <select
-          value={selectedPlatform}
-          onChange={(e) => setSelectedPlatform(e.target.value)}
-          className="bg-white border border-zinc-200 rounded-lg p-2 text-xs focus:ring-1 focus:ring-zinc-400 cursor-pointer"
-        >
-          <option value="All">All Platforms</option>
-          <option value="Vinted">Vinted</option>
-          <option value="Depop">Depop</option>
-          <option value="eBay">eBay</option>
-          <option value="Grailed">Grailed</option>
-          <option value="Vestiaire Collective">Vestiaire Collective</option>
-          <option value="Other">Other</option>
-        </select>
+        {/* Dynamic Categories */}
+        <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-1">
+          <button
+            type="button"
+            onClick={() => setSelectedCategory('All')}
+            className={`px-2.5 py-1 text-xs border transition-all cursor-pointer whitespace-nowrap font-mono ${
+              selectedCategory === 'All'
+                ? 'bg-[#8C7355] text-white border-[#8C7355] font-semibold shadow-xs'
+                : 'bg-[#F8F7F4] text-[#4A4A45] hover:bg-[#EAE8E3] border-[#E5E5E1]'
+            }`}
+          >
+            All Items ({saleItems.length})
+          </button>
 
-        <select
-          value={sortBy}
-          onChange={(e) => setSortBy(e.target.value)}
-          className="bg-white border border-zinc-200 rounded-lg p-2 text-xs focus:ring-1 focus:ring-zinc-400 cursor-pointer"
-        >
-          <option value="newest">Recently Listed</option>
-          <option value="price_desc">Highest Price</option>
-          <option value="price_asc">Lowest Price</option>
-        </select>
+          {categories.map((cat) => {
+            const isSelected = selectedCategory.toLowerCase() === cat.toLowerCase();
+            const count = categoryCounts.get(cat.toLowerCase()) || 0;
+            return (
+              <button
+                key={cat}
+                type="button"
+                onClick={() => setSelectedCategory(isSelected ? 'All' : cat)}
+                className={`px-2.5 py-1 text-xs border transition-all cursor-pointer whitespace-nowrap font-mono ${
+                  isSelected
+                    ? 'bg-[#8C7355] text-white border-[#8C7355] font-semibold shadow-xs'
+                    : 'bg-[#F8F7F4] text-[#4A4A45] hover:bg-[#EAE8E3] border-[#E5E5E1]'
+                }`}
+              >
+                {cat} {count > 0 ? `(${count})` : ''}
+              </button>
+            );
+          })}
+        </div>
 
-        {selectedSaleIds.size > 0 && (
-          <div className="flex items-center gap-2 ml-auto bg-zinc-900 text-white px-3 py-1.5 rounded-lg text-xs flex-wrap">
-            <span className="font-medium">{selectedSaleIds.size} selected</span>
-            <span className="text-zinc-600">|</span>
+        {/* Dynamic Tags filter strip */}
+        {uniqueTags.length > 0 && (
+          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pt-2 border-t border-[#E5E5E1]/70 text-xs">
+            <span className="text-[10px] font-mono text-[#767670] uppercase tracking-wider shrink-0">
+              Tags:
+            </span>
             <button
-              onClick={() => setIsBulkEditOpen(true)}
-              className="text-zinc-200 hover:text-white font-medium cursor-pointer"
+              type="button"
+              onClick={() => setSelectedTag('All')}
+              className={`px-2 py-0.5 text-[10px] font-mono border transition-all cursor-pointer whitespace-nowrap ${
+                selectedTag === 'All'
+                  ? 'bg-[#1A1A1A] text-white border-[#1A1A1A] font-semibold'
+                  : 'bg-[#F8F7F4] text-[#767670] hover:bg-[#EAE8E3] border-[#E5E5E1]'
+              }`}
             >
-              Bulk Edit
+              All Tags
             </button>
-            <span className="text-zinc-600">|</span>
+            {uniqueTags.map((ut) => {
+              const isSelected = selectedTag.toLowerCase() === ut.tag.toLowerCase();
+              return (
+                <button
+                  key={ut.tag}
+                  type="button"
+                  onClick={() => setSelectedTag(isSelected ? 'All' : ut.tag)}
+                  className={`inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-mono border transition-all cursor-pointer whitespace-nowrap ${
+                    isSelected
+                      ? 'bg-[#1A1A1A] text-white border-[#1A1A1A] font-semibold shadow-xs'
+                      : 'bg-[#F2F1ED] text-[#4A4A45] hover:bg-[#E5E3DC] border-[#E5E5E1]'
+                  }`}
+                  title={`Filter by tag #${ut.tag}`}
+                >
+                  #{ut.tag}
+                  <span className={`text-[9px] ${isSelected ? 'text-zinc-300' : 'text-[#767670]'}`}>
+                    ({ut.count})
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Collapsible Search and Filters Bar */}
+      <div className="bg-white border border-[#E5E5E1] p-3 space-y-2.5 shadow-xs">
+        {/* Search Input Row & Filter Toggle */}
+        <div className="flex items-center justify-between gap-3">
+          <div className="relative flex-1">
+            <div className="flex items-center gap-2 bg-[#F8F7F4] border border-[#E5E5E1] px-3 py-1.5 focus-within:border-[#8C7355] focus-within:bg-white transition-all shadow-2xs">
+              <Search className="w-3.5 h-3.5 text-[#8C7355] shrink-0" />
+              <input
+                type="text"
+                placeholder="Search listings by title, brand, platform, tracking, tags, buyer, notes..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full bg-transparent text-xs text-[#1A1A1A] placeholder:text-[#A5A59E] focus:outline-none"
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  className="text-[#767670] hover:text-rose-600 cursor-pointer p-0.5"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setIsFilterPanelOpen(!isFilterPanelOpen)}
+            className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-mono border border-[#E5E5E1] bg-[#F8F7F4] text-[#5A5A55] hover:text-[#1A1A1A] hover:bg-[#EAE8E3] transition-all cursor-pointer shrink-0"
+            title="Toggle Filter Options"
+          >
+            <Filter className="w-3.5 h-3.5 text-[#8C7355]" />
+            <span className="hidden sm:inline">Filters</span>
+            {isFilterPanelOpen ? (
+              <ChevronUp className="w-3 h-3" />
+            ) : (
+              <ChevronDown className="w-3 h-3" />
+            )}
+          </button>
+        </div>
+
+        {/* Collapsible Dropdown Filter Selects & Bulk Action Pill */}
+        {isFilterPanelOpen && (
+          <div className="flex flex-wrap items-center justify-between gap-2.5 pt-2 border-t border-[#E5E5E1]">
+            <div className="flex flex-wrap items-center gap-2">
+              <select
+                value={selectedStatusTab}
+                onChange={(e) => setSelectedStatusTab(e.target.value)}
+                className="bg-white border border-[#E5E5E1] px-2.5 py-1 text-xs font-mono text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none cursor-pointer"
+              >
+                <option value="All">All Statuses</option>
+                <option value="Active">Active / Listed</option>
+                <option value="Sold">Sold / Shipped</option>
+                <option value="Draft">Drafts</option>
+              </select>
+
+              <select
+                value={selectedCategory}
+                onChange={(e) => setSelectedCategory(e.target.value)}
+                className="bg-white border border-[#E5E5E1] px-2.5 py-1 text-xs font-mono text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none cursor-pointer"
+              >
+                <option value="All">All Categories</option>
+                {categories.map((cat) => {
+                  const count = categoryCounts.get(cat.toLowerCase()) || 0;
+                  return (
+                    <option key={cat} value={cat}>
+                      {cat} {count > 0 ? `(${count})` : ''}
+                    </option>
+                  );
+                })}
+              </select>
+
+              <select
+                value={selectedTag}
+                onChange={(e) => setSelectedTag(e.target.value)}
+                className="bg-white border border-[#E5E5E1] px-2.5 py-1 text-xs font-mono text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none cursor-pointer"
+              >
+                <option value="All">All Tags</option>
+                {uniqueTags.map((ut) => (
+                  <option key={ut.tag} value={ut.tag}>
+                    #{ut.tag} ({ut.count})
+                  </option>
+                ))}
+              </select>
+
+              <select
+                value={selectedBrand}
+                onChange={(e) => setSelectedBrand(e.target.value)}
+                className="bg-white border border-[#E5E5E1] px-2.5 py-1 text-xs font-mono text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none cursor-pointer"
+              >
+                <option value="All">All Brands</option>
+                {uniqueBrands.map((ub) => (
+                  <option key={ub.brand} value={ub.brand}>
+                    {ub.brand} ({ub.count})
+                  </option>
+                ))}
+              </select>
+
+              <select
+                value={selectedPlatform}
+                onChange={(e) => setSelectedPlatform(e.target.value)}
+                className="bg-white border border-[#E5E5E1] px-2.5 py-1 text-xs font-mono text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none cursor-pointer"
+              >
+                <option value="All">All Platforms</option>
+                <option value="Vinted">Vinted</option>
+                <option value="Depop">Depop</option>
+                <option value="eBay">eBay</option>
+                <option value="Grailed">Grailed</option>
+                <option value="Vestiaire Collective">Vestiaire Collective</option>
+                <option value="Other">Other</option>
+              </select>
+
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value)}
+                className="bg-white border border-[#E5E5E1] px-2.5 py-1 text-xs font-mono text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none cursor-pointer"
+              >
+                <option value="newest">Recently Listed</option>
+                <option value="price_desc">Highest Price</option>
+                <option value="price_asc">Lowest Price</option>
+              </select>
+            </div>
+
+            {selectedSaleIds.size > 0 && (
+              <div className="flex items-center gap-2 bg-[#1A1A1A] text-white px-3 py-1 text-xs font-mono">
+                <span className="font-medium">{selectedSaleIds.size} selected</span>
+                <span className="text-zinc-600">|</span>
+                <button
+                  onClick={() => setIsBulkEditOpen(true)}
+                  className="text-zinc-200 hover:text-white font-medium cursor-pointer"
+                >
+                  Bulk Edit
+                </button>
+                <span className="text-zinc-600">|</span>
+                <button
+                  onClick={handleBulkMoveToWardrobe}
+                  className="text-zinc-200 hover:text-white font-medium cursor-pointer"
+                  title="Move selected items back to wardrobe"
+                >
+                  To Wardrobe
+                </button>
+                <span className="text-zinc-600">|</span>
+                <button
+                  onClick={handleBulkMoveToShopping}
+                  className="text-zinc-200 hover:text-white font-medium cursor-pointer"
+                  title="Move selected items to wishlist"
+                >
+                  To Wishlist
+                </button>
+                <span className="text-zinc-600">|</span>
+                <button
+                  onClick={handleBulkDelete}
+                  className="text-rose-400 hover:text-rose-300 font-medium cursor-pointer"
+                >
+                  Delete
+                </button>
+                <button
+                  onClick={() => setSelectedSaleIds(new Set())}
+                  className="p-0.5 text-zinc-400 hover:text-white cursor-pointer ml-1"
+                  title="Clear selection"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Active Filters Display */}
+        {hasActiveFilters && (
+          <div className="flex flex-wrap items-center gap-1.5 pt-2 border-t border-[#E5E5E1] text-[11px] font-mono">
+            <span className="text-[#767670] uppercase tracking-wider text-[10px]">Active Filters:</span>
+
+            {selectedCategory !== 'All' && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-[#FAF9F6] border border-[#8C7355] text-[#8C7355] rounded-xs font-medium">
+                Category: {selectedCategory}
+                <button
+                  type="button"
+                  onClick={() => setSelectedCategory('All')}
+                  className="hover:text-rose-600 cursor-pointer"
+                  title="Remove category filter"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            )}
+
+            {selectedTag !== 'All' && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-[#FAF9F6] border border-[#1A1A1A] text-[#1A1A1A] rounded-xs font-medium">
+                Tag: #{selectedTag}
+                <button
+                  type="button"
+                  onClick={() => setSelectedTag('All')}
+                  className="hover:text-rose-600 cursor-pointer"
+                  title="Remove tag filter"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            )}
+
+            {selectedBrand !== 'All' && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-[#FAF9F6] border border-[#E5E5E1] text-[#1A1A1A] rounded-xs">
+                Brand: {selectedBrand}
+                <button
+                  type="button"
+                  onClick={() => setSelectedBrand('All')}
+                  className="hover:text-rose-600 cursor-pointer"
+                  title="Remove brand filter"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            )}
+
+            {selectedPlatform !== 'All' && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-[#FAF9F6] border border-[#E5E5E1] text-[#1A1A1A] rounded-xs">
+                Platform: {selectedPlatform}
+                <button
+                  type="button"
+                  onClick={() => setSelectedPlatform('All')}
+                  className="hover:text-rose-600 cursor-pointer"
+                  title="Remove platform filter"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            )}
+
+            {selectedStatusTab !== 'All' && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-[#FAF9F6] border border-[#E5E5E1] text-[#1A1A1A] rounded-xs">
+                Status: {selectedStatusTab}
+                <button
+                  type="button"
+                  onClick={() => setSelectedStatusTab('All')}
+                  className="hover:text-rose-600 cursor-pointer"
+                  title="Remove status filter"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            )}
+
+            {searchQuery.trim() !== '' && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-[#FAF9F6] border border-[#E5E5E1] text-[#1A1A1A] rounded-xs">
+                Search: "{searchQuery}"
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  className="hover:text-rose-600 cursor-pointer"
+                  title="Clear search query"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            )}
+
             <button
-              onClick={handleBulkMoveToWardrobe}
-              className="text-zinc-200 hover:text-white font-medium cursor-pointer"
-              title="Move selected items back to wardrobe"
+              type="button"
+              onClick={handleResetAllFilters}
+              className="text-[#8C7355] hover:text-[#1A1A1A] hover:underline cursor-pointer ml-1"
             >
-              To Wardrobe
-            </button>
-            <span className="text-zinc-600">|</span>
-            <button
-              onClick={handleBulkMoveToShopping}
-              className="text-zinc-200 hover:text-white font-medium cursor-pointer"
-              title="Move selected items to wishlist"
-            >
-              To Wishlist
-            </button>
-            <span className="text-zinc-600">|</span>
-            <button
-              onClick={handleBulkDelete}
-              className="text-rose-400 hover:text-rose-300 font-medium cursor-pointer"
-            >
-              Delete
-            </button>
-            <button
-              onClick={() => setSelectedSaleIds(new Set())}
-              className="p-0.5 text-zinc-400 hover:text-white cursor-pointer ml-1"
-              title="Clear selection"
-            >
-              <X className="w-3.5 h-3.5" />
+              Clear all
             </button>
           </div>
         )}
@@ -461,106 +907,261 @@ export const SellingView: React.FC = () => {
       {/* Content View: Grid or Database Table */}
       {viewMode === 'grid' ? (
         filteredSales.length === 0 ? (
-          <div className="bg-white border border-zinc-200 rounded-xl p-12 text-center text-zinc-500">
-            <ShoppingBag className="w-10 h-10 mx-auto text-zinc-300 mb-3" />
-            <p className="font-medium text-zinc-700">No sale items match your criteria</p>
-            <p className="text-xs text-zinc-400 mt-1">Try resetting filters or adding a new listing.</p>
+          <div className="bg-white border border-[#E5E5E1] p-12 text-center text-[#767670]">
+            <ShoppingBag className="w-10 h-10 mx-auto text-[#A5A59E] mb-3" />
+            <p className="font-serif font-bold text-[#1A1A1A]">No sale items match your criteria</p>
+            <p className="text-xs text-[#767670] mt-1 font-mono">Try resetting filters or adding a new listing.</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-            {filteredSales.map((item) => (
-              <div
-                key={item.id}
-                className={`bg-white rounded-xl border p-3 flex flex-col group relative transition hover:shadow-md ${
-                  selectedSaleIds.has(item.id)
-                    ? 'border-zinc-900 ring-1 ring-zinc-900'
-                    : 'border-zinc-200'
-                }`}
-              >
-                <button
-                  type="button"
-                  onClick={() => toggleSelectSale(item.id)}
-                  className="absolute top-2 left-2 z-10 p-1 rounded-md bg-white/90 shadow-sm border border-zinc-200 cursor-pointer"
+            {filteredSales.map((item) => {
+              const isSelected = selectedSaleIds.has(item.id);
+              return (
+                <div
+                  key={item.id}
+                  className={`group bg-white border transition-all flex flex-col justify-between ${
+                    isSelected
+                      ? 'border-[#8C7355] ring-2 ring-[#8C7355]/20 shadow-md'
+                      : 'border-[#E5E5E1] shadow-2xs hover:shadow-xs hover:border-[#8C7355]'
+                  }`}
                 >
-                  <CheckSquare
-                    className={`w-3.5 h-3.5 ${
-                      selectedSaleIds.has(item.id) ? 'text-zinc-900' : 'text-zinc-300'
-                    }`}
-                  />
-                </button>
+                  {/* Image Stage */}
+                  <div className="relative aspect-4/5 overflow-hidden bg-[#F8F7F4] border-b border-[#E5E5E1]">
+                    <GarmentImage
+                      src={item.imageUrl}
+                      alt={item.name}
+                      category={item.category}
+                      className="w-full h-full object-cover group-hover:scale-103 transition-transform duration-300"
+                    />
 
-                <div className="w-full aspect-square rounded-lg overflow-hidden bg-zinc-100 mb-3 relative">
-                  <GarmentImage
-                    src={item.imageUrl}
-                    alt={item.name}
-                    category={item.category}
-                    className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
-                  />
-                  <div className="absolute top-2 right-2 px-2 py-0.5 rounded text-[10px] font-semibold bg-white/90 text-zinc-800 shadow-xs">
-                    {item.platform}
+                    {/* Top Left: Tick Box with unified Sales aesthetic */}
+                    <div className="absolute top-2 left-2 z-10 flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => toggleSelectSale(item.id)}
+                        className={`p-1.5 rounded-md backdrop-blur-xs shadow-xs border transition-all cursor-pointer flex items-center justify-center ${
+                          isSelected
+                            ? 'bg-[#8C7355] border-[#8C7355] text-white ring-2 ring-[#8C7355]/30'
+                            : 'bg-white/95 border-zinc-200 text-zinc-300 hover:text-zinc-600 hover:border-zinc-400'
+                        }`}
+                        title={isSelected ? 'Deselect listing' : 'Select listing for bulk actions'}
+                        aria-label={isSelected ? 'Deselect listing' : 'Select listing'}
+                      >
+                        <CheckSquare className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+
+                    {/* Top Right: Platform Badge */}
+                    <div className="absolute top-2 right-2 z-10">
+                      <span className="text-[10px] font-mono px-2 py-0.5 bg-white/95 text-[#1A1A1A] border border-[#D5D5D0] shadow-xs font-semibold">
+                        {item.platform}
+                      </span>
+                    </div>
+
+                    {/* Bottom Right: Status Badge */}
+                    <div className="absolute bottom-2 right-2 z-10">
+                      <span
+                        className={`text-[10px] font-mono px-2 py-0.5 bg-white/95 border shadow-xs font-semibold uppercase tracking-wider ${
+                          item.status === 'Listed'
+                            ? 'text-emerald-700 border-emerald-300'
+                            : item.status === 'Sold' || item.status === 'Completed'
+                            ? 'text-blue-700 border-blue-300'
+                            : item.status === 'Reserved'
+                            ? 'text-amber-700 border-amber-300'
+                            : 'text-[#767670] border-[#D5D5D0]'
+                        }`}
+                      >
+                        {item.status}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Body Details matching Purchases fonts and layout */}
+                  <div className="p-3.5 space-y-2.5 flex-1 flex flex-col justify-between">
+                    <div className="space-y-1.5">
+                      {/* Brand & Price Header */}
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[10px] font-mono uppercase tracking-wider text-[#8C7355] font-bold truncate">
+                          {item.brand || 'Unbranded'}
+                        </span>
+                        <span className="text-xs font-mono font-bold text-[#1A1A1A]">
+                          {formatCurrency(
+                            item.listingPrice ?? item.soldPrice ?? item.originalPricePaid ?? 0
+                          )}
+                        </span>
+                      </div>
+
+                      {/* Garment Title in Serif */}
+                      <h3
+                        className="text-xs font-serif font-bold text-[#1A1A1A] line-clamp-1"
+                        title={item.name}
+                      >
+                        {item.name}
+                      </h3>
+
+                      {/* Garment Sub-details (Category, Condition, Size, Color) */}
+                      <p className="text-[11px] text-[#767670] font-sans line-clamp-1">
+                        {item.category && (
+                          <button
+                            type="button"
+                            onClick={() => setSelectedCategory(item.category)}
+                            className="font-medium text-[#4A4A45] hover:text-[#8C7355] hover:underline cursor-pointer"
+                            title={`Filter by category "${item.category}"`}
+                          >
+                            {item.category}
+                          </button>
+                        )}
+                        {item.condition && ` • ${item.condition}`}
+                        {item.size && ` • Size ${item.size}`}
+                        {item.color && ` • ${item.color}`}
+                      </p>
+
+                      {/* Description / Notes */}
+                      {(item.description || item.notes) && (
+                        <p className="text-[11px] text-[#767670] line-clamp-2 leading-relaxed font-sans">
+                          {item.description || item.notes}
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Unified Tag System with Quick (x) Deletion & Inline (+ tag) Add */}
+                    <div className="space-y-1 pt-1.5 border-t border-[#E5E5E1]">
+                      <div className="flex flex-wrap items-center gap-1">
+                        {(item.tags || []).map((tag) => (
+                          <span
+                            key={tag}
+                            className="inline-flex items-center gap-0.5 text-[10px] font-mono px-1.5 py-0.5 bg-[#F2F1ED] border border-[#E5E5E1] text-[#4A4A45]"
+                          >
+                            <button
+                              type="button"
+                              onClick={() => setSelectedTag(tag)}
+                              className="hover:text-[#8C7355] hover:underline cursor-pointer"
+                              title={`Filter by tag #${tag}`}
+                            >
+                              #{tag}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteTag(item.id, tag)}
+                              className="text-[#A5A59E] hover:text-rose-600 ml-0.5 cursor-pointer"
+                              title={`Delete tag #${tag}`}
+                            >
+                              <X className="w-2.5 h-2.5" />
+                            </button>
+                          </span>
+                        ))}
+
+                        {/* Add Tag Inline Input */}
+                        {newTagInputItemId === item.id ? (
+                          <input
+                            type="text"
+                            placeholder="tag..."
+                            value={newTagText}
+                            onChange={(e) => setNewTagText(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') handleAddTag(item.id);
+                              if (e.key === 'Escape') setNewTagInputItemId(null);
+                            }}
+                            onBlur={() => handleAddTag(item.id)}
+                            autoFocus
+                            className="w-16 text-[10px] font-mono border border-[#8C7355] px-1 py-0.5 bg-white focus:outline-none"
+                          />
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setNewTagInputItemId(item.id);
+                              setNewTagText('');
+                            }}
+                            className="text-[10px] font-mono text-[#8C7355] hover:text-[#1A1A1A] px-1 py-0.5 border border-dashed border-[#D5D5D0] hover:border-[#8C7355] cursor-pointer"
+                            title="Add tag"
+                          >
+                            + tag
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Action Buttons Row */}
+                    <div className="pt-2 border-t border-[#E5E5E1] flex items-center justify-between gap-1.5">
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => setAiGeneratorItem(item)}
+                          className="p-1.5 text-[#767670] hover:text-[#8C7355] border border-[#E5E5E1] hover:bg-[#F2F1ED] transition-colors cursor-pointer"
+                          title="Generate AI Listing Description"
+                        >
+                          <Sparkles className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => moveSaleItemToWardrobe(item.id)}
+                          className="p-1.5 text-[#767670] hover:text-[#8C7355] border border-[#E5E5E1] hover:bg-[#F2F1ED] transition-colors cursor-pointer"
+                          title="Move back to Wardrobe"
+                        >
+                          <FolderUp className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => moveSaleItemToShopping(item.id)}
+                          className="p-1.5 text-[#767670] hover:text-[#8C7355] border border-[#E5E5E1] hover:bg-[#F2F1ED] transition-colors cursor-pointer"
+                          title="Move to Wishlist"
+                        >
+                          <ShoppingBag className="w-3.5 h-3.5" />
+                        </button>
+                        {item.platformListingUrl && (
+                          <a
+                            href={item.platformListingUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="p-1.5 text-[#767670] hover:text-[#1A1A1A] border border-[#E5E5E1] hover:bg-[#F2F1ED] transition-colors cursor-pointer"
+                            title="Open Platform Listing"
+                          >
+                            <ExternalLink className="w-3.5 h-3.5" />
+                          </a>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSaleItemToEdit(item);
+                            setIsSaleFormOpen(true);
+                          }}
+                          className="p-1.5 text-[#767670] hover:text-[#1A1A1A] border border-[#E5E5E1] hover:bg-[#F2F1ED] transition-colors cursor-pointer"
+                          title="Edit Listing Details"
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+
+                      <div className="flex items-center gap-1">
+                        {item.status !== 'Sold' && item.status !== 'Completed' && (
+                          <button
+                            type="button"
+                            onClick={() => setMarkSoldItem(item)}
+                            className="px-2 py-1 bg-emerald-700 hover:bg-emerald-800 text-white text-[10px] font-mono font-medium transition cursor-pointer"
+                            title="Mark this item as sold"
+                          >
+                            Mark Sold
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (safeConfirm(`Delete listing for "${item.name}"?`)) {
+                              deleteSaleItem(item.id);
+                            }
+                          }}
+                          className="p-1.5 text-[#767670] hover:text-rose-600 border border-[#E5E5E1] hover:bg-rose-50 transition-colors cursor-pointer"
+                          title="Delete listing"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 </div>
-
-                <div className="flex-1 flex flex-col">
-                  <span className="text-[11px] font-mono text-zinc-500 uppercase tracking-wider">
-                    {item.brand || 'Unbranded'}
-                  </span>
-                  <h3 className="font-medium text-sm text-zinc-900 truncate mb-1">{item.name}</h3>
-                  <div className="flex items-center justify-between mt-auto pt-2 border-t border-zinc-100">
-                    <span className="text-sm font-semibold text-zinc-900">
-                      {formatCurrency(item.listingPrice ?? item.soldPrice ?? item.originalPricePaid ?? 0)}
-                    </span>
-                    <span
-                      className={`px-2 py-0.5 rounded text-[10px] font-medium uppercase ${
-                        item.status === 'Listed'
-                          ? 'bg-emerald-50 text-emerald-700 border border-emerald-100'
-                          : item.status === 'Sold' || item.status === 'Completed'
-                          ? 'bg-blue-50 text-blue-700 border border-blue-100'
-                          : 'bg-zinc-100 text-zinc-600'
-                      }`}
-                    >
-                      {item.status}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Card Action Buttons */}
-                <div className="flex items-center justify-end gap-1.5 mt-3 pt-2 border-t border-zinc-100">
-                  <button
-                    onClick={() => setAiGeneratorItem(item)}
-                    className="p-1.5 text-zinc-500 hover:text-purple-600 hover:bg-purple-50 rounded-md transition cursor-pointer"
-                    title="Generate AI Listing Description"
-                  >
-                    <Sparkles className="w-3.5 h-3.5" />
-                  </button>
-                  <button
-                    onClick={() => moveSaleItemToWardrobe(item.id)}
-                    className="p-1.5 text-zinc-500 hover:text-amber-700 hover:bg-amber-50 rounded-md transition cursor-pointer"
-                    title="Move back to Wardrobe"
-                  >
-                    <FolderUp className="w-3.5 h-3.5" />
-                  </button>
-                  <button
-                    onClick={() => {
-                      setSaleItemToEdit(item);
-                      setIsSaleFormOpen(true);
-                    }}
-                    className="p-1.5 text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100 rounded-md transition cursor-pointer"
-                    title="Edit Listing"
-                  >
-                    <Edit2 className="w-3.5 h-3.5" />
-                  </button>
-                  {item.status !== 'Sold' && item.status !== 'Completed' && (
-                    <button
-                      onClick={() => setMarkSoldItem(item)}
-                      className="px-2 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-[10px] font-medium transition cursor-pointer"
-                    >
-                      Mark Sold
-                    </button>
-                  )}
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )
       ) : (
@@ -578,6 +1179,12 @@ export const SellingView: React.FC = () => {
           areAllSelected={filteredSales.length > 0 && selectedSaleIds.size === filteredSales.length}
           areSomeSelected={selectedSaleIds.size > 0 && selectedSaleIds.size < filteredSales.length}
           displaySettings={displaySettings}
+          onSelectCategory={(category) => {
+            setSelectedCategory(category);
+          }}
+          onSelectTag={(tag) => {
+            setSelectedTag(tag);
+          }}
           onEditItem={(item) => {
             setSaleItemToEdit(item);
             setIsSaleFormOpen(true);
@@ -635,6 +1242,7 @@ export const SellingView: React.FC = () => {
         <AutoImportModal
           isOpen={isAutoImportOpen}
           onClose={() => setIsAutoImportOpen(false)}
+          initialTab={autoImportTab}
           defaultDestination="selling"
         />
       )}

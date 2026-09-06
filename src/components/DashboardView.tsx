@@ -14,7 +14,6 @@ import {
   Wallet,
   PoundSterling,
   SlidersHorizontal,
-  DollarSign,
 } from 'lucide-react';
 import { useWardrobe } from '../context/WardrobeContext';
 import { WardrobeItem } from '../types';

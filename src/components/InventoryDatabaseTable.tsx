@@ -26,7 +26,7 @@ import {
   MapPin,
   Flame,
   ShoppingBag,
-  DollarSign,
+  PoundSterling,
 } from 'lucide-react';
 
 interface InventoryDatabaseTableProps {

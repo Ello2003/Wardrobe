@@ -25,7 +25,7 @@ import {
 import {
   TrendingUp,
   ShoppingBag,
-  DollarSign,
+  PoundSterling,
   Tag,
   PieChart as PieChartIcon,
   BarChart3,
@@ -810,7 +810,7 @@ export const AnalyticsChartsView: React.FC<AnalyticsChartsViewProps> = ({ onOpen
                   Track monthly cash flow recovered from rotating wardrobe inventory
                 </p>
               </div>
-              <DollarSign className="w-4 h-4 text-[#8C7355]" />
+              <PoundSterling className="w-4 h-4 text-[#8C7355]" />
             </div>
 
             {salesTimelineData.length === 0 ? (

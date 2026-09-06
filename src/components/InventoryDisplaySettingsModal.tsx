@@ -10,7 +10,7 @@ import {
   Layers,
   Shirt,
   Tag,
-  DollarSign,
+  PoundSterling,
   Calendar,
   Sparkles,
   Columns3,

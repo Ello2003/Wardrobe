@@ -3,7 +3,7 @@ import {
   X,
   Settings as SettingsIcon,
   Sliders,
-  DollarSign,
+  PoundSterling,
   Edit3,
   Layers,
   Tag,
@@ -23,9 +23,18 @@ import {
   ShoppingBag,
   Maximize2,
   MoveHorizontal,
+  Globe,
+  Server,
+  Lock,
+  RefreshCw,
+  KeyRound,
+  ExternalLink,
+  Copy,
 } from 'lucide-react';
 import { useWardrobe } from '../context/WardrobeContext';
 import { AppSettings, DEFAULT_APP_SETTINGS } from '../types';
+import { safeConfirm } from '../utils/safeConfirm';
+import { testWorkerConnection } from '../services/vintedWorkerService';
 import {
   InventoryDisplaySettings,
   DEFAULT_INVENTORY_DISPLAY_SETTINGS,
@@ -77,6 +86,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     | 'inline'
     | 'categories'
     | 'tags'
+    | 'vinted'
     | 'data'
   >('general');
 
@@ -121,9 +131,39 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
 
   const [resetMsg, setResetMsg] = useState<string | null>(null);
 
+  // Vinted Cloudflare Worker Integration State
+  const [vintedEndpoint, setVintedEndpoint] = useState(settings.vintedWorkerAuth?.workerEndpoint || '');
+  const [vintedDomain, setVintedDomain] = useState(settings.vintedWorkerAuth?.domain || 'co.uk');
+  const [vintedAccessToken, setVintedAccessToken] = useState(settings.vintedWorkerAuth?.accessToken || '');
+  const [vintedCsrfToken, setVintedCsrfToken] = useState(settings.vintedWorkerAuth?.csrfToken || '');
+  const [vintedCookie, setVintedCookie] = useState(settings.vintedWorkerAuth?.cookie || '');
+  const [vintedRefreshToken, setVintedRefreshToken] = useState(settings.vintedWorkerAuth?.refreshToken || '');
+  const [vintedPurchasedRoute, setVintedPurchasedRoute] = useState<'wardrobe' | 'shopping'>(
+    settings.vintedWorkerAuth?.defaultImportDestination === 'shopping' ? 'shopping' : 'wardrobe'
+  );
+  const [vintedAutoRoute, setVintedAutoRoute] = useState(settings.vintedWorkerAuth?.autoRouteOrders ?? true);
+  const [vintedShowTokens, setVintedShowTokens] = useState(false);
+  const [vintedTesting, setVintedTesting] = useState(false);
+  const [vintedTestResult, setVintedTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [vintedSaveSuccess, setVintedSaveSuccess] = useState(false);
+
   // Sync settings when opened
   useEffect(() => {
     if (isOpen) {
+      if (settings.vintedWorkerAuth) {
+        setVintedEndpoint(settings.vintedWorkerAuth.workerEndpoint || '');
+        setVintedDomain(settings.vintedWorkerAuth.domain || 'co.uk');
+        setVintedAccessToken(settings.vintedWorkerAuth.accessToken || '');
+        setVintedCsrfToken(settings.vintedWorkerAuth.csrfToken || '');
+        setVintedCookie(settings.vintedWorkerAuth.cookie || '');
+        setVintedRefreshToken(settings.vintedWorkerAuth.refreshToken || '');
+        setVintedPurchasedRoute(
+          settings.vintedWorkerAuth.defaultImportDestination === 'shopping' ? 'shopping' : 'wardrobe'
+        );
+        setVintedAutoRoute(settings.vintedWorkerAuth.autoRouteOrders ?? true);
+      }
+      setVintedTestResult(null);
+      setVintedSaveSuccess(false);
       try {
         const savedInv = localStorage.getItem('inventory_display_settings');
         if (savedInv) setInvSettings({ ...DEFAULT_INVENTORY_DISPLAY_SETTINGS, ...JSON.parse(savedInv) });
@@ -367,6 +407,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
             }`}
           >
             Tags & Brands
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('vinted')}
+            className={`px-3 py-2 text-xs font-mono font-medium border-b-2 cursor-pointer transition-colors whitespace-nowrap flex items-center gap-1.5 ${
+              activeTab === 'vinted'
+                ? 'border-[#007782] text-[#007782] font-bold'
+                : 'border-transparent text-[#767670] hover:text-[#007782]'
+            }`}
+          >
+            <span className="w-2 h-2 rounded-full bg-[#007782]" />
+            <span>Vinted Sync &amp; Worker</span>
           </button>
           <button
             type="button"
@@ -1367,9 +1419,407 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
             </div>
           )}
 
+          {/* TAB: Vinted Cloudflare Worker Integration */}
+          {activeTab === 'vinted' && (
+            <div className="space-y-6">
+              {/* Header Box */}
+              <div className="p-4 bg-[#F0F8F8] border border-[#BCE4E6] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-start gap-3">
+                  <div className="w-8 h-8 bg-[#007782] text-white flex items-center justify-center shrink-0">
+                    <Globe className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-xs font-serif font-bold text-[#004A52]">
+                      Cloudflare Worker: Vinted Account Sync &amp; Active Listings
+                    </h3>
+                    <p className="text-[11px] text-[#00606A] font-sans mt-0.5 max-w-2xl leading-relaxed">
+                      Connect your Cloudflare Worker URL and session tokens to enable automatic syncing of your complete Vinted order history (purchases and sales) as well as live public listing extraction into your closet or resale catalog.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 self-start sm:self-center shrink-0">
+                  <span
+                    className={`px-2 py-1 text-[10px] font-mono font-bold uppercase ${
+                      vintedEndpoint ? 'bg-[#E1F2F2] text-[#007782] border border-[#BCE4E6]' : 'bg-[#EFEFEF] text-[#777]'
+                    }`}
+                  >
+                    {vintedEndpoint ? 'Configured' : 'Not Setup'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Status Banner when test run */}
+              {vintedTestResult && (
+                <div
+                  className={`p-3 text-xs font-mono flex items-start gap-2 border ${
+                    vintedTestResult.success
+                      ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
+                      : 'bg-amber-50 text-amber-800 border-amber-300'
+                  }`}
+                >
+                  {vintedTestResult.success ? (
+                    <Check className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                  ) : (
+                    <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                  )}
+                  <div>
+                    <span className="font-bold">
+                      {vintedTestResult.success ? 'Worker Connection Verified: ' : 'Connection Warning: '}
+                    </span>
+                    {vintedTestResult.message}
+                  </div>
+                </div>
+              )}
+
+              {/* Save Success Banner */}
+              {vintedSaveSuccess && (
+                <div className="p-3 bg-emerald-50 text-emerald-800 border border-emerald-300 text-xs font-mono flex items-center gap-2">
+                  <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>Vinted Cloudflare Worker settings saved successfully! All credentials updated.</span>
+                </div>
+              )}
+
+              {/* Worker Setup Boxes */}
+              <div className="p-4 bg-white border border-[#E5E5E1] space-y-4">
+                <div className="flex items-center justify-between border-b border-[#F0EFEB] pb-2.5">
+                  <div className="flex items-center gap-2">
+                    <Server className="w-4 h-4 text-[#007782]" />
+                    <h4 className="text-xs font-mono font-bold text-[#1A1A1A] uppercase tracking-wider">
+                      Worker Endpoint &amp; Region
+                    </h4>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (!vintedEndpoint.trim()) {
+                        setVintedTestResult({ success: false, message: 'Enter your Cloudflare Worker URL first.' });
+                        return;
+                      }
+                      setVintedTesting(true);
+                      setVintedTestResult(null);
+                      try {
+                        const res = await testWorkerConnection(vintedEndpoint.trim());
+                        setVintedTestResult(res);
+                      } catch (e: any) {
+                        setVintedTestResult({ success: false, message: e?.message || 'Worker test failed' });
+                      } finally {
+                        setVintedTesting(false);
+                      }
+                    }}
+                    disabled={vintedTesting || !vintedEndpoint.trim()}
+                    className="px-3 py-1.5 bg-[#F4F4F0] hover:bg-[#EAEAE6] text-[#1A1A1A] border border-[#CCCCCC] text-[11px] font-mono font-semibold flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+                  >
+                    {vintedTesting ? (
+                      <>
+                        <RefreshCw className="w-3 h-3 animate-spin" />
+                        Testing...
+                      </>
+                    ) : (
+                      <>
+                        <RefreshCw className="w-3 h-3" />
+                        Test Connection
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div className="sm:col-span-2">
+                    <label className="block text-[11px] font-mono font-semibold text-[#1A1A1A] uppercase tracking-wider mb-1">
+                      Cloudflare Worker URL *
+                    </label>
+                    <input
+                      type="url"
+                      placeholder="https://vinted-api.your-account.workers.dev"
+                      value={vintedEndpoint}
+                      onChange={(e) => setVintedEndpoint(e.target.value)}
+                      className="w-full px-3 py-2 text-xs font-mono bg-[#FAF9F5] border border-[#CCCCCC] focus:border-[#007782] focus:bg-white focus:outline-hidden"
+                    />
+                    <p className="text-[10px] text-[#767670] mt-1 font-mono">
+                      The base HTTPS URL of your deployed Cloudflare Worker handling Vinted API proxy calls.
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-mono font-semibold text-[#1A1A1A] uppercase tracking-wider mb-1">
+                      Vinted Domain
+                    </label>
+                    <select
+                      value={vintedDomain}
+                      onChange={(e) => setVintedDomain(e.target.value)}
+                      className="w-full px-3 py-2 text-xs font-mono bg-white border border-[#CCCCCC] focus:border-[#007782] focus:outline-hidden"
+                    >
+                      <option value="co.uk">co.uk (United Kingdom)</option>
+                      <option value="com">com (International / US)</option>
+                      <option value="fr">fr (France)</option>
+                      <option value="de">de (Germany)</option>
+                      <option value="it">it (Italy)</option>
+                      <option value="es">es (Spain)</option>
+                      <option value="pl">pl (Poland)</option>
+                      <option value="nl">nl (Netherlands)</option>
+                      <option value="be">be (Belgium)</option>
+                    </select>
+                    <p className="text-[10px] text-[#767670] mt-1 font-mono">
+                      Domain suffix used for URLs and orders.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Authentication Credentials */}
+              <div className="p-4 bg-white border border-[#E5E5E1] space-y-4">
+                <div className="flex items-center justify-between border-b border-[#F0EFEB] pb-2.5">
+                  <div className="flex items-center gap-2">
+                    <KeyRound className="w-4 h-4 text-[#007782]" />
+                    <h4 className="text-xs font-mono font-bold text-[#1A1A1A] uppercase tracking-wider">
+                      Vinted Account Session Credentials
+                    </h4>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setVintedShowTokens(!vintedShowTokens)}
+                    className="text-[11px] font-mono text-[#007782] hover:underline flex items-center gap-1 cursor-pointer"
+                  >
+                    {vintedShowTokens ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                    <span>{vintedShowTokens ? 'Hide Tokens' : 'Reveal Tokens'}</span>
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-[11px] font-mono font-semibold text-[#1A1A1A] uppercase tracking-wider mb-1">
+                      Access Token (access_token)
+                    </label>
+                    <input
+                      type={vintedShowTokens ? 'text' : 'password'}
+                      placeholder="Bearer token or oauth token string"
+                      value={vintedAccessToken}
+                      onChange={(e) => setVintedAccessToken(e.target.value)}
+                      className="w-full px-3 py-2 text-xs font-mono bg-[#FAF9F5] border border-[#CCCCCC] focus:border-[#007782] focus:bg-white focus:outline-hidden"
+                    />
+                    <p className="text-[10px] text-[#767670] mt-1 font-mono">
+                      Used in authorization headers for orders endpoints.
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-mono font-semibold text-[#1A1A1A] uppercase tracking-wider mb-1">
+                      CSRF Token (xcsrf_token)
+                    </label>
+                    <input
+                      type={vintedShowTokens ? 'text' : 'password'}
+                      placeholder="X-CSRF-Token or CSRF string"
+                      value={vintedCsrfToken}
+                      onChange={(e) => setVintedCsrfToken(e.target.value)}
+                      className="w-full px-3 py-2 text-xs font-mono bg-[#FAF9F5] border border-[#CCCCCC] focus:border-[#007782] focus:bg-white focus:outline-hidden"
+                    />
+                    <p className="text-[10px] text-[#767670] mt-1 font-mono">
+                      Used in x-csrf-token verification on Vinted API calls.
+                    </p>
+                  </div>
+
+                  <div className="sm:col-span-2">
+                    <label className="block text-[11px] font-mono font-semibold text-[#1A1A1A] uppercase tracking-wider mb-1">
+                      Session Cookie (cookie)
+                    </label>
+                    <input
+                      type={vintedShowTokens ? 'text' : 'password'}
+                      placeholder="v_sess=...; _vinted_session=...; anon_id=..."
+                      value={vintedCookie}
+                      onChange={(e) => setVintedCookie(e.target.value)}
+                      className="w-full px-3 py-2 text-xs font-mono bg-[#FAF9F5] border border-[#CCCCCC] focus:border-[#007782] focus:bg-white focus:outline-hidden"
+                    />
+                    <p className="text-[10px] text-[#767670] mt-1 font-mono">
+                      Browser session cookie passed to your Cloudflare Worker.
+                    </p>
+                  </div>
+
+                  <div className="sm:col-span-2">
+                    <label className="block text-[11px] font-mono font-semibold text-[#1A1A1A] uppercase tracking-wider mb-1">
+                      Refresh Token (Optional)
+                    </label>
+                    <input
+                      type={vintedShowTokens ? 'text' : 'password'}
+                      placeholder="Optional refresh token string"
+                      value={vintedRefreshToken}
+                      onChange={(e) => setVintedRefreshToken(e.target.value)}
+                      className="w-full px-3 py-2 text-xs font-mono bg-[#FAF9F5] border border-[#CCCCCC] focus:border-[#007782] focus:bg-white focus:outline-hidden"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Destination & Routing Preferences */}
+              <div className="p-4 bg-white border border-[#E5E5E1] space-y-4">
+                <div className="flex items-center gap-2 border-b border-[#F0EFEB] pb-2.5">
+                  <Sliders className="w-4 h-4 text-[#007782]" />
+                  <h4 className="text-xs font-mono font-bold text-[#1A1A1A] uppercase tracking-wider">
+                    Sync Routing &amp; Destination Defaults
+                  </h4>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-[11px] font-mono font-semibold text-[#1A1A1A] uppercase tracking-wider mb-1">
+                      Route Purchased Orders To:
+                    </label>
+                    <div className="space-y-1.5 mt-2">
+                      <label className="flex items-center gap-2 cursor-pointer text-xs font-mono">
+                        <input
+                          type="radio"
+                          name="purchasedRoute"
+                          checked={vintedPurchasedRoute === 'wardrobe'}
+                          onChange={() => setVintedPurchasedRoute('wardrobe')}
+                          className="text-[#007782] focus:ring-0"
+                        />
+                        <span>Wardrobe Closet (Active Garment Inventory)</span>
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer text-xs font-mono">
+                        <input
+                          type="radio"
+                          name="purchasedRoute"
+                          checked={vintedPurchasedRoute === 'shopping'}
+                          onChange={() => setVintedPurchasedRoute('shopping')}
+                          className="text-[#007782] focus:ring-0"
+                        />
+                        <span>Shopping List / Wishlist (Marked as Purchased)</span>
+                      </label>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-mono font-semibold text-[#1A1A1A] uppercase tracking-wider mb-1">
+                      Route Sold Listings To:
+                    </label>
+                    <p className="text-xs font-mono text-[#767670] mt-2">
+                      Resale Manager Archive (Marked as &apos;Sold&apos; with completed transaction price)
+                    </p>
+                  </div>
+
+                  <div className="sm:col-span-2 pt-2 border-t border-[#F0EFEB]">
+                    <label className="flex items-center gap-2 cursor-pointer text-xs font-mono">
+                      <input
+                        type="checkbox"
+                        checked={vintedAutoRoute}
+                        onChange={(e) => setVintedAutoRoute(e.target.checked)}
+                        className="rounded border-[#CCCCCC] text-[#007782] focus:ring-0"
+                      />
+                      <span>Auto-classify duplicate items and skip re-importing already synced orders</span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+
+              {/* Action Buttons Bar */}
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2">
+                <p className="text-[11px] font-mono text-[#767670]">
+                  Credentials are encrypted in your local browser sandbox and synced to the worker proxy.
+                </p>
+
+                <div className="flex items-center gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      updateSettings({
+                        vintedWorkerAuth: {
+                          workerEndpoint: vintedEndpoint.trim(),
+                          domain: vintedDomain.trim() || 'co.uk',
+                          accessToken: vintedAccessToken.trim(),
+                          csrfToken: vintedCsrfToken.trim(),
+                          cookie: vintedCookie.trim(),
+                          refreshToken: vintedRefreshToken.trim(),
+                          autoRouteOrders: vintedAutoRoute,
+                          defaultImportDestination: vintedPurchasedRoute,
+                        },
+                      });
+                      setVintedSaveSuccess(true);
+                      setTimeout(() => setVintedSaveSuccess(false), 3500);
+                    }}
+                    className="px-5 py-2.5 bg-[#007782] hover:bg-[#005E67] text-white text-xs font-mono font-bold uppercase tracking-wider transition-colors cursor-pointer shadow-xs flex items-center gap-1.5"
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                    Save Vinted Credentials
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* TAB 5: Backup & Reset */}
           {activeTab === 'data' && (
             <div className="space-y-6">
+              {/* Automated Periodic Rollbacks */}
+              <div className="p-4 bg-[#FAF9F5] border border-[#E5E5E1] space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h4 className="text-xs font-mono font-bold text-[#1A1A1A] uppercase tracking-wider">
+                      Automated Periodic Rollbacks &amp; Checkpoints
+                    </h4>
+                    <p className="text-xs text-[#767670] mt-0.5">
+                      Automatically capture silent background snapshots of your closet so you can rewind at any point.
+                    </p>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={settings.autoSnapshotEnabled !== false}
+                      onChange={(e) => updateSettings({ autoSnapshotEnabled: e.target.checked })}
+                      className="sr-only peer"
+                    />
+                    <div className="w-9 h-5 bg-[#CCCCCC] peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#1A1A1A]"></div>
+                  </label>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-[#E5E5E1]">
+                  <div>
+                    <label className="block text-xs font-mono text-[#767670] mb-1">
+                      Auto-Save Frequency (Minutes)
+                    </label>
+                    <select
+                      value={settings.autoSnapshotIntervalMinutes || 10}
+                      onChange={(e) =>
+                        updateSettings({ autoSnapshotIntervalMinutes: Number(e.target.value) })
+                      }
+                      disabled={settings.autoSnapshotEnabled === false}
+                      className="w-full px-3 py-2 text-xs font-mono bg-white border border-[#CCCCCC] disabled:opacity-50"
+                    >
+                      <option value={2}>Every 2 minutes (High frequency)</option>
+                      <option value={5}>Every 5 minutes</option>
+                      <option value={10}>Every 10 minutes (Recommended)</option>
+                      <option value={15}>Every 15 minutes</option>
+                      <option value={30}>Every 30 minutes</option>
+                      <option value={60}>Every 60 minutes</option>
+                    </select>
+                    <p className="text-[10px] text-[#767670] mt-1">
+                      Snapshots only trigger if changes have occurred since the last checkpoint.
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-mono text-[#767670] mb-1">
+                      Max Checkpoints to Keep
+                    </label>
+                    <select
+                      value={settings.maxAutoSnapshots || 20}
+                      onChange={(e) =>
+                        updateSettings({ maxAutoSnapshots: Number(e.target.value) })
+                      }
+                      disabled={settings.autoSnapshotEnabled === false}
+                      className="w-full px-3 py-2 text-xs font-mono bg-white border border-[#CCCCCC] disabled:opacity-50"
+                    >
+                      <option value={10}>Keep latest 10 auto-checkpoints</option>
+                      <option value={20}>Keep latest 20 auto-checkpoints (Recommended)</option>
+                      <option value={30}>Keep latest 30 auto-checkpoints</option>
+                      <option value={50}>Keep latest 50 auto-checkpoints</option>
+                    </select>
+                    <p className="text-[10px] text-[#767670] mt-1">
+                      Older checkpoints automatically rotate out to save browser storage.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
               {/* Export JSON */}
               <div className="p-4 bg-[#FAF9F5] border border-[#E5E5E1] flex items-center justify-between">
                 <div>
@@ -1434,7 +1884,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                     type="button"
                     onClick={() => {
                       if (
-                        window.confirm(
+                        safeConfirm(
                           'Are you sure you want to reset all data back to the default Graeme capsule wardrobe?'
                         )
                       ) {
@@ -1452,7 +1902,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                     type="button"
                     onClick={() => {
                       if (
-                        window.confirm(
+                        safeConfirm(
                           'WARNING: This will erase all wardrobe items, shopping lists, and sales. Are you sure?'
                         )
                       ) {

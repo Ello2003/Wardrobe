@@ -397,11 +397,39 @@ export const getDefaultPresetConfig = (preset: MatchPreset): MatchParametersConf
   }
 };
 
+const KNOWN_COLORS = [
+  'black', 'white', 'navy', 'blue', 'green', 'grey', 'gray',
+  'brown', 'red', 'olive', 'khaki', 'beige', 'cream', 'charcoal',
+  'yellow', 'orange', 'pink', 'purple', 'burgundy', 'tan', 'camel',
+  'maroon', 'indigo', 'sage', 'ecru', 'stone', 'teal'
+];
+
+const detectGarmentColors = (item: { color?: string; name?: string }): Set<string> => {
+  const colors = new Set<string>();
+  if (item.color) {
+    const raw = item.color.toLowerCase().trim();
+    if (raw && raw !== 'neutral' && raw !== 'unspecified' && raw !== 'multi') {
+      KNOWN_COLORS.forEach((c) => {
+        if (raw.includes(c)) colors.add(c);
+      });
+      if (colors.size === 0 && raw.length > 2) colors.add(raw);
+    }
+  }
+  if (item.name) {
+    const nameLower = item.name.toLowerCase();
+    KNOWN_COLORS.forEach((c) => {
+      const regex = new RegExp(`\\b${c}\\b`, 'i');
+      if (regex.test(nameLower)) colors.add(c);
+    });
+  }
+  return colors;
+};
+
 /**
  * Humidor-grade Garment Duplicate Evaluator
- * Checks whether two garment records represent instances of the exact same clothing item
- * Accounts for brand aliases, punctuation, lowercase normalisation, title token overlaps,
- * and generic fallback naming (e.g. "raldo" vs "raldo shirt" vs "Raldo").
+ * Checks whether two garment records represent instances of the exact same clothing item.
+ * Strictly respects color distinctions (e.g. black vs white are separate garments),
+ * distinct garment categories, and distinct product titles from the same brand.
  */
 export const isGarmentDuplicate = (
   a: { id?: string; brand?: string; name?: string; color?: string; category?: string; imageUrl?: string },
@@ -410,7 +438,30 @@ export const isGarmentDuplicate = (
   if (!a || !b) return false;
   if (a.id && b.id && a.id === b.id) return true;
 
-  // Exact image URL match (non-empty)
+  // 1. Color Distinction Check: If items have different colors (in color field or title), they are NOT duplicates!
+  const colorsA = detectGarmentColors(a);
+  const colorsB = detectGarmentColors(b);
+  if (colorsA.size > 0 && colorsB.size > 0) {
+    let hasSharedColor = false;
+    for (const ca of colorsA) {
+      if (colorsB.has(ca)) {
+        hasSharedColor = true;
+        break;
+      }
+    }
+    if (!hasSharedColor) {
+      return false; // Distinct colors (e.g. black vs white) are completely different garments
+    }
+  }
+
+  // 2. Category Distinction Check: If items have different explicit categories, they are NOT duplicates!
+  const catA = (a.category || '').trim().toLowerCase();
+  const catB = (b.category || '').trim().toLowerCase();
+  if (catA && catB && catA !== 'other' && catB !== 'other' && catA !== catB) {
+    return false;
+  }
+
+  // 3. Exact image URL match (non-empty & long enough to be an actual asset)
   if (a.imageUrl && b.imageUrl && a.imageUrl === b.imageUrl && a.imageUrl.length > 20) {
     return true;
   }
@@ -432,43 +483,43 @@ export const isGarmentDuplicate = (
   const fullA = `${cleanBrandA}${cleanNameA}`;
   const fullB = `${cleanBrandB}${cleanNameB}`;
 
-  // If full texts match and non-empty (e.g. "raldo" and "raldo", "raldoshirt" and "raldoshirt")
+  // If full brand+name texts match exactly and non-empty
   if (fullA && fullB && fullA === fullB) {
     return true;
   }
 
   // Exact brand match
   if (cleanBrandA && cleanBrandB && cleanBrandA === cleanBrandB) {
-    if (cleanNameA === cleanNameB) return true;
+    // Both names match exactly
+    if (cleanNameA === cleanNameB && cleanNameA.length > 0) return true;
 
-    // One name is empty or just generic ("garment", "item", "clothing", brand name itself)
-    const isGenericA = !cleanNameA || cleanNameA === cleanBrandA || cleanNameA === 'item' || cleanNameA === 'clothing';
-    const isGenericB = !cleanNameB || cleanNameB === cleanBrandB || cleanNameB === 'item' || cleanNameB === 'clothing';
-    if (isGenericA || isGenericB) return true;
+    // One name is generic placeholder ("garment", "item", "clothing", or identical to brand name itself)
+    const isGenericA = !cleanNameA || cleanNameA === cleanBrandA || cleanNameA === 'item' || cleanNameA === 'clothing' || cleanNameA === 'garment';
+    const isGenericB = !cleanNameB || cleanNameB === cleanBrandB || cleanNameB === 'item' || cleanNameB === 'clothing' || cleanNameB === 'garment';
+    if (isGenericA && isGenericB) return true;
 
-    // One name contains the other (e.g. "raldo oxford shirt" and "oxford shirt")
-    if (cleanNameA.length >= 3 && cleanNameB.length >= 3) {
-      if (cleanNameA.includes(cleanNameB) || cleanNameB.includes(cleanNameA)) return true;
-    }
-
-    // Clean title match without noise words
-    const titleA = cleanItemTitle(rawNameA, rawBrandA);
-    const titleB = cleanItemTitle(rawNameB, rawBrandB);
+    // Clean title match without brand prefix & noise words
+    const titleA = cleanItemTitle(rawNameA, rawBrandA).toLowerCase().replace(/[^a-z0-9]/g, '');
+    const titleB = cleanItemTitle(rawNameB, rawBrandB).toLowerCase().replace(/[^a-z0-9]/g, '');
     if (titleA && titleB && titleA === titleB) return true;
-    if (titleA.length >= 3 && titleB.length >= 3 && (titleA.includes(titleB) || titleB.includes(titleA))) return true;
+
+    // DO NOT merge if names are different distinct garments (e.g. "Oxford Shirt" vs "Flannel Shirt" vs "Harrington Jacket")
+    return false;
   }
 
-  // Brand embedded in other name (e.g. brand is "raldo", other has brand "" and name "raldo shirt")
-  if (cleanBrandA && cleanBrandA.length >= 3 && fullB.includes(cleanBrandA)) {
-    if (cleanNameA.length < 3 || fullB.includes(cleanBrandA)) return true;
-  }
-  if (cleanBrandB && cleanBrandB.length >= 3 && fullA.includes(cleanBrandB)) {
-    if (cleanNameB.length < 3 || fullA.includes(cleanBrandB)) return true;
-  }
+  // Brand embedded in other name where brand is empty or "unknown"
+  const isUnknownBrandA = !cleanBrandA || cleanBrandA === 'unknown' || cleanBrandA === 'brand' || cleanBrandA === 'designerbrand';
+  const isUnknownBrandB = !cleanBrandB || cleanBrandB === 'unknown' || cleanBrandB === 'brand' || cleanBrandB === 'designerbrand';
 
-  // Handle case where one name or brand is identical (e.g. both named "raldo" even if brand is empty)
-  if (cleanNameA && cleanNameB && cleanNameA === cleanNameB && cleanNameA.length >= 3) {
-    return true;
+  if (isUnknownBrandA && cleanBrandB && cleanBrandB.length >= 4 && fullA.includes(cleanBrandB)) {
+    const titleA = cleanItemTitle(rawNameA, rawBrandB).toLowerCase().replace(/[^a-z0-9]/g, '');
+    const titleB = cleanItemTitle(rawNameB, rawBrandB).toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (titleA && titleB && titleA === titleB) return true;
+  }
+  if (isUnknownBrandB && cleanBrandA && cleanBrandA.length >= 4 && fullB.includes(cleanBrandA)) {
+    const titleA = cleanItemTitle(rawNameA, rawBrandA).toLowerCase().replace(/[^a-z0-9]/g, '');
+    const titleB = cleanItemTitle(rawNameB, rawBrandA).toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (titleA && titleB && titleA === titleB) return true;
   }
 
   return false;

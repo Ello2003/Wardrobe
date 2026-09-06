@@ -9,6 +9,7 @@ import { SellingView } from './components/SellingView';
 import { AnalyticsChartsView } from './components/AnalyticsChartsView';
 import { TrendResearchView } from './components/TrendResearchView';
 import { VersionHistoryView } from './components/VersionHistoryView';
+import { ToolsView } from './components/ToolsView';
 import { ItemDetailModal } from './components/ItemDetailModal';
 import { ItemFormModal } from './components/ItemFormModal';
 import { OutfitFormModal } from './components/OutfitFormModal';
@@ -36,7 +37,7 @@ const MainAppContent: React.FC = () => {
 
   // Ensure browser title is explicitly set
   useEffect(() => {
-    document.title = 'Inventory | Purchases | Sales';
+    document.title = 'Wardrobe & Style Studio';
   }, []);
 
   // Global Ctrl+Z / Cmd+Z Undo shortcut
@@ -177,9 +178,10 @@ const MainAppContent: React.FC = () => {
           <TrendResearchView onOpenAIStylist={() => setIsAIStylistOpen(true)} />
         )}
 
-        {activeTab === 'history' && (
-          <VersionHistoryView
+        {(activeTab === 'tools' || activeTab === 'history') && (
+          <ToolsView
             onOpenCreateSnapshot={() => setIsSnapshotModalOpen(true)}
+            defaultSubTab={activeTab === 'history' ? 'audit' : 'duplicates'}
           />
         )}
       </main>

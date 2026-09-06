@@ -18,7 +18,7 @@ import {
   FolderUp,
   Sliders,
   SlidersHorizontal,
-  DollarSign,
+  PoundSterling,
   ShoppingBag,
   Layers,
   Search,
@@ -27,6 +27,7 @@ import {
 } from 'lucide-react';
 import { useWardrobe } from '../context/WardrobeContext';
 import { WardrobeItem, Category, Season, Condition } from '../types';
+import { safeConfirm } from '../utils/safeConfirm';
 import { AutoImportModal } from './AutoImportModal';
 import { GarmentImage } from './GarmentImage';
 import { BulkEditModal } from './BulkEditModal';
@@ -472,16 +473,16 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
               </button>
             </div>
 
-            {/* Display Settings Toggle */}
+            {/* Display Settings Toggle (Icon Only) */}
             <button
               type="button"
               onClick={() => setIsDisplaySettingsOpen(true)}
               id="inventory-display-settings-btn"
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono border border-[#D5D5D0] bg-white text-[#4A4A45] hover:border-[#8C7355] hover:text-[#1A1A1A] transition-all cursor-pointer shadow-xs"
+              className="p-1.5 border border-[#D5D5D0] bg-white text-[#4A4A45] hover:border-[#8C7355] hover:text-[#1A1A1A] transition-all cursor-pointer shadow-xs"
               title="Configure inventory display sections and density"
+              aria-label="Display Settings"
             >
               <SlidersHorizontal className="w-3.5 h-3.5 text-[#8C7355]" />
-              <span>Display Settings</span>
             </button>
 
             {/* Multi-Select / Deselect Controls */}
@@ -521,30 +522,6 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
                 </button>
               )}
             </div>
-
-            {/* Merge Duplicates Quick Action */}
-            <button
-              type="button"
-              onClick={() => setIsDuplicateMergeOpen(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono border border-[#8C7355]/40 bg-white text-[#8C7355] hover:bg-[#8C7355] hover:text-white transition-all cursor-pointer shadow-xs"
-              title="Detect and merge duplicate items across your inventory and wishlist"
-            >
-              <Layers className="w-3.5 h-3.5" />
-              <span>Merge Duplicates</span>
-            </button>
-
-            {/* Auto-Import from Link Button (Includes URL, Vinted HTML/PDF, Photo, Text) */}
-            <button
-              onClick={() => {
-                setAutoImportTab('url');
-                setIsAutoImportOpen(true);
-              }}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono font-medium border border-[#8C7355] text-[#8C7355] hover:bg-[#8C7355] hover:text-white transition-all cursor-pointer shadow-xs"
-              title="Automatically extract garment details from product link or Vinted data"
-            >
-              <Link2 className="w-3.5 h-3.5" />
-              Auto-Import Link
-            </button>
 
             {/* Add New Item Button */}
             <button
@@ -643,7 +620,7 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
 
               <button
                 onClick={() => {
-                  if (window.confirm('Reset categories to standard wardrobe defaults?')) {
+                  if (safeConfirm('Reset categories to standard wardrobe defaults?')) {
                     resetCategories();
                   }
                 }}
@@ -1067,11 +1044,11 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
               Reset Filters
             </button>
             <button
-              onClick={() => setIsAutoImportOpen(true)}
+              onClick={onOpenAddItem}
               className="px-3.5 py-1.5 text-xs bg-[#8C7355] hover:bg-[#735D43] text-white cursor-pointer flex items-center gap-1.5"
             >
-              <Link2 className="w-3.5 h-3.5" />
-              Auto-Import from Link
+              <Plus className="w-3.5 h-3.5" />
+              Add Garment
             </button>
           </div>
         </div>
@@ -1124,19 +1101,15 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
                       <button
                         type="button"
                         onClick={(e) => handleToggleSelectItem(item.id, e)}
-                        className={`w-6 h-6 border shadow-xs flex items-center justify-center cursor-pointer transition-all ${
+                        className={`p-1.5 rounded-md backdrop-blur-xs shadow-xs border transition-all cursor-pointer flex items-center justify-center ${
                           isSelected
                             ? 'bg-[#8C7355] border-[#8C7355] text-white ring-2 ring-[#8C7355]/30'
-                            : 'bg-white/95 border-[#B5B5AF] text-transparent hover:border-[#8C7355] hover:bg-white'
+                            : 'bg-white/95 border-zinc-200 text-zinc-300 hover:text-zinc-600 hover:border-zinc-400'
                         }`}
                         title={isSelected ? 'Deselect garment' : 'Select garment for bulk actions'}
                         aria-label={isSelected ? 'Deselect garment' : 'Select garment'}
                       >
-                        {isSelected ? (
-                          <Check className="w-3.5 h-3.5 stroke-[3] text-white" />
-                        ) : (
-                          <span className="w-2.5 h-2.5 rounded-none border border-transparent" />
-                        )}
+                        <CheckSquare className="w-3.5 h-3.5" />
                       </button>
 
                       {displaySettings.showCategory && (

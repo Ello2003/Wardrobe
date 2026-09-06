@@ -6,7 +6,7 @@ import {
   Layers,
   Sparkles,
   Sliders,
-  DollarSign,
+  PoundSterling,
   MapPin,
   Calendar,
   AlertCircle,
@@ -212,7 +212,7 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
         if (targetPriority !== '__NO_CHANGE__') patch.priority = targetPriority as ShoppingPriority;
         if (targetShoppingStatus !== '__NO_CHANGE__') patch.status = targetShoppingStatus as ShoppingStatus;
         if (targetRetailer.trim()) patch.retailerName = targetRetailer.trim();
-        if (targetSeasons.length > 0) patch.season = targetSeasons;
+        if (targetSeasons.length > 0) patch.season = targetSeasons[0] as Season;
 
         if (tagsToAdd.length > 0 || tagsToRemove.size > 0) {
           const current = (item.tags || []).filter((t) => !tagsToRemove.has(t));
@@ -237,7 +237,7 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
         if (targetPlatform !== '__NO_CHANGE__') patch.platform = targetPlatform as SellingPlatform;
         if (targetSellingStatus !== '__NO_CHANGE__') patch.status = targetSellingStatus as SellingStatus;
         if (targetShippingStatus !== '__NO_CHANGE__') patch.shippingStatus = targetShippingStatus as ShippingStatus;
-        if (targetCourier !== '__NO_CHANGE__') patch.courier = targetCourier;
+        if (targetCourier !== '__NO_CHANGE__') patch.courier = targetCourier as any;
 
         if (tagsToAdd.length > 0 || tagsToRemove.size > 0) {
           const current = (item.tags || []).filter((t) => !tagsToRemove.has(t));
@@ -245,12 +245,12 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
         }
 
         if (priceAdjType !== 'none' && !isNaN(priceValNum) && priceValNum >= 0) {
-          let curr = item.listedPrice || 0;
+          let curr = item.listingPrice || 0;
           if (priceAdjType === 'set_fixed') curr = priceValNum;
           else if (priceAdjType === 'percent_discount') curr = Math.max(0, curr * (1 - priceValNum / 100));
           else if (priceAdjType === 'percent_increase') curr = curr * (1 + priceValNum / 100);
           else if (priceAdjType === 'add_fixed') curr = Math.max(0, curr + priceValNum);
-          patch.listedPrice = Math.round(curr * 100) / 100;
+          patch.listingPrice = Math.round(curr * 100) / 100;
         }
 
         return patch;
@@ -258,7 +258,7 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
     } else if (targetType === 'lookbook') {
       batchUpdateOutfits(selectedIds, (item) => {
         const patch: Partial<LookbookOutfit> = {};
-        if (targetOccasion !== '__NO_CHANGE__') patch.occasion = targetOccasion;
+        if (targetOccasion !== '__NO_CHANGE__') patch.occasion = targetOccasion as any;
         return patch;
       }, `Bulk updated ${count} outfits`);
     }

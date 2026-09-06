@@ -55,7 +55,33 @@ export interface AppSettings {
   enableColorBadges: boolean;
   customTags: string[];
   monthlyBudgetAlertThreshold: number; // percentage (e.g. 85%)
+  autoSnapshotEnabled: boolean;
+  autoSnapshotIntervalMinutes: number; // e.g. 5, 10, 15, 30, 60 minutes
+  maxAutoSnapshots: number; // max auto checkpoints kept (default 20)
+  vintedWorkerAuth?: VintedWorkerAuth;
 }
+
+export interface VintedWorkerAuth {
+  workerEndpoint: string;
+  domain: string; // e.g. 'co.uk'
+  accessToken: string;
+  csrfToken: string;
+  refreshToken?: string;
+  cookie?: string;
+  autoRouteOrders?: boolean; // true = purchased -> wardrobe, sold -> resale
+  defaultImportDestination?: 'wardrobe' | 'shopping' | 'selling';
+}
+
+export const DEFAULT_VINTED_WORKER_AUTH: VintedWorkerAuth = {
+  workerEndpoint: '',
+  domain: 'co.uk',
+  accessToken: '',
+  csrfToken: '',
+  refreshToken: '',
+  cookie: '',
+  autoRouteOrders: true,
+  defaultImportDestination: 'wardrobe',
+};
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   currency: 'GBP',
@@ -74,6 +100,10 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   enableColorBadges: true,
   customTags: ['Casual', 'Formal', 'Work', 'Vintage', 'Minimalist', 'Summer', 'Winter', 'Essential'],
   monthlyBudgetAlertThreshold: 85,
+  autoSnapshotEnabled: true,
+  autoSnapshotIntervalMinutes: 10,
+  maxAutoSnapshots: 20,
+  vintedWorkerAuth: DEFAULT_VINTED_WORKER_AUTH,
 };
 
 export interface BulkEditWardrobePayload {
@@ -294,6 +324,7 @@ export type ChangeActionType =
   | 'WISHLIST_PURCHASED'
   | 'WISHLIST_DELETED'
   | 'SALE_LISTED'
+  | 'SALE_ADDED'
   | 'SALE_UPDATED'
   | 'SALE_SOLD'
   | 'SALE_DELETED'
@@ -301,6 +332,8 @@ export type ChangeActionType =
   | 'SNAPSHOT_RESTORED'
   | 'BUDGET_UPDATED'
   | 'BULK_IMPORT'
+  | 'VINTED_SYNC'
+  | 'VINTED_EXTRACT'
   | 'UNDO_EXECUTED';
 
 export interface VersionChangeLog {
@@ -318,6 +351,16 @@ export interface VersionChangeLog {
     newValue?: any;
     financialImpact?: number; // £ change
     wearCount?: number;
+    previousEntity?: any; // Preserved entity before mutation (for 1-click restore)
+    currentEntity?: any; // Entity state after mutation
+    deletedEntities?: any[]; // For bulk actions
+  };
+  snapshotData?: {
+    items: WardrobeItem[];
+    outfits: LookbookOutfit[];
+    shoppingList: ShoppingItem[];
+    saleItems?: SaleItem[];
+    monthlyBudget?: number;
   };
   author?: string;
 }
@@ -333,6 +376,7 @@ export interface WardrobeSnapshot {
   outfitCount: number;
   wishlistCount: number;
   saleItemCount?: number;
+  isAuto?: boolean; // True if automatically saved by periodic auto-rollback
   data: {
     items: WardrobeItem[];
     outfits: LookbookOutfit[];

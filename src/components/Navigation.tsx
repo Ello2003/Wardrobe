@@ -9,11 +9,11 @@ import {
   Plus,
   Search,
   PoundSterling,
-  DollarSign,
   Tag,
   BarChart3,
   Settings,
   Undo2,
+  Wrench,
 } from 'lucide-react';
 import { useWardrobe } from '../context/WardrobeContext';
 
@@ -61,13 +61,13 @@ export const Navigation: React.FC<NavigationProps> = ({
       id: 'shopping',
       label: 'Purchases',
       icon: ShoppingBag,
-      badge: shoppingList.filter((s) => s.status !== 'Purchased').length.toString(),
+      badge: shoppingList.length.toString(),
     },
     {
       id: 'selling',
       label: 'Sales & Resale',
-      icon: DollarSign,
-      badge: saleItems.filter((s) => s.status === 'Listed' || s.status === 'Reserved').length.toString(),
+      icon: PoundSterling,
+      badge: saleItems.length.toString(),
     },
     {
       id: 'analytics',
@@ -82,9 +82,9 @@ export const Navigation: React.FC<NavigationProps> = ({
     },
     { id: 'trends', label: 'Trend Research', icon: Sparkles },
     {
-      id: 'history',
-      label: 'Audit & Versions',
-      icon: History,
+      id: 'tools',
+      label: 'Tools',
+      icon: Wrench,
     },
   ];
 
@@ -101,14 +101,14 @@ export const Navigation: React.FC<NavigationProps> = ({
             <div>
               <div className="flex items-center gap-1.5">
                 <span className="font-serif tracking-tight text-base font-semibold text-[#1A1A1A]">
-                  Inventory | Purchases | Sales
+                  Wardrobe &amp; Style Studio
                 </span>
                 <span className="inline-flex items-center gap-0.5 text-[10px] font-mono px-1.5 py-0.5 rounded bg-[#F3F2EE] text-[#8C7355] border border-[#E5E5E1] font-semibold">
                   <PoundSterling className="w-2.5 h-2.5" /> GBP
                 </span>
               </div>
               <p className="text-[10px] text-[#767670] font-sans tracking-tight">
-                Curated Closet • Lookbook Studio • Resale &amp; P&amp;L Intelligence
+                Track fabric compositions, cost-per-wear economics, care guides, and styling combinations.
               </p>
             </div>
           </div>
@@ -151,16 +151,6 @@ export const Navigation: React.FC<NavigationProps> = ({
             </button>
 
             <button
-              onClick={onOpenDuplicateMerge}
-              id="nav-merge-duplicates-btn"
-              className="hidden lg:inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-md bg-white hover:bg-[#F3F2EE] text-[#8C7355] border border-[#8C7355]/40 shadow-xs transition-all cursor-pointer"
-              title="Detect and merge duplicates throughout the entire site"
-            >
-              <Layers className="w-3.5 h-3.5" />
-              <span>Merge Duplicates</span>
-            </button>
-
-            <button
               onClick={onOpenAIStylist}
               id="nav-ai-stylist-btn"
               className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md bg-[#8C7355] hover:bg-[#786248] text-white shadow-xs transition-all cursor-pointer"
@@ -194,7 +184,7 @@ export const Navigation: React.FC<NavigationProps> = ({
         <nav className="flex space-x-1 overflow-x-auto no-scrollbar py-1.5 border-t border-[#E5E5E1]">
           {tabs.map((tab) => {
             const Icon = tab.icon;
-            const isActive = activeTab === tab.id;
+            const isActive = activeTab === tab.id || (tab.id === 'tools' && activeTab === 'history');
             return (
               <button
                 key={tab.id}

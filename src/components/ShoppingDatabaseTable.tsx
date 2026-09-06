@@ -138,7 +138,7 @@ export const ShoppingDatabaseTable: React.FC<ShoppingDatabaseTableProps> = ({
       let comparison = 0;
       switch (sortField) {
         case 'name':
-          comparison = a.name.localeCompare(b.name);
+          comparison = (a.name || '').localeCompare(b.name || '');
           break;
         case 'brand':
           comparison = (a.brand || '').localeCompare(b.brand || '');
@@ -162,7 +162,7 @@ export const ShoppingDatabaseTable: React.FC<ShoppingDatabaseTableProps> = ({
           comparison = (a.season || '').localeCompare(b.season || '');
           break;
         case 'addedDate':
-          comparison = (a.addedDate || '').localeCompare(b.addedDate || '');
+          comparison = (a.addedDate || a.createdAt || '').localeCompare(b.addedDate || b.createdAt || '');
           break;
       }
       return sortDirection === 'asc' ? comparison : -comparison;
@@ -282,7 +282,7 @@ export const ShoppingDatabaseTable: React.FC<ShoppingDatabaseTableProps> = ({
         isResizing ? 'select-none' : ''
       }`}
     >
-      <table className={`w-full text-left border-collapse ${textSize} text-[#1A1A1A]`}>
+      <table className={`w-full min-w-max text-left border-collapse ${textSize} text-[#1A1A1A]`}>
         {/* Table Header */}
         <thead
           className={`bg-[#F8F7F4] text-[#5A5A55] font-mono text-[10px] uppercase tracking-wider border-b border-[#E5E5E1] select-none ${
@@ -600,7 +600,16 @@ export const ShoppingDatabaseTable: React.FC<ShoppingDatabaseTableProps> = ({
 
         {/* Table Body */}
         <tbody className="divide-y divide-[#E5E5E1]">
-          {sortedItems.map((item, idx) => {
+          {sortedItems.length === 0 ? (
+            <tr>
+              <td colSpan={25} className="py-12 text-center text-[#767670] bg-white">
+                <ShoppingBag className="w-8 h-8 mx-auto text-[#A5A59E] mb-2" />
+                <p className="font-serif font-bold text-[#1A1A1A]">No purchase wishlist items match your criteria</p>
+                <p className="text-xs text-[#767670] mt-1 font-mono">Try clearing filters or adding items to your wishlist.</p>
+              </td>
+            </tr>
+          ) : (
+            sortedItems.map((item, idx) => {
             const isEditingName = editingCellId === `${item.id}_name`;
             const isEditingBrand = editingCellId === `${item.id}_brand`;
             const isEditingEstPrice = editingCellId === `${item.id}_estimatedPrice`;
@@ -1183,7 +1192,7 @@ export const ShoppingDatabaseTable: React.FC<ShoppingDatabaseTableProps> = ({
                 )}
               </tr>
             );
-          })}
+          }))}
         </tbody>
       </table>
     </div>

@@ -1,7 +1,24 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useWardrobe } from '../context/WardrobeContext';
-import { Category, Season, Condition, SellingStatus, ShoppingStatus } from '../types';
+import { Category, Season, Condition, SellingStatus, ShoppingStatus, normalizeCategoryName } from '../types';
 import { GarmentImage } from './GarmentImage';
+import {
+  fetchAllVintedOrders,
+  extractVintedItemFromUrl,
+  extractVintedItemsFromUrls,
+  inferCategoryFromTitle,
+  testWorkerConnection,
+  scrapeVintedAccountListings,
+  VintedOrder,
+  VintedExtractedItem,
+  VintedAccountListing,
+} from '../services/vintedWorkerService';
+import {
+  determineLifecycleTags,
+  getLifecycleTagColor,
+  isCancelledStatus,
+  LIFECYCLE_TAGS,
+} from '../utils/tagUtils';
 import {
   Link2,
   Sparkles,
@@ -13,6 +30,7 @@ import {
   Camera,
   Plus,
   AlertCircle,
+  AlertTriangle,
   PoundSterling,
   ClipboardPaste,
   ShoppingBag,
@@ -29,6 +47,13 @@ import {
   FileCode,
   FolderUp,
   Tag,
+  Globe,
+  Server,
+  KeyRound,
+  Sliders,
+  Play,
+  CheckCircle2,
+  User,
 } from 'lucide-react';
 
 export interface ExtractedGarmentItem {
@@ -93,7 +118,19 @@ export const AutoImportModal: React.FC<AutoImportModalProps> = ({
   initialTab = 'url',
   onSuccessDirectToForm,
 }) => {
-  const { addItem, addShoppingItem, addSaleItem, batchAddItems, batchAddShoppingItems, batchAddSaleItems, categories } = useWardrobe();
+  const {
+    addItem,
+    addShoppingItem,
+    addSaleItem,
+    batchAddItems,
+    batchAddShoppingItems,
+    batchAddSaleItems,
+    categories,
+    settings,
+    updateSettings,
+    syncVintedAccountOrders,
+    importVintedExtractedListings,
+  } = useWardrobe();
   const [activeTab, setActiveTab] = useState<ImportTab>(initialTab || 'url');
 
   // URL Tab state
@@ -105,7 +142,31 @@ export const AutoImportModal: React.FC<AutoImportModalProps> = ({
   const [photoUrlInput, setPhotoUrlInput] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Vinted Data Tab state
+  // Vinted Data Tab state (Scrape Account + Cloudflare Worker + Batch URLs + HTML/PDF)
+  const [vintedSubTab, setVintedSubTab] = useState<'scrape' | 'sync' | 'urls' | 'files'>('scrape');
+  const [vintedAccountInput, setVintedAccountInput] = useState('');
+  const [vintedAccountDomain, setVintedAccountDomain] = useState(settings.vintedWorkerAuth?.domain || 'co.uk');
+  const [vintedAccountFilter, setVintedAccountFilter] = useState<'all' | 'listed' | 'sold'>('all');
+  const [vintedAccountHtml, setVintedAccountHtml] = useState('');
+  const [showAccountHtmlPaste, setShowAccountHtmlPaste] = useState(false);
+  const [vintedAccountProgress, setVintedAccountProgress] = useState<string | null>(null);
+  const [scrapedUserData, setScrapedUserData] = useState<{ username?: string; id?: string; photo?: string; itemsCount?: number } | null>(null);
+  const [previewTagFilter, setPreviewTagFilter] = useState<'all' | 'Bought' | 'Sold' | 'Listed' | 'Cancelled'>('all');
+
+  const [vintedSyncType, setVintedSyncType] = useState<'all' | 'purchased' | 'sold' | 'active'>('all');
+  const [vintedSyncProgress, setVintedSyncProgress] = useState<string | null>(null);
+  const [vintedBatchUrls, setVintedBatchUrls] = useState<string>('');
+  const [vintedBatchProgress, setVintedBatchProgress] = useState<string | null>(null);
+  const [showQuickWorkerConfig, setShowQuickWorkerConfig] = useState(false);
+  const [quickWorkerUrl, setQuickWorkerUrl] = useState(settings.vintedWorkerAuth?.workerEndpoint || '');
+  const [quickDomain, setQuickDomain] = useState(settings.vintedWorkerAuth?.domain || 'co.uk');
+  const [quickAccessToken, setQuickAccessToken] = useState(settings.vintedWorkerAuth?.accessToken || '');
+  const [quickCsrfToken, setQuickCsrfToken] = useState(settings.vintedWorkerAuth?.csrfToken || '');
+  const [quickCookie, setQuickCookie] = useState(settings.vintedWorkerAuth?.cookie || '');
+  const [quickSaveMessage, setQuickSaveMessage] = useState<string | null>(null);
+  const [quickTestingWorker, setQuickTestingWorker] = useState(false);
+  const [quickTestResult, setQuickTestResult] = useState<{ success: boolean; message: string } | null>(null);
+
   const [vintedFiles, setVintedFiles] = useState<VintedStagedFile[]>([]);
   const [isVintedDragging, setIsVintedDragging] = useState(false);
   const [vintedShoppingStatus, setVintedShoppingStatus] = useState<'Purchased' | 'To Buy'>('Purchased');
@@ -496,6 +557,54 @@ export const AutoImportModal: React.FC<AutoImportModalProps> = ({
     setSaveSuccessMessage(null);
 
     try {
+      // If this is a Vinted link and user has a configured Cloudflare Worker, extract directly via Worker first
+      if (urlToUse.toLowerCase().includes('vinted.') && settings.vintedWorkerAuth?.workerEndpoint) {
+        try {
+          const vintedItem = await extractVintedItemFromUrl(
+            settings.vintedWorkerAuth.workerEndpoint,
+            urlToUse
+          );
+          if (vintedItem) {
+            const p =
+              typeof vintedItem.price === 'number'
+                ? vintedItem.price
+                : parseFloat(String(vintedItem.price || '0').replace(/[^0-9.]/g, '')) || 0;
+            const cat = normalizeCategoryName(inferCategoryFromTitle(vintedItem.title), categories);
+            const isSale = globalDestination === 'selling';
+
+            normalizeExtractedItems(
+              [
+                {
+                  name: vintedItem.title || 'Vinted Listing',
+                  brand: vintedItem.brand || 'Vinted',
+                  category: cat,
+                  purchasePrice: p,
+                  color: vintedItem.colour || 'Various',
+                  condition: vintedItem.condition || 'Good',
+                  season: ['All-Season'],
+                  imageUrl: vintedItem.image || '',
+                  targetStoreUrl: vintedItem.url,
+                  retailerName: 'Vinted',
+                  seller: vintedItem.seller,
+                  notes: [vintedItem.description, vintedItem.seller ? `Seller: @${vintedItem.seller}` : '']
+                    .filter(Boolean)
+                    .join(' · '),
+                  destination: globalDestination,
+                  tags: ['vinted', 'active-listing', isSale ? 'sale' : 'imported'],
+                  transactionType: isSale ? 'Sale' : undefined,
+                },
+              ],
+              false,
+              p,
+              'Vinted'
+            );
+            return;
+          }
+        } catch (vintedErr) {
+          console.warn('Vinted Worker direct link parse failed, falling back to Gemini URL extractor:', vintedErr);
+        }
+      }
+
       const res = await fetch('/api/gemini/extract-from-url', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -746,6 +855,343 @@ export const AutoImportModal: React.FC<AutoImportModalProps> = ({
     }
   };
 
+  // Quick Save & Test Worker configuration
+  const handleQuickSaveWorkerConfig = () => {
+    if (!quickWorkerUrl.trim()) {
+      setError('Please provide a Cloudflare Worker URL.');
+      return;
+    }
+    updateSettings({
+      vintedWorkerAuth: {
+        workerEndpoint: quickWorkerUrl.trim(),
+        domain: quickDomain.trim() || 'co.uk',
+        accessToken: quickAccessToken.trim(),
+        csrfToken: quickCsrfToken.trim(),
+        cookie: quickCookie.trim(),
+        refreshToken: settings.vintedWorkerAuth?.refreshToken || '',
+        autoRouteOrders: settings.vintedWorkerAuth?.autoRouteOrders ?? true,
+        defaultImportDestination: settings.vintedWorkerAuth?.defaultImportDestination || 'wardrobe',
+      },
+    });
+    setQuickSaveMessage('Worker credentials saved successfully!');
+    setTimeout(() => setQuickSaveMessage(null), 3000);
+  };
+
+  const handleQuickTestWorker = async () => {
+    const endpoint = quickWorkerUrl.trim() || settings.vintedWorkerAuth?.workerEndpoint;
+    if (!endpoint) {
+      setQuickTestResult({ success: false, message: 'Please enter a Cloudflare Worker URL to test.' });
+      return;
+    }
+    setQuickTestingWorker(true);
+    setQuickTestResult(null);
+    try {
+      const res = await testWorkerConnection(endpoint);
+      setQuickTestResult(res);
+    } catch (e: any) {
+      setQuickTestResult({ success: false, message: e?.message || 'Connection test failed.' });
+    } finally {
+      setQuickTestingWorker(false);
+    }
+  };
+
+  // Scrape Vinted Account Closet Listings (Public or Authenticated)
+  const handleScrapeAccountListings = async (targetInput?: string) => {
+    const input = (targetInput !== undefined ? targetInput : vintedAccountInput).trim();
+    const rawHtml = vintedAccountHtml.trim();
+
+    if (!input && !rawHtml) {
+      setError('Please enter a Vinted account URL (e.g. https://www.vinted.co.uk/member/123456-username), username (@username), or paste the account page HTML.');
+      return;
+    }
+
+    setIsLoading(true);
+    setError(null);
+    setSaveSuccessMessage(null);
+    setVintedAccountProgress('Scraping listings from Vinted account...');
+
+    try {
+      const workerAuth = settings.vintedWorkerAuth;
+      const result = await scrapeVintedAccountListings({
+        accountUrlOrUsername: input,
+        domain: vintedAccountDomain || workerAuth?.domain || 'co.uk',
+        workerEndpoint: workerAuth?.workerEndpoint,
+        rawHtml: rawHtml || undefined,
+        statusFilter: vintedAccountFilter,
+        accessToken: workerAuth?.accessToken,
+        cookie: workerAuth?.cookie,
+        onProgress: (msg) => setVintedAccountProgress(msg),
+      });
+
+      if (result.user) {
+        setScrapedUserData(result.user);
+      }
+
+      if (!result.listings || result.listings.length === 0) {
+        throw new Error(
+          `No listings could be found for ${result.user?.username || input}. Vinted may be displaying a verification challenge in your region, or this closet currently has 0 items matching the filter. You can also view the profile in your browser, copy page source, and paste into the HTML field below.`
+        );
+      }
+
+      // Convert VintedAccountListing to ExtractedGarmentItem
+      const rawExtracted: any[] = result.listings.map((l, idx) => {
+        const isSold = l.status === 'Sold';
+        const isCancelled = l.status === 'Cancelled';
+        const p = typeof l.price === 'number' ? l.price : parseFloat(String(l.price || '0').replace(/[^0-9.]/g, '')) || 0;
+        const cat = normalizeCategoryName(l.category || inferCategoryFromTitle(l.title), categories);
+
+        // Account listings are items being sold / listed by this user, so default to 'selling'
+        const dest = globalDestination === 'wardrobe' || globalDestination === 'shopping' ? globalDestination : 'selling';
+
+        const lifecycleTags = determineLifecycleTags({
+          destination: dest,
+          sellingStatus: isSold ? 'Sold' : (isCancelled ? 'Draft' : 'Listed'),
+          isVinted: true,
+          existingTags: l.tags || [],
+          sourceType: 'account-scrape',
+        });
+
+        return {
+          name: l.title || `Vinted Listing #${l.id || idx + 1}`,
+          brand: l.brand || 'Vinted',
+          category: cat,
+          size: l.size || '',
+          color: l.color || 'Various',
+          purchasePrice: p,
+          season: ['All-Season'],
+          condition: l.condition || 'Good',
+          imageUrl: l.imageUrl || '',
+          allCandidateImages: l.allImages && l.allImages.length > 0 ? l.allImages : (l.imageUrl ? [l.imageUrl] : []),
+          targetStoreUrl: l.url,
+          retailerName: 'Vinted',
+          orderStatus: isSold ? 'Sold' : (isCancelled ? 'Cancelled' : 'Listed'),
+          orderDate: new Date().toISOString().split('T')[0],
+          transactionType: 'Sale',
+          sourceFile: `Vinted Closet @${result.user?.username || input.replace(/https?:\/\/[^/]+\/(member\/)?/, '')}`,
+          destination: dest,
+          tags: lifecycleTags,
+          notes: l.description ? `${l.description} · Vinted listing from @${result.user?.username || 'user'}` : `Vinted listing from @${result.user?.username || 'user'}`,
+          seller: result.user?.username,
+        };
+      });
+
+      normalizeExtractedItems(
+        rawExtracted,
+        true,
+        rawExtracted.reduce((acc, it) => acc + (it.purchasePrice || 0), 0),
+        'Vinted'
+      );
+    } catch (err: any) {
+      console.error('Vinted account scrape error:', err);
+      setError(err?.message || 'Failed to scrape Vinted account listings. Check URL or paste page HTML.');
+    } finally {
+      setIsLoading(false);
+      setVintedAccountProgress(null);
+    }
+  };
+
+  // Live Cloudflare Worker: Sync Vinted Account Orders
+  const handleSyncVintedOrders = async (mode: 'preview' | 'direct' = 'preview') => {
+    const workerAuth = settings.vintedWorkerAuth;
+    if (!workerAuth?.workerEndpoint) {
+      setShowQuickWorkerConfig(true);
+      setError('Please configure your Cloudflare Worker URL before syncing orders.');
+      return;
+    }
+
+    if (!workerAuth.accessToken && !workerAuth.cookie) {
+      setShowQuickWorkerConfig(true);
+      setError('Please provide either your Vinted Access Token or Session Cookie.');
+      return;
+    }
+
+    setIsLoading(true);
+    setError(null);
+    setSaveSuccessMessage(null);
+    setVintedSyncProgress('Connecting to Cloudflare Worker...');
+
+    try {
+      const typesToSync: Array<'purchased' | 'sold' | 'active'> =
+        vintedSyncType === 'all'
+          ? ['purchased', 'sold', 'active']
+          : [vintedSyncType];
+
+      const res = await fetchAllVintedOrders(
+        workerAuth,
+        typesToSync,
+        (msg) => setVintedSyncProgress(msg),
+        (newToken) => {
+          updateSettings({
+            vintedWorkerAuth: {
+              ...workerAuth,
+              accessToken: newToken,
+            },
+          });
+        }
+      );
+
+      if (res.errors.length > 0 && res.orders.length === 0) {
+        throw new Error(res.errors.join(' | '));
+      }
+
+      if (res.orders.length === 0) {
+        setError('No orders or active listings found in your Vinted account for the chosen sync filter.');
+        setIsLoading(false);
+        setVintedSyncProgress(null);
+        return;
+      }
+
+      if (mode === 'direct') {
+        // Direct commit into database with rollback checkpoint & audit log
+        const targetDest = workerAuth.defaultImportDestination === 'shopping' ? 'shopping' : 'wardrobe';
+        const syncRes = syncVintedAccountOrders(res.orders, {
+          routePurchasedTo: targetDest,
+          skipDuplicates: workerAuth.autoRouteOrders ?? true,
+        });
+
+        const activeCount = res.orders.filter((o) => o.type === 'active' || o.status === 'Listed').length;
+
+        setSaveSuccessMessage(
+          `Successfully synced Vinted account: added ${syncRes.addedPurchased} purchases (£${syncRes.totalPurchasedVal.toFixed(2)}), ${syncRes.addedSold} sold items (£${syncRes.totalSoldVal.toFixed(2)})${activeCount > 0 ? `, and ${activeCount} active closet listings` : ''}${syncRes.skippedDuplicates > 0 ? ` (${syncRes.skippedDuplicates} duplicates skipped)` : ''}. Rollback checkpoint created.`
+        );
+        setIsLoading(false);
+        setVintedSyncProgress(null);
+        return;
+      }
+
+      // Preview mode: populate preview cards so user can inspect and edit before importing
+      const rawExtracted: any[] = res.orders.map((o) => {
+        const p = typeof o.price === 'number' ? o.price : parseFloat(String(o.price || '0').replace(/[^0-9.]/g, '')) || 0;
+        const cat = normalizeCategoryName(inferCategoryFromTitle(o.title), categories);
+        const isSold = o.type === 'sold';
+        const defaultDest = isSold
+          ? 'selling'
+          : (workerAuth.defaultImportDestination || globalDestination);
+
+        return {
+          name: o.title || `Vinted Order #${o.orderId}`,
+          brand: 'Vinted',
+          category: cat,
+          purchasePrice: p,
+          color: 'Various',
+          season: ['All-Season'],
+          condition: 'Good',
+          imageUrl: o.image || '',
+          targetStoreUrl: o.orderId ? `https://www.vinted.${workerAuth.domain || 'co.uk'}/items/${o.orderId}` : '',
+          retailerName: 'Vinted',
+          orderStatus: o.transactionStatus || (isSold ? 'Sold' : 'Delivered'),
+          orderDate: o.date ? String(o.date).slice(0, 10) : undefined,
+          transactionType: isSold ? 'Sale' : 'Purchase',
+          sourceFile: `Vinted Live ${isSold ? 'Sale' : 'Order'} #${o.orderId}`,
+          destination: defaultDest,
+          tags: determineLifecycleTags({
+            destination: defaultDest,
+            transactionType: isSold ? 'Sale' : 'Purchase',
+            orderStatus: o.transactionStatus,
+            sellingStatus: isSold ? (isCancelledStatus(o.transactionStatus || '') ? 'Draft' : 'Sold') : undefined,
+            shoppingStatus: !isSold ? (isCancelledStatus(o.transactionStatus || '') ? 'Cancelled' : 'Purchased') : undefined,
+            isVinted: true,
+            existingTags: ['account-sync'],
+          }),
+          notes: o.transactionStatus ? `Vinted ${o.type} · ${o.transactionStatus}` : `Vinted ${o.type} order`,
+        };
+      });
+
+      normalizeExtractedItems(
+        rawExtracted,
+        true,
+        rawExtracted.reduce((acc, it) => acc + (it.purchasePrice || 0), 0),
+        'Vinted'
+      );
+    } catch (err: any) {
+      console.error('Vinted orders sync error:', err);
+      setError(err?.message || 'Failed to sync orders from Vinted via Cloudflare Worker.');
+    } finally {
+      setIsLoading(false);
+      setVintedSyncProgress(null);
+    }
+  };
+
+  // Batch Extract Vinted URLs via Cloudflare Worker
+  const handleBatchExtractVintedUrls = async () => {
+    const urls = vintedBatchUrls
+      .split('\n')
+      .map((u) => u.trim())
+      .filter((u) => u.startsWith('http') && u.includes('vinted'));
+
+    if (urls.length === 0) {
+      setError('Please paste at least one valid Vinted listing URL (e.g. https://www.vinted.co.uk/items/12345...).');
+      return;
+    }
+
+    const workerUrl = settings.vintedWorkerAuth?.workerEndpoint;
+    if (!workerUrl) {
+      setShowQuickWorkerConfig(true);
+      setError('Please configure your Cloudflare Worker URL before extracting public Vinted listings.');
+      return;
+    }
+
+    setIsLoading(true);
+    setError(null);
+    setExtractedItems([]);
+    setBasketSummary(null);
+    setSaveSuccessMessage(null);
+    setVintedBatchProgress(`Extracting ${urls.length} item(s) via Cloudflare Worker...`);
+
+    try {
+      const res = await extractVintedItemsFromUrls(workerUrl, urls, (curr, tot, u) => {
+        setVintedBatchProgress(`Extracting item ${curr} of ${tot}...`);
+      });
+
+      if (res.errors.length > 0 && res.items.length === 0) {
+        throw new Error(res.errors.join(' | '));
+      }
+
+      if (res.items.length === 0) {
+        setError('No items could be extracted from the provided Vinted URLs.');
+        setIsLoading(false);
+        setVintedBatchProgress(null);
+        return;
+      }
+
+      const rawItems = res.items.map((it) => {
+        const p = typeof it.price === 'number' ? it.price : parseFloat(String(it.price || '0').replace(/[^0-9.]/g, '')) || 0;
+        const cat = normalizeCategoryName(inferCategoryFromTitle(it.title), categories);
+        const isSale = globalDestination === 'selling';
+        return {
+          name: it.title || 'Vinted Listing',
+          brand: it.brand || 'Vinted',
+          category: cat,
+          purchasePrice: p,
+          color: it.colour || 'Various',
+          condition: it.condition || 'Good',
+          season: ['All-Season'],
+          imageUrl: it.image || '',
+          targetStoreUrl: it.url,
+          retailerName: 'Vinted',
+          seller: it.seller,
+          notes: [it.description, it.seller ? `Seller: @${it.seller}` : ''].filter(Boolean).join(' · '),
+          destination: globalDestination,
+          tags: ['vinted', 'active-listing', isSale ? 'sale' : 'imported'],
+          transactionType: isSale ? 'Sale' : undefined,
+        };
+      });
+
+      normalizeExtractedItems(
+        rawItems,
+        rawItems.length > 1,
+        rawItems.reduce((acc, it) => acc + (it.purchasePrice || 0), 0),
+        'Vinted'
+      );
+    } catch (err: any) {
+      console.error('Vinted batch extraction error:', err);
+      setError(err?.message || 'Failed to extract Vinted listings.');
+    } finally {
+      setIsLoading(false);
+      setVintedBatchProgress(null);
+    }
+  };
+
   // Field edit handlers
   const handleUpdateItemField = (index: number, field: keyof ExtractedGarmentItem, value: any) => {
     setExtractedItems((prev) => {
@@ -781,6 +1227,42 @@ export const AutoImportModal: React.FC<AutoImportModalProps> = ({
         };
       })
     );
+  };
+
+  const handleToggleLifecycleTag = (index: number, tag: 'Bought' | 'Sold' | 'Listed' | 'Cancelled') => {
+    setExtractedItems((prev) => {
+      const next = [...prev];
+      if (!next[index]) return next;
+      const item = { ...next[index] };
+      const currentTags = Array.isArray(item.tags) ? [...item.tags] : [];
+      const hasTag = currentTags.includes(tag);
+
+      // Mutually exclusive lifecycle tags
+      const withoutLifecycle = currentTags.filter((t) => !LIFECYCLE_TAGS.includes(t as any));
+      const updatedTags = hasTag ? withoutLifecycle : [...withoutLifecycle, tag];
+
+      if (!hasTag) {
+        if (tag === 'Sold') {
+          item.destination = 'selling';
+          item.orderStatus = 'Sold';
+          item.transactionType = 'Sale';
+        } else if (tag === 'Listed') {
+          item.destination = 'selling';
+          item.orderStatus = 'Listed';
+          item.transactionType = 'Sale';
+        } else if (tag === 'Bought') {
+          item.destination = 'wardrobe';
+          item.orderStatus = 'Order completed!';
+          item.transactionType = 'Purchase';
+        } else if (tag === 'Cancelled') {
+          item.orderStatus = 'Cancelled';
+        }
+      }
+
+      item.tags = updatedTags;
+      next[index] = item;
+      return next;
+    });
   };
 
   const handleToggleSelectItem = (index: number) => {
@@ -839,7 +1321,14 @@ export const AutoImportModal: React.FC<AutoImportModalProps> = ({
           purchasePrice: Number(item.purchasePrice) || 0,
           currentValuation: Number(item.purchasePrice) || 0,
           condition: (item.condition as Condition) || 'Vintage / Well-Loved',
-          tags: item.tags || ['imported'],
+          tags: determineLifecycleTags({
+            destination: 'wardrobe',
+            orderStatus: item.orderStatus,
+            transactionType: item.transactionType,
+            isVinted,
+            existingTags: item.tags,
+            sourceType: activeTab === 'vinted' ? (vintedSubTab === 'scrape' ? 'account-scrape' : 'file') : 'general',
+          }),
           imageUrl: item.imageUrl || '',
           isFavorite: false,
           isArchived: false,
@@ -885,7 +1374,15 @@ export const AutoImportModal: React.FC<AutoImportModalProps> = ({
           imageUrl: item.imageUrl || (candidateImages[0] || ''),
           additionalImages: candidateImages.length > 1 ? candidateImages.slice(1) : undefined,
           description: item.notes || `Authentic pre-owned ${item.brand} ${item.name}.`,
-          tags: Array.isArray(item.tags) && item.tags.length > 0 ? item.tags : ['vinted', 'resale', 'imported'],
+          tags: determineLifecycleTags({
+            destination: 'selling',
+            sellingStatus: effectiveStatus,
+            orderStatus: item.orderStatus,
+            transactionType: item.transactionType || 'Sale',
+            isVinted,
+            existingTags: item.tags,
+            sourceType: activeTab === 'vinted' ? (vintedSubTab === 'scrape' ? 'account-scrape' : 'file') : 'general',
+          }),
           listedDate: item.orderDate || new Date().toISOString().split('T')[0],
           buyerUsername: item.buyer && item.buyer !== 'user' && item.buyer !== 'No data' ? item.buyer : undefined,
           notes: item.sourceFile ? `Imported from Vinted (${item.sourceFile}).` : 'Imported from Vinted listing.',
@@ -939,7 +1436,15 @@ export const AutoImportModal: React.FC<AutoImportModalProps> = ({
           imageUrl: item.imageUrl || '',
           retailerName: item.retailerName || (isVinted ? 'Vinted' : 'Online Retailer'),
           reasonOrGap: item.notes || (isVinted ? `Imported from Vinted data (${item.sourceFile || 'Vinted export'})` : `Identified garment from ${item.brand}`),
-          tags: item.tags || (isVinted ? ['vinted', 'second-hand', 'pre-owned'] : ['wishlist', 'basket-import']),
+          tags: determineLifecycleTags({
+            destination: 'shopping',
+            shoppingStatus: itemStatus,
+            orderStatus: item.orderStatus,
+            transactionType: item.transactionType,
+            isVinted,
+            existingTags: item.tags,
+            sourceType: activeTab === 'vinted' ? (vintedSubTab === 'scrape' ? 'account-scrape' : 'file') : 'general',
+          }),
           purchasedDate: isPurchased ? (item.orderDate || new Date().toISOString().split('T')[0]) : undefined,
           seller: item.seller || undefined,
           buyer: item.buyer || undefined,
@@ -1018,7 +1523,7 @@ export const AutoImportModal: React.FC<AutoImportModalProps> = ({
             <div>
               <div className="flex items-center gap-2">
                 <h2 className="text-sm sm:text-base font-serif font-semibold text-[#1A1A1A]">
-                  Import Garment &amp; Shopping Basket Studio
+                  Import Toolkit
                 </h2>
                 <span className="hidden sm:inline-block text-[10px] font-mono px-2 py-0.5 bg-[#F2F1ED] border border-[#D5D5D0] text-[#5A5A55] rounded">
                   Paste &amp; Drop Precision Enabled
@@ -1101,7 +1606,7 @@ export const AutoImportModal: React.FC<AutoImportModalProps> = ({
             }`}
           >
             <FolderUp className="w-3.5 h-3.5 text-[#007782]" />
-            <span className="font-semibold">4. Vinted Data (HTML / PDF)</span>
+            <span className="font-semibold">4. Vinted Sync &amp; Worker</span>
           </button>
         </div>
 
@@ -1375,7 +1880,7 @@ export const AutoImportModal: React.FC<AutoImportModalProps> = ({
             </div>
           )}
 
-          {/* TAB 4: VINTED DATA (HTML EXPORTS & PDF INVOICES) */}
+          {/* TAB 4: VINTED SYNC & WORKER INTEGRATION */}
           {activeTab === 'vinted' && (
             <div className="space-y-4">
               {/* Hidden File Input for Vinted files */}
@@ -1392,286 +1897,971 @@ export const AutoImportModal: React.FC<AutoImportModalProps> = ({
                 }}
               />
 
-              {/* Informative Header Banner */}
-              <div className="p-3 bg-[#F0F8F8] border border-[#BCE4E6] flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
-                <div className="flex items-start gap-2.5">
-                  <div className="w-7 h-7 bg-[#007782] text-white flex items-center justify-center shrink-0 shadow-xs">
-                    <FolderUp className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <h3 className="text-xs font-serif font-bold text-[#004A52]">
-                      Import Vinted Active Listings, HTML Exports &amp; Invoices (PDF)
-                    </h3>
-                    <p className="text-[11px] text-[#00606A] font-sans mt-0.5">
-                      Upload your active Vinted listing pages saved as HTML, downloaded export files (<code className="bg-white/80 px-1 py-0.5 border border-[#BCE4E6] text-[10px] font-mono">items.html</code>, <code className="bg-white/80 px-1 py-0.5 border border-[#BCE4E6] text-[10px] font-mono">sales.html</code>, <code className="bg-white/80 px-1 py-0.5 border border-[#BCE4E6] text-[10px] font-mono">purchases.html</code>), or PDF transaction invoices.
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
+              {/* Sub-tab Navigation */}
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#E5E5E1] pb-2">
+                <div className="flex items-center gap-1.5">
                   <button
                     type="button"
-                    onClick={() => vintedFileInputRef.current?.click()}
-                    className="px-3 py-1.5 bg-[#007782] hover:bg-[#005E67] text-white text-xs font-mono font-medium flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+                    onClick={() => setVintedSubTab('scrape')}
+                    className={`px-3 py-1.5 text-xs font-mono font-medium transition-colors flex items-center gap-1.5 cursor-pointer ${
+                      vintedSubTab === 'scrape'
+                        ? 'bg-[#007782] text-white shadow-xs'
+                        : 'bg-[#F8F7F4] text-[#5A5A55] hover:text-[#1A1A1A] hover:bg-[#ECEBE8]'
+                    }`}
                   >
-                    <Upload className="w-3.5 h-3.5" />
-                    Browse Files
+                    <User className="w-3.5 h-3.5" />
+                    <span>Scrape Account</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setVintedSubTab('sync')}
+                    className={`px-3 py-1.5 text-xs font-mono font-medium transition-colors flex items-center gap-1.5 cursor-pointer ${
+                      vintedSubTab === 'sync'
+                        ? 'bg-[#007782] text-white shadow-xs'
+                        : 'bg-[#F8F7F4] text-[#5A5A55] hover:text-[#1A1A1A] hover:bg-[#ECEBE8]'
+                    }`}
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    <span>Live Account Sync</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setVintedSubTab('urls')}
+                    className={`px-3 py-1.5 text-xs font-mono font-medium transition-colors flex items-center gap-1.5 cursor-pointer ${
+                      vintedSubTab === 'urls'
+                        ? 'bg-[#007782] text-white shadow-xs'
+                        : 'bg-[#F8F7F4] text-[#5A5A55] hover:text-[#1A1A1A] hover:bg-[#ECEBE8]'
+                    }`}
+                  >
+                    <Link2 className="w-3.5 h-3.5" />
+                    <span>Batch Vinted URLs</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setVintedSubTab('files')}
+                    className={`px-3 py-1.5 text-xs font-mono font-medium transition-colors flex items-center gap-1.5 cursor-pointer ${
+                      vintedSubTab === 'files'
+                        ? 'bg-[#007782] text-white shadow-xs'
+                        : 'bg-[#F8F7F4] text-[#5A5A55] hover:text-[#1A1A1A] hover:bg-[#ECEBE8]'
+                    }`}
+                  >
+                    <Files className="w-3.5 h-3.5" />
+                    <span>HTML &amp; PDF Files</span>
+                  </button>
+                </div>
+
+                {/* Worker status pill and quick toggle */}
+                <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1 text-[11px] font-mono text-[#5A5A55]">
+                    <span
+                      className={`w-2 h-2 rounded-full ${
+                        settings.vintedWorkerAuth?.workerEndpoint ? 'bg-emerald-500' : 'bg-amber-500'
+                      }`}
+                    />
+                    <span>
+                      {settings.vintedWorkerAuth?.workerEndpoint ? 'Worker Configured' : 'Worker Setup Required'}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowQuickWorkerConfig((prev) => !prev)}
+                    className="px-2 py-1 border border-[#D5D5D0] bg-white hover:bg-[#F8F7F4] text-[10px] font-mono text-[#1A1A1A] flex items-center gap-1 cursor-pointer transition-colors"
+                  >
+                    <Sliders className="w-3 h-3 text-[#007782]" />
+                    <span>{showQuickWorkerConfig ? 'Hide Config' : 'Worker Config'}</span>
                   </button>
                 </div>
               </div>
 
-              {/* Dedicated Drag & Drop Zone for Vinted HTML / PDFs */}
-              <div
-                onDragOver={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  setIsVintedDragging(true);
-                }}
-                onDragLeave={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  setIsVintedDragging(false);
-                }}
-                onDrop={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  setIsVintedDragging(false);
-                  if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-                    processVintedFiles(e.dataTransfer.files);
-                  }
-                }}
-                onClick={() => vintedFileInputRef.current?.click()}
-                className={`border-2 border-dashed p-6 text-center cursor-pointer transition-all ${
-                  isVintedDragging
-                    ? 'border-[#007782] bg-teal-50/80 scale-[0.99]'
-                    : 'border-[#007782]/40 bg-[#FAF9F7] hover:bg-teal-50/30 hover:border-[#007782]'
-                }`}
-              >
-                <div className="w-10 h-10 bg-white border border-[#BCE4E6] text-[#007782] flex items-center justify-center mx-auto mb-2 shadow-xs">
-                  <Files className="w-5 h-5" />
-                </div>
-                <div className="text-xs font-mono font-semibold text-[#004A52] mb-1">
-                  Drag &amp; Drop Vinted HTML or PDF Files Here
-                </div>
-                <p className="text-[11px] text-[#767670] max-w-md mx-auto">
-                  Supports multiple files simultaneously. Automatically extracts product titles, designer brands, £ GBP purchase prices, garment categories, order dates, and condition.
-                </p>
-              </div>
-
-              {/* Staged Files List */}
-              {vintedFiles.length > 0 && (
-                <div className="space-y-2 bg-[#F8F7F4] border border-[#E5E5E1] p-3">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-mono font-semibold uppercase tracking-wider text-[#5A5A55]">
-                      Staged Vinted Files ({vintedFiles.length})
-                    </span>
+              {/* Quick Worker Configuration Drawer */}
+              {showQuickWorkerConfig && (
+                <div className="p-4 bg-[#F0F8F8] border border-[#BCE4E6] space-y-3 animate-in fade-in duration-150">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <h4 className="text-xs font-mono font-bold text-[#004A52] flex items-center gap-1.5">
+                        <Server className="w-3.5 h-3.5 text-[#007782]" />
+                        Cloudflare Worker &amp; Vinted Credentials
+                      </h4>
+                      <p className="text-[11px] text-[#00606A] font-sans mt-0.5">
+                        Connects to your custom Cloudflare Worker to bypass CORS and Cloudflare bot challenges when syncing orders or scraping listings.
+                      </p>
+                    </div>
                     <button
                       type="button"
-                      onClick={() => setVintedFiles([])}
-                      className="text-[10px] font-mono text-rose-700 hover:text-rose-900 cursor-pointer"
+                      onClick={() => setShowQuickWorkerConfig(false)}
+                      className="p-1 text-[#00606A] hover:text-[#004A52] cursor-pointer"
                     >
-                      Remove All
+                      <X className="w-3.5 h-3.5" />
                     </button>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {vintedFiles.map((vf) => (
-                      <div
-                        key={vf.id}
-                        className="bg-white border border-[#D5D5D0] p-2 flex items-center justify-between text-xs font-mono shadow-xs"
-                      >
-                        <div className="flex items-center gap-2 overflow-hidden">
-                          {vf.type === 'pdf' ? (
-                            <span className="px-1.5 py-0.5 bg-rose-100 text-rose-800 text-[9px] font-bold uppercase shrink-0">
-                              PDF
-                            </span>
-                          ) : (
-                            <span className="px-1.5 py-0.5 bg-teal-100 text-teal-800 text-[9px] font-bold uppercase shrink-0">
-                              HTML
-                            </span>
-                          )}
-                          <span className="truncate text-[#1A1A1A] font-medium" title={vf.name}>
-                            {vf.name}
-                          </span>
-                          <span className="text-[10px] text-[#767670] shrink-0">
-                            ({(vf.size / 1024).toFixed(0)} KB)
-                          </span>
-                        </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs font-mono">
+                    <div className="sm:col-span-2 space-y-1">
+                      <label className="text-[10px] font-semibold text-[#004A52] uppercase">
+                        Worker Endpoint URL
+                      </label>
+                      <input
+                        type="url"
+                        placeholder="https://vinted-proxy.your-subdomain.workers.dev"
+                        value={quickWorkerUrl}
+                        onChange={(e) => setQuickWorkerUrl(e.target.value)}
+                        className="w-full p-2 bg-white border border-[#BCE4E6] text-xs text-[#1A1A1A] focus:outline-none focus:border-[#007782]"
+                      />
+                    </div>
 
-                        <div className="flex items-center gap-1 shrink-0">
-                          {vf.isLoaded ? (
-                            <Check className="w-3.5 h-3.5 text-emerald-600" />
-                          ) : (
-                            <Loader2 className="w-3.5 h-3.5 text-amber-600 animate-spin" />
-                          )}
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleRemoveVintedFile(vf.id);
-                            }}
-                            className="p-1 text-[#767670] hover:text-rose-600 cursor-pointer"
-                          >
-                            <X className="w-3 h-3" />
-                          </button>
-                        </div>
-                      </div>
-                    ))}
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-semibold text-[#004A52] uppercase">
+                        Vinted Domain
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="co.uk, fr, de, com"
+                        value={quickDomain}
+                        onChange={(e) => setQuickDomain(e.target.value)}
+                        className="w-full p-2 bg-white border border-[#BCE4E6] text-xs text-[#1A1A1A] focus:outline-none focus:border-[#007782]"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-semibold text-[#004A52] uppercase">
+                        Access Token (Bearer)
+                      </label>
+                      <input
+                        type="password"
+                        placeholder="Optional if using cookie"
+                        value={quickAccessToken}
+                        onChange={(e) => setQuickAccessToken(e.target.value)}
+                        className="w-full p-2 bg-white border border-[#BCE4E6] text-xs text-[#1A1A1A] focus:outline-none focus:border-[#007782]"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-semibold text-[#004A52] uppercase">
+                        CSRF Token
+                      </label>
+                      <input
+                        type="password"
+                        placeholder="X-CSRF-Token"
+                        value={quickCsrfToken}
+                        onChange={(e) => setQuickCsrfToken(e.target.value)}
+                        className="w-full p-2 bg-white border border-[#BCE4E6] text-xs text-[#1A1A1A] focus:outline-none focus:border-[#007782]"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-semibold text-[#004A52] uppercase">
+                        Vinted Session Cookie (_vinted_fr_session)
+                      </label>
+                      <input
+                        type="password"
+                        placeholder="_vinted_fr_session=..."
+                        value={quickCookie}
+                        onChange={(e) => setQuickCookie(e.target.value)}
+                        className="w-full p-2 bg-white border border-[#BCE4E6] text-xs text-[#1A1A1A] focus:outline-none focus:border-[#007782]"
+                      />
+                    </div>
+                  </div>
+
+                  {quickTestResult && (
+                    <div
+                      className={`p-2.5 text-xs font-mono border ${
+                        quickTestResult.success
+                          ? 'bg-emerald-50 border-emerald-300 text-emerald-900'
+                          : 'bg-rose-50 border-rose-300 text-rose-900'
+                      }`}
+                    >
+                      {quickTestResult.message}
+                    </div>
+                  )}
+
+                  {quickSaveMessage && (
+                    <div className="p-2 text-xs font-mono bg-emerald-50 border border-emerald-300 text-emerald-800">
+                      {quickSaveMessage}
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-between pt-1">
+                    <button
+                      type="button"
+                      onClick={handleQuickTestWorker}
+                      disabled={quickTestingWorker || !quickWorkerUrl.trim()}
+                      className="px-3 py-1.5 bg-white border border-[#007782] text-[#007782] hover:bg-teal-50 text-xs font-mono font-semibold transition-colors disabled:opacity-50 cursor-pointer flex items-center gap-1.5"
+                    >
+                      {quickTestingWorker ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          Testing Worker...
+                        </>
+                      ) : (
+                        <>
+                          <Play className="w-3.5 h-3.5" />
+                          Test Worker Ping
+                        </>
+                      )}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleQuickSaveWorkerConfig}
+                      className="px-4 py-1.5 bg-[#007782] hover:bg-[#005E67] text-white text-xs font-mono font-semibold transition-colors cursor-pointer flex items-center gap-1.5 shadow-xs"
+                    >
+                      <Check className="w-3.5 h-3.5" />
+                      Save Credentials
+                    </button>
                   </div>
                 </div>
               )}
 
-              {/* Import Options & Destination Controls */}
-              <div className="bg-[#FAF9F7] border border-[#E5E5E1] p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div className="space-y-1">
-                  <div className="text-[11px] font-mono font-semibold uppercase tracking-wider text-[#5A5A55]">
-                    Import Destination &amp; Status
-                  </div>
-                  <div className="flex flex-wrap items-center gap-3">
-                    <label className="flex items-center gap-1.5 text-xs text-[#1A1A1A] cursor-pointer">
-                      <input
-                        type="radio"
-                        name="vintedDest"
-                        checked={globalDestination === 'selling'}
-                        onChange={() => setGlobalDestination('selling')}
-                        className="text-[#007782] focus:ring-[#007782]"
-                      />
-                      <span className="font-medium text-[#007782]">Import into Sales &amp; Resale (Listings)</span>
-                    </label>
-
-                    <label className="flex items-center gap-1.5 text-xs text-[#1A1A1A] cursor-pointer">
-                      <input
-                        type="radio"
-                        name="vintedDest"
-                        checked={globalDestination === 'shopping'}
-                        onChange={() => setGlobalDestination('shopping')}
-                        className="text-[#007782] focus:ring-[#007782]"
-                      />
-                      <span>Import into Shopping Section</span>
-                    </label>
-
-                    <label className="flex items-center gap-1.5 text-xs text-[#1A1A1A] cursor-pointer">
-                      <input
-                        type="radio"
-                        name="vintedDest"
-                        checked={globalDestination === 'wardrobe'}
-                        onChange={() => setGlobalDestination('wardrobe')}
-                        className="text-[#007782] focus:ring-[#007782]"
-                      />
-                      <span>Import into Wardrobe (Owned)</span>
-                    </label>
-                  </div>
-                </div>
-
-                {globalDestination === 'selling' && (
-                  <div className="space-y-1 border-t sm:border-t-0 sm:border-l border-[#E5E5E1] pt-2 sm:pt-0 sm:pl-3">
-                    <div className="text-[10px] font-mono text-[#767670]">Initial Listing Status:</div>
-                    <div className="inline-flex border border-[#D5D5D0] p-0.5 bg-white text-xs">
-                      <button
-                        type="button"
-                        onClick={() => setVintedSellingStatus('Listed')}
-                        className={`px-2 py-0.5 cursor-pointer transition-colors ${
-                          vintedSellingStatus === 'Listed'
-                            ? 'bg-[#007782] text-white font-semibold'
-                            : 'text-[#5A5A55] hover:text-[#1A1A1A]'
-                        }`}
-                      >
-                        Active (Listed)
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setVintedSellingStatus('Sold')}
-                        className={`px-2 py-0.5 cursor-pointer transition-colors ${
-                          vintedSellingStatus === 'Sold'
-                            ? 'bg-[#007782] text-white font-semibold'
-                            : 'text-[#5A5A55] hover:text-[#1A1A1A]'
-                        }`}
-                      >
-                        Sold
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setVintedSellingStatus('Draft')}
-                        className={`px-2 py-0.5 cursor-pointer transition-colors ${
-                          vintedSellingStatus === 'Draft'
-                            ? 'bg-[#007782] text-white font-semibold'
-                            : 'text-[#5A5A55] hover:text-[#1A1A1A]'
-                        }`}
-                      >
-                        Draft
-                      </button>
+              {/* SUBTAB 0: SCRAPE VINTED ACCOUNT LISTINGS */}
+              {vintedSubTab === 'scrape' && (
+                <div className="space-y-4">
+                  <div className="p-3.5 bg-[#F0F8F8] border border-[#BCE4E6] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="flex items-start gap-2.5">
+                      <div className="w-8 h-8 bg-[#007782] text-white flex items-center justify-center shrink-0 shadow-xs">
+                        <User className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h3 className="text-xs font-serif font-bold text-[#004A52]">
+                          Scrape Vinted Account Listings
+                        </h3>
+                        <p className="text-[11px] text-[#00606A] font-sans mt-0.5 leading-relaxed">
+                          Extract all items from any Vinted closet or profile URL. Items are tagged automatically with lifecycle tags (<strong>Bought</strong>, <strong>Sold</strong>, <strong>Listed</strong>, <strong>Cancelled</strong>) and ready for your Wardrobe, Resale Hub, or Shopping Wishlist.
+                        </p>
+                      </div>
                     </div>
                   </div>
-                )}
 
-                {globalDestination === 'shopping' && (
-                  <div className="space-y-1 border-t sm:border-t-0 sm:border-l border-[#E5E5E1] pt-2 sm:pt-0 sm:pl-3">
-                    <div className="text-[10px] font-mono text-[#767670]">Initial Item Status:</div>
-                    <div className="inline-flex border border-[#D5D5D0] p-0.5 bg-white text-xs">
-                      <button
-                        type="button"
-                        onClick={() => setVintedShoppingStatus('Purchased')}
-                        className={`px-2 py-0.5 cursor-pointer transition-colors ${
-                          vintedShoppingStatus === 'Purchased'
-                            ? 'bg-[#007782] text-white font-semibold'
-                            : 'text-[#5A5A55] hover:text-[#1A1A1A]'
-                        }`}
-                      >
-                        Purchased (£ Paid)
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setVintedShoppingStatus('To Buy')}
-                        className={`px-2 py-0.5 cursor-pointer transition-colors ${
-                          vintedShoppingStatus === 'To Buy'
-                            ? 'bg-[#007782] text-white font-semibold'
-                            : 'text-[#5A5A55] hover:text-[#1A1A1A]'
-                        }`}
-                      >
-                        To Buy (Wishlist)
-                      </button>
+                  {/* Scraped User Profile Pill (if any) */}
+                  {scrapedUserData && (
+                    <div className="p-3 bg-white border border-[#007782]/30 flex items-center justify-between gap-3 shadow-xs">
+                      <div className="flex items-center gap-3">
+                        {scrapedUserData.photo ? (
+                          <img
+                            src={scrapedUserData.photo}
+                            alt={scrapedUserData.username || 'User'}
+                            className="w-10 h-10 rounded-full object-cover border border-[#E5E5E1]"
+                          />
+                        ) : (
+                          <div className="w-10 h-10 rounded-full bg-[#007782]/10 text-[#007782] flex items-center justify-center font-bold font-mono">
+                            {(scrapedUserData.username || 'U')[0].toUpperCase()}
+                          </div>
+                        )}
+                        <div>
+                          <div className="text-xs font-mono font-bold text-[#1A1A1A] flex items-center gap-1.5">
+                            <span>@{scrapedUserData.username || 'vinted-user'}</span>
+                            {scrapedUserData.id && (
+                              <span className="text-[10px] text-[#767670] font-normal">ID: {scrapedUserData.id}</span>
+                            )}
+                          </div>
+                          {scrapedUserData.itemsCount !== undefined && (
+                            <div className="text-[11px] text-[#5A5A55]">
+                              {scrapedUserData.itemsCount} active closet items
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      <span className="px-2 py-0.5 text-[10px] font-mono bg-teal-50 text-[#007782] border border-[#BCE4E6] uppercase tracking-wider">
+                        Active Profile
+                      </span>
                     </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Optional Paste Fallback */}
-              <details className="text-xs font-mono text-[#5A5A55]">
-                <summary className="cursor-pointer hover:text-[#1A1A1A] select-none py-1">
-                  ▸ Or paste raw Vinted HTML / table code directly
-                </summary>
-                <div className="mt-2 space-y-2">
-                  <textarea
-                    rows={3}
-                    placeholder="Paste raw Vinted HTML source code or table snippet here..."
-                    value={vintedRawInput}
-                    onChange={(e) => setVintedRawInput(e.target.value)}
-                    className="w-full p-2 bg-white border border-[#D5D5D0] text-xs font-mono text-[#1A1A1A] focus:outline-none focus:border-[#007782]"
-                  />
-                </div>
-              </details>
-
-              {/* Extract Trigger Button */}
-              <div className="flex justify-end pt-1">
-                <button
-                  type="button"
-                  onClick={handleExtractFromVinted}
-                  disabled={isLoading || (vintedFiles.length === 0 && !vintedRawInput.trim())}
-                  className="px-5 py-2.5 bg-[#007782] hover:bg-[#005E67] disabled:opacity-50 text-white text-xs font-mono font-semibold uppercase tracking-wider transition-colors flex items-center gap-2 cursor-pointer shadow-xs"
-                >
-                  {isLoading ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      Parsing Vinted Data &amp; Receipts...
-                    </>
-                  ) : (
-                    <>
-                      <Sparkles className="w-4 h-4" />
-                      Extract Vinted Garments ({vintedFiles.length} file{vintedFiles.length !== 1 ? 's' : ''})
-                    </>
                   )}
-                </button>
-              </div>
+
+                  {/* Connected Session Shortcut Banner (Bypasses Cloudflare) */}
+                  {Boolean(
+                    settings.vintedWorkerAuth?.accessToken ||
+                    settings.vintedWorkerAuth?.cookie ||
+                    settings.vintedWorkerAuth?.workerEndpoint
+                  ) && (
+                    <div className="p-3 bg-teal-50 border border-[#007782]/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shadow-2xs">
+                      <div className="flex items-start sm:items-center gap-2">
+                        <Sparkles className="w-4 h-4 text-[#007782] shrink-0 mt-0.5 sm:mt-0" />
+                        <div>
+                          <span className="font-semibold text-[#004A52]">Connected Vinted Session Ready: </span>
+                          <span className="text-[#00606A]">
+                            Scrape your active closet listings directly via your authenticated session to 100% bypass Cloudflare challenges.
+                          </span>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setVintedSubTab('sync');
+                          setVintedSyncType('active');
+                        }}
+                        className="px-3 py-1.5 text-xs font-mono font-semibold bg-[#007782] text-white hover:bg-[#005E67] shrink-0 cursor-pointer transition-colors shadow-xs"
+                      >
+                        Scrape Active via Session →
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Input Form */}
+                  <div className="p-3.5 bg-[#FAF9F7] border border-[#E5E5E1] space-y-3">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <label className="text-[11px] font-mono font-semibold uppercase tracking-wider text-[#5A5A55]">
+                        Vinted Account / Member URL or Username
+                      </label>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] text-[#767670] font-mono">Domain:</span>
+                        <select
+                          value={vintedAccountDomain}
+                          onChange={(e) => setVintedAccountDomain(e.target.value)}
+                          className="text-xs font-mono bg-white border border-[#D5D5D0] px-2 py-1 text-[#1A1A1A] focus:border-[#007782] focus:outline-none"
+                        >
+                          <option value="co.uk">vinted.co.uk (UK £)</option>
+                          <option value="fr">vinted.fr (France €)</option>
+                          <option value="de">vinted.de (Germany €)</option>
+                          <option value="it">vinted.it (Italy €)</option>
+                          <option value="es">vinted.es (Spain €)</option>
+                          <option value="com">vinted.com (US $)</option>
+                          <option value="nl">vinted.nl (Netherlands €)</option>
+                          <option value="be">vinted.be (Belgium €)</option>
+                          <option value="pl">vinted.pl (Poland zł)</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="relative">
+                      <input
+                        type="text"
+                        value={vintedAccountInput}
+                        onChange={(e) => setVintedAccountInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && !isLoading) {
+                            e.preventDefault();
+                            handleScrapeAccountListings();
+                          }
+                        }}
+                        placeholder="e.g. https://www.vinted.co.uk/member/12345678-username or @username"
+                        className="w-full px-3 py-2 text-xs font-mono bg-white border border-[#D5D5D0] text-[#1A1A1A] placeholder-[#9A9A90] focus:border-[#007782] focus:outline-none pr-24"
+                      />
+                      {vintedAccountInput && (
+                        <button
+                          type="button"
+                          onClick={() => setVintedAccountInput('')}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-[#767670] hover:text-[#1A1A1A]"
+                          title="Clear input"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] text-[#767670]">
+                      <span>Formats accepted: Full profile URL, member ID, or @username</span>
+                      <button
+                        type="button"
+                        onClick={() => setShowAccountHtmlPaste(!showAccountHtmlPaste)}
+                        className="text-[#007782] hover:underline font-mono cursor-pointer flex items-center gap-1"
+                      >
+                        <FileCode className="w-3 h-3" />
+                        <span>{showAccountHtmlPaste ? 'Hide HTML paste' : 'Paste Page HTML (Bypass Cloudflare)'}</span>
+                      </button>
+                    </div>
+
+                    {showAccountHtmlPaste && (
+                      <div className="space-y-1.5 pt-2 border-t border-[#E5E5E1]">
+                        <div className="flex items-center justify-between text-[11px] font-mono text-[#5A5A55]">
+                          <span>Account Page HTML Source (Direct or Saved Page)</span>
+                          <span className="text-[10px] text-[#767670]">Paste right-click &gt; View Page Source</span>
+                        </div>
+                        <textarea
+                          rows={4}
+                          value={vintedAccountHtml}
+                          onChange={(e) => setVintedAccountHtml(e.target.value)}
+                          placeholder="<!DOCTYPE html><html>... Paste Vinted member profile HTML here to parse without cloudflare blocks ..."
+                          className="w-full p-2 text-xs font-mono bg-white border border-[#D5D5D0] text-[#1A1A1A] focus:border-[#007782] focus:outline-none"
+                        />
+                      </div>
+                    )}
+
+                    {/* Status Filter Selection */}
+                    <div className="pt-2 border-t border-[#E5E5E1] space-y-1.5">
+                      <div className="text-[11px] font-mono font-semibold uppercase tracking-wider text-[#5A5A55]">
+                        Item Filter
+                      </div>
+                      <div className="grid grid-cols-3 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setVintedAccountFilter('all')}
+                          className={`p-2 border text-center cursor-pointer transition-colors ${
+                            vintedAccountFilter === 'all'
+                              ? 'bg-[#007782]/10 border-[#007782] text-[#007782] font-semibold'
+                              : 'bg-white border-[#D5D5D0] text-[#1A1A1A] hover:border-[#007782]/50'
+                          }`}
+                        >
+                          <div className="text-xs font-mono">All Listings</div>
+                          <div className="text-[10px] text-[#767670]">Active + Sold</div>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setVintedAccountFilter('listed')}
+                          className={`p-2 border text-center cursor-pointer transition-colors ${
+                            vintedAccountFilter === 'listed'
+                              ? 'bg-[#007782]/10 border-[#007782] text-[#007782] font-semibold'
+                              : 'bg-white border-[#D5D5D0] text-[#1A1A1A] hover:border-[#007782]/50'
+                          }`}
+                        >
+                          <div className="text-xs font-mono">Listed Only</div>
+                          <div className="text-[10px] text-[#767670]">Tag: Listed</div>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setVintedAccountFilter('sold')}
+                          className={`p-2 border text-center cursor-pointer transition-colors ${
+                            vintedAccountFilter === 'sold'
+                              ? 'bg-[#007782]/10 border-[#007782] text-[#007782] font-semibold'
+                              : 'bg-white border-[#D5D5D0] text-[#1A1A1A] hover:border-[#007782]/50'
+                          }`}
+                        >
+                          <div className="text-xs font-mono">Sold Only</div>
+                          <div className="text-[10px] text-[#767670]">Tag: Sold</div>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Action Button */}
+                    <div className="pt-2 flex flex-col sm:flex-row items-center justify-between gap-3">
+                      <div className="text-xs font-mono text-[#767670]">
+                        {vintedAccountProgress ? (
+                          <span className="text-[#007782] flex items-center gap-1.5 font-medium">
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            {vintedAccountProgress}
+                          </span>
+                        ) : (
+                          <span>Items will be automatically tagged: Bought, Sold, Listed, Cancelled</span>
+                        )}
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => handleScrapeAccountListings()}
+                        disabled={isLoading || (!vintedAccountInput.trim() && !vintedAccountHtml.trim())}
+                        className="w-full sm:w-auto px-5 py-2.5 bg-[#007782] hover:bg-[#005E67] text-white text-xs font-mono font-semibold transition-colors disabled:opacity-50 cursor-pointer flex items-center justify-center gap-2 shadow-xs"
+                      >
+                        {isLoading ? (
+                          <>
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                            <span>Scraping Account...</span>
+                          </>
+                        ) : (
+                          <>
+                            <User className="w-4 h-4" />
+                            <span>Scrape Account Listings</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* SUBTAB 1: LIVE ACCOUNT SYNC */}
+              {vintedSubTab === 'sync' && (
+                <div className="space-y-4">
+                  <div className="p-3 bg-[#F0F8F8] border border-[#BCE4E6] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="flex items-start gap-2.5">
+                      <div className="w-8 h-8 bg-[#007782] text-white flex items-center justify-center shrink-0 shadow-xs">
+                        <RefreshCw className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h3 className="text-xs font-serif font-bold text-[#004A52]">
+                          Live Vinted Account Sync (Cloudflare Worker)
+                        </h3>
+                        <p className="text-[11px] text-[#00606A] font-sans mt-0.5 leading-relaxed">
+                          Fetches your active purchases and completed sales directly from Vinted. Automatically skips duplicate transactions, creates a rollback checkpoint in Version History, and auto-routes purchases into your Wardrobe and sales into your Resale Hub.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Sync Filter Selection */}
+                  <div className="p-3 bg-[#FAF9F7] border border-[#E5E5E1] space-y-2">
+                    <div className="text-[11px] font-mono font-semibold uppercase tracking-wider text-[#5A5A55]">
+                      Select Transactions to Sync
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setVintedSyncType('all')}
+                        className={`p-2.5 border text-left cursor-pointer transition-colors ${
+                          vintedSyncType === 'all'
+                            ? 'bg-[#007782]/10 border-[#007782] text-[#007782] font-semibold'
+                            : 'bg-white border-[#D5D5D0] text-[#1A1A1A] hover:border-[#007782]/50'
+                        }`}
+                      >
+                        <div className="text-xs font-mono">All Activity</div>
+                        <div className="text-[10px] text-[#767670] mt-0.5">Purchases, Sold &amp; Active items</div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setVintedSyncType('purchased')}
+                        className={`p-2.5 border text-left cursor-pointer transition-colors ${
+                          vintedSyncType === 'purchased'
+                            ? 'bg-[#007782]/10 border-[#007782] text-[#007782] font-semibold'
+                            : 'bg-white border-[#D5D5D0] text-[#1A1A1A] hover:border-[#007782]/50'
+                        }`}
+                      >
+                        <div className="text-xs font-mono">Purchased Only</div>
+                        <div className="text-[10px] text-[#767670] mt-0.5">Import into Wardrobe or Wishlist</div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setVintedSyncType('sold')}
+                        className={`p-2.5 border text-left cursor-pointer transition-colors ${
+                          vintedSyncType === 'sold'
+                            ? 'bg-[#007782]/10 border-[#007782] text-[#007782] font-semibold'
+                            : 'bg-white border-[#D5D5D0] text-[#1A1A1A] hover:border-[#007782]/50'
+                        }`}
+                      >
+                        <div className="text-xs font-mono">Sold Listings Only</div>
+                        <div className="text-[10px] text-[#767670] mt-0.5">Import into Resale Hub as Sold</div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setVintedSyncType('active')}
+                        className={`p-2.5 border text-left cursor-pointer transition-colors ${
+                          vintedSyncType === 'active'
+                            ? 'bg-[#007782]/10 border-[#007782] text-[#007782] font-semibold'
+                            : 'bg-white border-[#D5D5D0] text-[#1A1A1A] hover:border-[#007782]/50'
+                        }`}
+                      >
+                        <div className="text-xs font-mono flex items-center justify-between">
+                          <span>Active Listings</span>
+                          <span className="text-[9px] px-1 py-0.2 bg-teal-100 text-[#007782] font-bold">Session</span>
+                        </div>
+                        <div className="text-[10px] text-[#767670] mt-0.5">Scrapes live closet (Bypasses Cloudflare)</div>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Sync Progress Banner */}
+                  {vintedSyncProgress && (
+                    <div className="p-3 bg-teal-50 border border-teal-300 text-teal-900 text-xs font-mono flex items-center gap-2">
+                      <Loader2 className="w-4 h-4 animate-spin text-[#007782]" />
+                      <span>{vintedSyncProgress}</span>
+                    </div>
+                  )}
+
+                  {/* Actions: Preview vs Direct Sync */}
+                  <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2">
+                    <div className="text-[11px] text-[#767670] font-sans">
+                      💡 Choose <strong>Preview Orders</strong> to inspect and edit items before importing, or <strong>Direct 1-Click Sync</strong> to immediately sync into your database.
+                    </div>
+
+                    <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+                      <button
+                        type="button"
+                        onClick={() => handleSyncVintedOrders('preview')}
+                        disabled={isLoading}
+                        className="px-4 py-2 bg-white border border-[#007782] text-[#007782] hover:bg-teal-50 disabled:opacity-50 text-xs font-mono font-semibold uppercase tracking-wider transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
+                      >
+                        {isLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                        Preview Orders
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleSyncVintedOrders('direct')}
+                        disabled={isLoading}
+                        className="px-4 py-2 bg-[#007782] hover:bg-[#005E67] disabled:opacity-50 text-white text-xs font-mono font-semibold uppercase tracking-wider transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
+                      >
+                        {isLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                        Direct 1-Click Sync
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* SUBTAB 2: BATCH VINTED URLS */}
+              {vintedSubTab === 'urls' && (
+                <div className="space-y-4">
+                  <div className="p-3 bg-[#F0F8F8] border border-[#BCE4E6] flex items-start gap-2.5">
+                    <div className="w-8 h-8 bg-[#007782] text-white flex items-center justify-center shrink-0 shadow-xs">
+                      <Link2 className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h3 className="text-xs font-serif font-bold text-[#004A52]">
+                        Batch Extract Public Vinted Listing URLs
+                      </h3>
+                      <p className="text-[11px] text-[#00606A] font-sans mt-0.5 leading-relaxed">
+                        Paste links to any Vinted items (one per line). Your Cloudflare Worker will scrape each listing cleanly without triggering bot protections or CORS errors, extracting images, brand names, £ prices, categories, and descriptions.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-mono font-semibold text-[#1A1A1A] uppercase tracking-wider flex items-center justify-between">
+                      <span>Vinted URLs (one per line)</span>
+                      <span className="text-[10px] text-[#767670] lowercase">e.g. https://www.vinted.co.uk/items/543210-vintage-jacket</span>
+                    </label>
+                    <textarea
+                      rows={5}
+                      placeholder="https://www.vinted.co.uk/items/512345678-cos-wool-coat&#10;https://www.vinted.co.uk/items/512345679-acne-studios-scarf"
+                      value={vintedBatchUrls}
+                      onChange={(e) => setVintedBatchUrls(e.target.value)}
+                      className="w-full p-3 bg-white border border-[#D5D5D0] text-xs font-mono text-[#1A1A1A] focus:outline-none focus:border-[#007782] leading-relaxed"
+                    />
+                  </div>
+
+                  {/* Destination Selector for Batch URLs */}
+                  <div className="p-3 bg-[#FAF9F7] border border-[#E5E5E1] flex flex-wrap items-center justify-between gap-3">
+                    <div className="text-[11px] font-mono font-semibold uppercase text-[#5A5A55]">
+                      Destination:
+                    </div>
+                    <div className="flex items-center gap-4 text-xs font-mono">
+                      <label className="flex items-center gap-1.5 cursor-pointer">
+                        <input
+                          type="radio"
+                          name="batchDest"
+                          checked={globalDestination === 'wardrobe'}
+                          onChange={() => setGlobalDestination('wardrobe')}
+                          className="text-[#007782] focus:ring-[#007782]"
+                        />
+                        <span>Wardrobe (Owned)</span>
+                      </label>
+                      <label className="flex items-center gap-1.5 cursor-pointer">
+                        <input
+                          type="radio"
+                          name="batchDest"
+                          checked={globalDestination === 'shopping'}
+                          onChange={() => setGlobalDestination('shopping')}
+                          className="text-[#007782] focus:ring-[#007782]"
+                        />
+                        <span>Shopping (Wishlist)</span>
+                      </label>
+                      <label className="flex items-center gap-1.5 cursor-pointer">
+                        <input
+                          type="radio"
+                          name="batchDest"
+                          checked={globalDestination === 'selling'}
+                          onChange={() => setGlobalDestination('selling')}
+                          className="text-[#007782] focus:ring-[#007782]"
+                        />
+                        <span>Resale (Selling)</span>
+                      </label>
+                    </div>
+                  </div>
+
+                  {vintedBatchProgress && (
+                    <div className="p-3 bg-teal-50 border border-teal-300 text-teal-900 text-xs font-mono flex items-center gap-2">
+                      <Loader2 className="w-4 h-4 animate-spin text-[#007782]" />
+                      <span>{vintedBatchProgress}</span>
+                    </div>
+                  )}
+
+                  <div className="flex justify-end pt-1">
+                    <button
+                      type="button"
+                      onClick={handleBatchExtractVintedUrls}
+                      disabled={isLoading || !vintedBatchUrls.trim()}
+                      className="px-5 py-2.5 bg-[#007782] hover:bg-[#005E67] disabled:opacity-50 text-white text-xs font-mono font-semibold uppercase tracking-wider transition-colors flex items-center gap-2 cursor-pointer shadow-xs"
+                    >
+                      {isLoading ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          Extracting Listings via Worker...
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="w-4 h-4" />
+                          Extract Garments from URLs
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* SUBTAB 3: HTML EXPORTS & PDF INVOICES */}
+              {vintedSubTab === 'files' && (
+                <div className="space-y-4">
+                  {/* Informative Header Banner */}
+                  <div className="p-3 bg-[#F0F8F8] border border-[#BCE4E6] flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                    <div className="flex items-start gap-2.5">
+                      <div className="w-7 h-7 bg-[#007782] text-white flex items-center justify-center shrink-0 shadow-xs">
+                        <FolderUp className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h3 className="text-xs font-serif font-bold text-[#004A52]">
+                          Import Vinted Active Listings, HTML Exports &amp; Invoices (PDF)
+                        </h3>
+                        <p className="text-[11px] text-[#00606A] font-sans mt-0.5">
+                          Upload your active Vinted listing pages saved as HTML, downloaded export files (<code className="bg-white/80 px-1 py-0.5 border border-[#BCE4E6] text-[10px] font-mono">items.html</code>, <code className="bg-white/80 px-1 py-0.5 border border-[#BCE4E6] text-[10px] font-mono">sales.html</code>, <code className="bg-white/80 px-1 py-0.5 border border-[#BCE4E6] text-[10px] font-mono">purchases.html</code>), or PDF transaction invoices.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => vintedFileInputRef.current?.click()}
+                        className="px-3 py-1.5 bg-[#007782] hover:bg-[#005E67] text-white text-xs font-mono font-medium flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+                      >
+                        <Upload className="w-3.5 h-3.5" />
+                        Browse Files
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Dedicated Drag & Drop Zone for Vinted HTML / PDFs */}
+                  <div
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setIsVintedDragging(true);
+                    }}
+                    onDragLeave={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setIsVintedDragging(false);
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setIsVintedDragging(false);
+                      if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                        processVintedFiles(e.dataTransfer.files);
+                      }
+                    }}
+                    onClick={() => vintedFileInputRef.current?.click()}
+                    className={`border-2 border-dashed p-6 text-center cursor-pointer transition-all ${
+                      isVintedDragging
+                        ? 'border-[#007782] bg-teal-50/80 scale-[0.99]'
+                        : 'border-[#007782]/40 bg-[#FAF9F7] hover:bg-teal-50/30 hover:border-[#007782]'
+                    }`}
+                  >
+                    <div className="w-10 h-10 bg-white border border-[#BCE4E6] text-[#007782] flex items-center justify-center mx-auto mb-2 shadow-xs">
+                      <Files className="w-5 h-5" />
+                    </div>
+                    <div className="text-xs font-mono font-semibold text-[#004A52] mb-1">
+                      Drag &amp; Drop Vinted HTML or PDF Files Here
+                    </div>
+                    <p className="text-[11px] text-[#767670] max-w-md mx-auto">
+                      Supports multiple files simultaneously. Automatically extracts product titles, designer brands, £ GBP purchase prices, garment categories, order dates, and condition.
+                    </p>
+                  </div>
+
+                  {/* Staged Files List */}
+                  {vintedFiles.length > 0 && (
+                    <div className="space-y-2 bg-[#F8F7F4] border border-[#E5E5E1] p-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-mono font-semibold uppercase tracking-wider text-[#5A5A55]">
+                          Staged Vinted Files ({vintedFiles.length})
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setVintedFiles([])}
+                          className="text-[10px] font-mono text-rose-700 hover:text-rose-900 cursor-pointer"
+                        >
+                          Remove All
+                        </button>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {vintedFiles.map((vf) => (
+                          <div
+                            key={vf.id}
+                            className="bg-white border border-[#D5D5D0] p-2 flex items-center justify-between text-xs font-mono shadow-xs"
+                          >
+                            <div className="flex items-center gap-2 overflow-hidden">
+                              {vf.type === 'pdf' ? (
+                                <span className="px-1.5 py-0.5 bg-rose-100 text-rose-800 text-[9px] font-bold uppercase shrink-0">
+                                  PDF
+                                </span>
+                              ) : (
+                                <span className="px-1.5 py-0.5 bg-teal-100 text-teal-800 text-[9px] font-bold uppercase shrink-0">
+                                  HTML
+                                </span>
+                              )}
+                              <span className="truncate text-[#1A1A1A] font-medium" title={vf.name}>
+                                {vf.name}
+                              </span>
+                              <span className="text-[10px] text-[#767670] shrink-0">
+                                ({(vf.size / 1024).toFixed(0)} KB)
+                              </span>
+                            </div>
+
+                            <div className="flex items-center gap-1 shrink-0">
+                              {vf.isLoaded ? (
+                                <Check className="w-3.5 h-3.5 text-emerald-600" />
+                              ) : (
+                                <Loader2 className="w-3.5 h-3.5 text-amber-600 animate-spin" />
+                              )}
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleRemoveVintedFile(vf.id);
+                                }}
+                                className="p-1 text-[#767670] hover:text-rose-600 cursor-pointer"
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Import Options & Destination Controls */}
+                  <div className="bg-[#FAF9F7] border border-[#E5E5E1] p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="space-y-1">
+                      <div className="text-[11px] font-mono font-semibold uppercase tracking-wider text-[#5A5A55]">
+                        Import Destination &amp; Status
+                      </div>
+                      <div className="flex flex-wrap items-center gap-3">
+                        <label className="flex items-center gap-1.5 text-xs text-[#1A1A1A] cursor-pointer">
+                          <input
+                            type="radio"
+                            name="vintedDest"
+                            checked={globalDestination === 'selling'}
+                            onChange={() => setGlobalDestination('selling')}
+                            className="text-[#007782] focus:ring-[#007782]"
+                          />
+                          <span className="font-medium text-[#007782]">Import into Sales &amp; Resale (Listings)</span>
+                        </label>
+
+                        <label className="flex items-center gap-1.5 text-xs text-[#1A1A1A] cursor-pointer">
+                          <input
+                            type="radio"
+                            name="vintedDest"
+                            checked={globalDestination === 'shopping'}
+                            onChange={() => setGlobalDestination('shopping')}
+                            className="text-[#007782] focus:ring-[#007782]"
+                          />
+                          <span>Import into Shopping Section</span>
+                        </label>
+
+                        <label className="flex items-center gap-1.5 text-xs text-[#1A1A1A] cursor-pointer">
+                          <input
+                            type="radio"
+                            name="vintedDest"
+                            checked={globalDestination === 'wardrobe'}
+                            onChange={() => setGlobalDestination('wardrobe')}
+                            className="text-[#007782] focus:ring-[#007782]"
+                          />
+                          <span>Import into Wardrobe (Owned)</span>
+                        </label>
+                      </div>
+                    </div>
+
+                    {globalDestination === 'selling' && (
+                      <div className="space-y-1 border-t sm:border-t-0 sm:border-l border-[#E5E5E1] pt-2 sm:pt-0 sm:pl-3">
+                        <div className="text-[10px] font-mono text-[#767670]">Initial Listing Status:</div>
+                        <div className="inline-flex border border-[#D5D5D0] p-0.5 bg-white text-xs">
+                          <button
+                            type="button"
+                            onClick={() => setVintedSellingStatus('Listed')}
+                            className={`px-2 py-0.5 cursor-pointer transition-colors ${
+                              vintedSellingStatus === 'Listed'
+                                ? 'bg-[#007782] text-white font-semibold'
+                                : 'text-[#5A5A55] hover:text-[#1A1A1A]'
+                            }`}
+                          >
+                            Active (Listed)
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setVintedSellingStatus('Sold')}
+                            className={`px-2 py-0.5 cursor-pointer transition-colors ${
+                              vintedSellingStatus === 'Sold'
+                                ? 'bg-[#007782] text-white font-semibold'
+                                : 'text-[#5A5A55] hover:text-[#1A1A1A]'
+                            }`}
+                          >
+                            Sold
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setVintedSellingStatus('Draft')}
+                            className={`px-2 py-0.5 cursor-pointer transition-colors ${
+                              vintedSellingStatus === 'Draft'
+                                ? 'bg-[#007782] text-white font-semibold'
+                                : 'text-[#5A5A55] hover:text-[#1A1A1A]'
+                            }`}
+                          >
+                            Draft
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {globalDestination === 'shopping' && (
+                      <div className="space-y-1 border-t sm:border-t-0 sm:border-l border-[#E5E5E1] pt-2 sm:pt-0 sm:pl-3">
+                        <div className="text-[10px] font-mono text-[#767670]">Initial Item Status:</div>
+                        <div className="inline-flex border border-[#D5D5D0] p-0.5 bg-white text-xs">
+                          <button
+                            type="button"
+                            onClick={() => setVintedShoppingStatus('Purchased')}
+                            className={`px-2 py-0.5 cursor-pointer transition-colors ${
+                              vintedShoppingStatus === 'Purchased'
+                                ? 'bg-[#007782] text-white font-semibold'
+                                : 'text-[#5A5A55] hover:text-[#1A1A1A]'
+                            }`}
+                          >
+                            Purchased (£ Paid)
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setVintedShoppingStatus('To Buy')}
+                            className={`px-2 py-0.5 cursor-pointer transition-colors ${
+                              vintedShoppingStatus === 'To Buy'
+                                ? 'bg-[#007782] text-white font-semibold'
+                                : 'text-[#5A5A55] hover:text-[#1A1A1A]'
+                            }`}
+                          >
+                            To Buy (Wishlist)
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Optional Paste Fallback */}
+                  <details className="text-xs font-mono text-[#5A5A55]">
+                    <summary className="cursor-pointer hover:text-[#1A1A1A] select-none py-1">
+                      ▸ Or paste raw Vinted HTML / table code directly
+                    </summary>
+                    <div className="mt-2 space-y-2">
+                      <textarea
+                        rows={3}
+                        placeholder="Paste raw Vinted HTML source code or table snippet here..."
+                        value={vintedRawInput}
+                        onChange={(e) => setVintedRawInput(e.target.value)}
+                        className="w-full p-2 bg-white border border-[#D5D5D0] text-xs font-mono text-[#1A1A1A] focus:outline-none focus:border-[#007782]"
+                      />
+                    </div>
+                  </details>
+
+                  {/* Extract Trigger Button */}
+                  <div className="flex justify-end pt-1">
+                    <button
+                      type="button"
+                      onClick={handleExtractFromVinted}
+                      disabled={isLoading || (vintedFiles.length === 0 && !vintedRawInput.trim())}
+                      className="px-5 py-2.5 bg-[#007782] hover:bg-[#005E67] disabled:opacity-50 text-white text-xs font-mono font-semibold uppercase tracking-wider transition-colors flex items-center gap-2 cursor-pointer shadow-xs"
+                    >
+                      {isLoading ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          Parsing Vinted Data &amp; Receipts...
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="w-4 h-4" />
+                          Extract Vinted Garments ({vintedFiles.length} file{vintedFiles.length !== 1 ? 's' : ''})
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -1698,6 +2888,29 @@ export const AutoImportModal: React.FC<AutoImportModalProps> = ({
                   <p className="text-[11px] text-rose-700 mt-0.5">
                     Some online retailers protect or block automated web scrapers. You can immediately drag &amp; drop a screenshot or product image below to extract with Vision AI instead.
                   </p>
+                  {Boolean(
+                    settings.vintedWorkerAuth?.accessToken ||
+                    settings.vintedWorkerAuth?.cookie ||
+                    settings.vintedWorkerAuth?.workerEndpoint
+                  ) && (
+                    <div className="mt-2.5 pt-2 border-t border-rose-200 flex items-center justify-between gap-2">
+                      <span className="text-[11px] text-[#004A52] font-mono">
+                        ⚡ Connected Vinted session available
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setError(null);
+                          setActiveTab('vinted');
+                          setVintedSubTab('sync');
+                          setVintedSyncType('active');
+                        }}
+                        className="px-2.5 py-1 bg-[#007782] text-white hover:bg-[#005E67] text-[11px] font-mono font-semibold transition cursor-pointer shadow-2xs"
+                      >
+                        Scrape Active Listings via Session (Bypasses Cloudflare) →
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -1858,9 +3071,67 @@ export const AutoImportModal: React.FC<AutoImportModalProps> = ({
                 <span>Tip: Drag &amp; drop an image onto any garment photo box below to replace its picture or re-extract details.</span>
               </div>
 
+              {/* Lifecycle Tag Filter Bar */}
+              <div className="bg-[#FAF9F7] border border-[#E5E5E1] px-3.5 py-2 flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Tag className="w-3.5 h-3.5 text-[#007782]" />
+                  <span className="text-[11px] font-mono font-semibold uppercase tracking-wider text-[#5A5A55]">
+                    Filter by Tag:
+                  </span>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {(['all', 'Bought', 'Sold', 'Listed', 'Cancelled'] as const).map((filter) => {
+                      const count =
+                        filter === 'all'
+                          ? extractedItems.length
+                          : extractedItems.filter((it) => (it.tags || []).includes(filter)).length;
+                      const isSelected = previewTagFilter === filter;
+                      const tagColors = filter !== 'all' ? getLifecycleTagColor(filter) : null;
+
+                      return (
+                        <button
+                          key={filter}
+                          type="button"
+                          onClick={() => setPreviewTagFilter(filter)}
+                          className={`px-2.5 py-1 text-xs font-mono transition-colors cursor-pointer flex items-center gap-1.5 rounded-xs ${
+                            isSelected
+                              ? 'bg-[#1A1A1A] text-white font-bold shadow-xs'
+                              : 'bg-white border border-[#D5D5D0] text-[#5A5A55] hover:text-[#1A1A1A] hover:bg-[#F2F1ED]'
+                          }`}
+                        >
+                          {filter !== 'all' && tagColors && (
+                            <span className={`w-2 h-2 rounded-full ${tagColors.dot}`} />
+                          )}
+                          <span>{filter === 'all' ? 'All Items' : filter}</span>
+                          <span
+                            className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                              isSelected ? 'bg-white/20 text-white' : 'bg-stone-100 text-[#767670]'
+                            }`}
+                          >
+                            {count}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {previewTagFilter !== 'all' && (
+                  <button
+                    type="button"
+                    onClick={() => setPreviewTagFilter('all')}
+                    className="text-[10px] font-mono text-[#007782] hover:underline cursor-pointer"
+                  >
+                    Reset Filter
+                  </button>
+                )}
+              </div>
+
               {/* Items List - Each item as a separate listing candidate */}
               <div className="space-y-3">
-                {extractedItems.map((item, idx) => {
+                {extractedItems
+                  .map((item, idx) => ({ item, idx }))
+                  .filter(({ item }) => previewTagFilter === 'all' || (item.tags || []).includes(previewTagFilter))
+                  .map(({ item, idx }) => {
                   const isCardDragging = draggingCardIdx === idx;
                   return (
                     <div
@@ -2228,6 +3499,38 @@ export const AutoImportModal: React.FC<AutoImportModalProps> = ({
                               </div>
                             </div>
                           )}
+
+                          {/* Lifecycle Tags Selector */}
+                          <div className="sm:col-span-2 pt-2 border-t border-[#E5E5E1] flex flex-wrap items-center justify-between gap-2">
+                            <div className="flex items-center gap-1.5 text-[10px] font-mono text-[#5A5A55]">
+                              <Tag className="w-3 h-3 text-[#767670]" />
+                              <span className="font-semibold uppercase tracking-wider">Item Tag:</span>
+                            </div>
+
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              {LIFECYCLE_TAGS.map((lt) => {
+                                const isActive = (item.tags || []).includes(lt);
+                                const colorStyles = getLifecycleTagColor(lt);
+                                return (
+                                  <button
+                                    key={lt}
+                                    type="button"
+                                    onClick={() => handleToggleLifecycleTag(idx, lt)}
+                                    className={`px-2.5 py-1 text-xs font-mono border rounded-xs transition-all cursor-pointer flex items-center gap-1.5 ${
+                                      isActive
+                                        ? `${colorStyles.badge} font-bold shadow-xs ring-1 ring-offset-1 ring-current`
+                                        : 'bg-white border-[#D5D5D0] text-[#767670] hover:text-[#1A1A1A] hover:border-[#9A9A90]'
+                                    }`}
+                                    title={`Click to set tag to ${lt}`}
+                                  >
+                                    <span className={`w-1.5 h-1.5 rounded-full ${colorStyles.dot}`} />
+                                    <span>{lt}</span>
+                                    {isActive && <Check className="w-3 h-3 stroke-[3]" />}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
                         </div>
                       </div>
                     </div>

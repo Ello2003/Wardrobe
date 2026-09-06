@@ -34,6 +34,7 @@ import {
 } from 'lucide-react';
 import { useWardrobe } from '../context/WardrobeContext';
 import { ShoppingItem, ShoppingPriority, ShoppingStatus, Category } from '../types';
+import { safeConfirm } from '../utils/safeConfirm';
 import { AutoImportModal } from './AutoImportModal';
 import { GarmentImage } from './GarmentImage';
 import { BulkEditModal } from './BulkEditModal';
@@ -521,11 +522,54 @@ export const ShoppingView: React.FC<ShoppingViewProps> = ({
               </span>
             </div>
             <p className="text-xs text-[#767670] mt-0.5">
-              Track aggregate purchase commitments, monitor monthly spend against budget, and analyze your acquisition pipeline in British Pounds (£).
+              Showing {filteredItems.length} matching pieces • Pipeline Valuation:{' '}
+              <strong className="text-[#1A1A1A] font-mono">{formatCurrency(activePipelineValue)}</strong>
             </p>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            {/* View Mode Toggle: Grid vs Database Table (Icon-Only) */}
+            <div className="flex items-center border border-[#E5E5E1] p-0.5 bg-[#F8F7F4]">
+              <button
+                type="button"
+                onClick={() => handleUpdateDisplaySettings({ ...displaySettings, viewMode: 'grid' })}
+                className={`p-1.5 text-xs transition-colors cursor-pointer ${
+                  displaySettings.viewMode === 'grid'
+                    ? 'bg-white text-[#1A1A1A] shadow-xs font-bold'
+                    : 'text-[#767670] hover:text-[#1A1A1A]'
+                }`}
+                title="Grid Cards View"
+                aria-label="Grid Cards View"
+              >
+                <LayoutGrid className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => handleUpdateDisplaySettings({ ...displaySettings, viewMode: 'database' })}
+                className={`p-1.5 text-xs transition-colors cursor-pointer ${
+                  displaySettings.viewMode === 'database' || (displaySettings.viewMode as any) === 'table'
+                    ? 'bg-white text-[#1A1A1A] shadow-xs font-bold'
+                    : 'text-[#767670] hover:text-[#1A1A1A]'
+                }`}
+                title="Database Table Spreadsheet View"
+                aria-label="Database Table Spreadsheet View"
+              >
+                <Table className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            {/* Display Settings Toggle (Icon Only) */}
+            <button
+              type="button"
+              onClick={() => setIsDisplaySettingsOpen(true)}
+              id="shopping-display-settings-btn"
+              className="p-1.5 border border-[#D5D5D0] bg-white text-[#4A4A45] hover:border-[#8C7355] hover:text-[#1A1A1A] transition-all cursor-pointer shadow-xs"
+              title="Customize display settings and toggled elements"
+              aria-label="Display Settings"
+            >
+              <SlidersHorizontal className="w-3.5 h-3.5 text-[#8C7355]" />
+            </button>
+
             {/* Multi-Select / Deselect Controls */}
             <div className="flex items-center gap-1.5">
               <button
@@ -564,79 +608,13 @@ export const ShoppingView: React.FC<ShoppingViewProps> = ({
               )}
             </div>
 
-            {/* Merge Duplicates Quick Action */}
-            <button
-              type="button"
-              onClick={() => setIsDuplicateMergeOpen(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono border border-[#8C7355]/40 bg-white text-[#8C7355] hover:bg-[#8C7355] hover:text-white transition-all cursor-pointer shadow-xs"
-              title="Detect and merge duplicate items across your inventory and wishlist"
-            >
-              <Layers className="w-3.5 h-3.5" />
-              <span>Merge Duplicates</span>
-            </button>
-
-            {/* Display Settings Toggle */}
-            <button
-              type="button"
-              onClick={() => setIsDisplaySettingsOpen(true)}
-              id="shopping-display-settings-btn"
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono border border-[#D5D5D0] bg-white text-[#4A4A45] hover:border-[#8C7355] hover:text-[#1A1A1A] transition-all cursor-pointer shadow-xs"
-              title="Customize display settings and toggled elements"
-            >
-              <SlidersHorizontal className="w-3.5 h-3.5 text-[#8C7355]" />
-              <span>Display Settings</span>
-            </button>
-
-            {/* View Mode Toggle: Grid vs Database Table (Icon-Only) */}
-            <div className="inline-flex rounded-xs border border-[#D5D5D0] bg-white shadow-2xs overflow-hidden text-xs font-mono">
-              <button
-                type="button"
-                onClick={() => handleUpdateDisplaySettings({ ...displaySettings, viewMode: 'grid' })}
-                className={`p-1.5 flex items-center justify-center transition-colors cursor-pointer ${
-                  displaySettings.viewMode === 'grid'
-                    ? 'bg-[#1A1A1A] text-white font-bold'
-                    : 'text-[#5A5A55] hover:bg-[#F8F7F4]'
-                }`}
-                title="Grid Cards View"
-                aria-label="Grid Cards View"
-              >
-                <LayoutGrid className="w-3.5 h-3.5" />
-              </button>
-              <button
-                type="button"
-                onClick={() => handleUpdateDisplaySettings({ ...displaySettings, viewMode: 'database' })}
-                className={`p-1.5 border-l border-[#D5D5D0] flex items-center justify-center transition-colors cursor-pointer ${
-                  displaySettings.viewMode === 'database'
-                    ? 'bg-[#8C7355] text-white font-bold'
-                    : 'text-[#5A5A55] hover:bg-[#F8F7F4]'
-                }`}
-                title="Database Table Spreadsheet View"
-                aria-label="Database Table Spreadsheet View"
-              >
-                <Table className="w-3.5 h-3.5" />
-              </button>
-            </div>
-
-            {/* Auto-Import Link (Supports URL, Vinted HTML/PDF, Photo, Text) */}
-            <button
-              onClick={() => {
-                setAutoImportTab('url');
-                setIsAutoImportOpen(true);
-              }}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono font-medium border border-[#8C7355] text-[#8C7355] hover:bg-[#8C7355] hover:text-white transition-all cursor-pointer shadow-xs"
-              title="Automatically extract product from link or Vinted data to wishlist"
-            >
-              <Link2 className="w-3.5 h-3.5" />
-              Auto-Import Link
-            </button>
-
             <button
               onClick={onOpenAddShoppingItem}
               id="shopping-add-btn"
               className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-medium uppercase tracking-wider bg-[#8C7355] hover:bg-[#735D43] text-white shadow-xs transition-all cursor-pointer"
             >
               <Plus className="w-3.5 h-3.5" />
-              Add to Wishlist
+              <span>Add to Wishlist</span>
             </button>
           </div>
         </div>
@@ -1006,7 +984,7 @@ export const ShoppingView: React.FC<ShoppingViewProps> = ({
 
             <button
               onClick={() => {
-                if (window.confirm('Reset categories to standard wardrobe defaults?')) {
+                if (safeConfirm('Reset categories to standard wardrobe defaults?')) {
                   resetCategories();
                 }
               }}
@@ -1380,21 +1358,15 @@ export const ShoppingView: React.FC<ShoppingViewProps> = ({
           </p>
           <div className="flex items-center justify-center gap-2 pt-2">
             <button
-              onClick={() => setIsAutoImportOpen(true)}
+              onClick={onOpenAddShoppingItem}
               className="px-3.5 py-1.5 text-xs bg-[#8C7355] hover:bg-[#735D43] text-white cursor-pointer flex items-center gap-1.5"
             >
-              <Link2 className="w-3.5 h-3.5" />
-              Auto-Import from Link
-            </button>
-            <button
-              onClick={onOpenAddShoppingItem}
-              className="px-3.5 py-1.5 text-xs bg-[#F2F1ED] hover:bg-[#E5E3DC] text-[#1A1A1A] border border-[#E5E5E1] cursor-pointer"
-            >
-              Add Manually
+              <Plus className="w-3.5 h-3.5" />
+              Add Wishlist Item
             </button>
           </div>
         </div>
-      ) : displaySettings.viewMode === 'database' ? (
+      ) : displaySettings.viewMode === 'database' || (displaySettings.viewMode as any) === 'table' ? (
         /* DATABASE SPREADSHEET TABLE VIEW */
         <ShoppingDatabaseTable
           items={filteredItems}
@@ -1463,19 +1435,15 @@ export const ShoppingView: React.FC<ShoppingViewProps> = ({
                         <button
                           type="button"
                           onClick={(e) => handleToggleSelectItem(item.id, e)}
-                          className={`w-6 h-6 border shadow-xs flex items-center justify-center cursor-pointer transition-all ${
+                          className={`p-1.5 rounded-md backdrop-blur-xs shadow-xs border transition-all cursor-pointer flex items-center justify-center ${
                             isSelected
                               ? 'bg-[#8C7355] border-[#8C7355] text-white ring-2 ring-[#8C7355]/30'
-                              : 'bg-white/95 border-[#B5B5AF] text-transparent hover:border-[#8C7355] hover:bg-white'
+                              : 'bg-white/95 border-zinc-200 text-zinc-300 hover:text-zinc-600 hover:border-zinc-400'
                           }`}
                           title={isSelected ? 'Deselect item' : 'Select item for bulk actions'}
                           aria-label={isSelected ? 'Deselect item' : 'Select item'}
                         >
-                          {isSelected ? (
-                            <Check className="w-3.5 h-3.5 stroke-[3] text-white" />
-                          ) : (
-                            <span className="w-2.5 h-2.5 rounded-none border border-transparent" />
-                          )}
+                          <CheckSquare className="w-3.5 h-3.5" />
                         </button>
 
                         {/* Priority selector inline */}

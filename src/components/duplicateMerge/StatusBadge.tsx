@@ -1,5 +1,5 @@
 import React from 'react';
-import { Ban, CheckCircle2, Clock, DollarSign, Archive, Tag, ShoppingBag, FolderUp } from 'lucide-react';
+import { Ban, CheckCircle2, Clock, Archive, Tag, ShoppingBag, FolderUp } from 'lucide-react';
 import { ItemSource, StatusCategory } from './duplicateMergeTypes';
 
 interface StatusBadgeProps {
