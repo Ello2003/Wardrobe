@@ -1,6 +1,6 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import App from './App';
+import App from './App.tsx';
 import './index.css';
 
 // Guard against unhandled script errors propagating to iframe parent
