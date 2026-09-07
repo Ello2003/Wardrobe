@@ -182,7 +182,8 @@ export async function pushDatabaseToGithub(
     }
 
     // 2. Prepare JSON string and Base64 encoding
-    const jsonString = JSON.stringify(databasePayload, null, 2);
+    const sanitizedPayload = stripEmbeddedImages(databasePayload);
+    const jsonString = JSON.stringify(sanitizedPayload, null, 2);
     // Use UTF-8 safe base64 encoding
     const base64Content = btoa(
       encodeURIComponent(jsonString).replace(/%([0-9A-F]{2})/g, (_, p1) =>
