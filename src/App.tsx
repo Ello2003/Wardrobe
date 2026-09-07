@@ -313,4 +313,49 @@ const MainAppContent: React.FC = () => {
 
           <button
             onClick={dismissUndoToast}
-            className="
+            className="text-zinc-400 hover:text-white transition cursor-pointer"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
+      <footer className="border-t border-zinc-200 bg-white py-4 text-center text-xs text-zinc-500">
+        <div className="max-w-7xl mx-auto px-4 flex justify-between items-center">
+          <div>
+            &copy; {new Date().getFullYear()} Wardrobe System.
+            All rights reserved.
+          </div>
+
+          {currentVersion && (
+            <div className="flex items-center gap-1 text-zinc-400">
+              <History className="w-3 h-3" />
+              Version: {currentVersion}
+            </div>
+          )}
+        </div>
+      </footer>
+    </div>
+  );
+};
+
+export default function App() {
+  return (
+    <ErrorBoundary
+      fallbackTitle="Wardrobe & Lookbook Studio Recovery"
+      onClose={() => {
+        try {
+          localStorage.clear();
+        } catch {
+          // Ignore localStorage errors
+        }
+
+        window.location.reload();
+      }}
+    >
+      <WardrobeProvider>
+        <MainAppContent />
+      </WardrobeProvider>
+    </ErrorBoundary>
+  );
+}
