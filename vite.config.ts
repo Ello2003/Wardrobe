@@ -8,8 +8,12 @@ export default defineConfig(() => {
     base: '/Wardrobe/',
     plugins: [react(), tailwindcss()],
     resolve: {
-      alias: {
-        '@': path.resolve(__dirname, '.'),
+      
+
+        alias: {
+  '@': path.resolve(__dirname, './src'),
+}
+
       },
     },
     server: {
