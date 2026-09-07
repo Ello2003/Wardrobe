@@ -1,4 +1,4 @@
-```tsx
+
 import React, { useState, useEffect } from 'react';
 import { WardrobeProvider, useWardrobe } from './context/WardrobeContext';
 import { Navigation } from './components/Navigation';
