@@ -570,26 +570,26 @@ export const HumidorLosslessBackupModal: React.FC<HumidorLosslessBackupModalProp
                   <span className="text-xs font-mono font-bold text-[#1A1A1A]">Overall Integrity Score</span>
                   <span
                     className={`text-sm font-mono font-bold ${
-                      healthReport.healthScore >= 90
+                      healthReport.score >= 90
                         ? 'text-emerald-700'
-                        : healthReport.healthScore >= 75
+                        : healthReport.score >= 75
                         ? 'text-amber-700'
                         : 'text-rose-700'
                     }`}
                   >
-                    {healthReport.healthScore}% · {healthReport.healthScore >= 90 ? 'Optimal' : 'Needs Repair'}
+                    {healthReport.score}% · {healthReport.score >= 90 ? 'Optimal' : 'Needs Repair'}
                   </span>
                 </div>
                 <div className="w-full bg-[#E5E5E1] h-2 rounded-full overflow-hidden">
                   <div
                     className={`h-full transition-all ${
-                      healthReport.healthScore >= 90
+                      healthReport.score >= 90
                         ? 'bg-emerald-500'
-                        : healthReport.healthScore >= 75
+                        : healthReport.score >= 75
                         ? 'bg-amber-500'
                         : 'bg-rose-500'
                     }`}
-                    style={{ width: `${healthReport.healthScore}%` }}
+                    style={{ width: `${healthReport.score}%` }}
                   />
                 </div>
 
@@ -618,7 +618,7 @@ export const HumidorLosslessBackupModal: React.FC<HumidorLosslessBackupModalProp
                           <span className="font-bold uppercase tracking-wider text-[10px] mr-2">
                             [{issue.severity}]
                           </span>
-                          <span>{issue.description}</span>
+                          <span>{issue.message}</span>
                         </div>
                       </div>
                     ))
