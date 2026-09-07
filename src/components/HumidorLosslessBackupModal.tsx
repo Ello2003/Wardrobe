@@ -142,7 +142,7 @@ export const HumidorLosslessBackupModal: React.FC<HumidorLosslessBackupModalProp
       true
     );
 
-    const res = importDataJSON(importedJson);
+    const res = importDataJSON(JSON.stringify(validationResult.payload.data));
     if (res.success) {
       onNotify(
         'success',
@@ -223,8 +223,7 @@ export const HumidorLosslessBackupModal: React.FC<HumidorLosslessBackupModalProp
         true
       );
 
-      const res = importDataJSON(JSON.stringify({ ...current, data: repaired }));
-      if (res.success) {
+      const res = importDataJSON(JSON.stringify(repaired));      if (res.success) {
         onNotify('success', 'Database Doctor completed repairs! All references and fields harmonized.');
         handleRunDoctor();
       } else {
