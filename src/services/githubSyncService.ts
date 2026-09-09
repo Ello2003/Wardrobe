@@ -181,6 +181,25 @@ export async function pushDatabaseToGithub(
       currentSha = fileMeta.sha;
     }
 
+    function stripEmbeddedImages<T>(value: T): T {
+  if (typeof value === 'string') {
+    if (value.startsWith('data:image/')) {
+      return '[image omitted from GitHub sync]' as unknown as T;
+    }
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => stripEmbeddedImages(item)) as unknown as T;
+  }
+  if (value && typeof value === 'object') {
+    const result: Record<string, any> = {};
+    for (const [key, val] of Object.entries(value as Record<string, any>)) {
+      result[key] = stripEmbeddedImages(val);
+    }
+    return result as T;
+  }
+  return value;
+}
     // 2. Prepare JSON string and Base64 encoding
     const sanitizedPayload = stripEmbeddedImages(databasePayload);
     const jsonString = JSON.stringify(sanitizedPayload, null, 2);
