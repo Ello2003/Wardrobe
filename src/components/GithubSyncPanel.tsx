@@ -162,6 +162,31 @@ export const GithubSyncPanel: React.FC<GithubSyncPanelProps> = ({ onNotify }) =>
 
     setIsPulling(true);
     try {
+      
+         const res = await pullDatabaseFromGithub(config);
+      if (res.success && res.data) {
+        // Create safety snapshot
+        createSnapshot(
+          '[Pre-GitHub Pull Safety]',
+          `Automatic safety snapshot captured prior to pulling data from GitHub repository "${config.repo}".`,
+          true
+        );
+
+        const validation = validateLosslessBackup(res.data);
+        if (!validation.valid || !validation.payload) {
+          onNotify('error', validation.errors[0] || 'Pulled file is not a recognized backup format.');
+          return;
+        }
+
+        const importResult = importDataJSON(JSON.stringify(validation.payload.data));
+        if (importResult.success) {
+          onNotify('success', `Closet state restored from GitHub backup (${config.repo}/${config.filePath})!`);
+        } else {
+          onNotify('error', importResult.message || 'Failed to import backup data.');
+        }
+      } else {
+        onNotify('error', res.message);
+        
       const res = await pullDatabaseFromGithub(config);
       if (res.success && res.data) {
         // Create safety snapshot
@@ -171,7 +196,13 @@ export const GithubSyncPanel: React.FC<GithubSyncPanelProps> = ({ onNotify }) =>
           true
         );
 
-        const importResult = importDataJSON(JSON.stringify(res.data));
+        const validation = validateLosslessBackup(res.data);
+        if (!validation.valid || !validation.payload) {
+          onNotify('error', validation.errors[0] || 'Pulled file is not a recognized backup format.');
+          return;
+        }
+
+        const importResult = importDataJSON(JSON.stringify(validation.payload.data));
         if (importResult.success) {
           onNotify('success', `Closet state restored from GitHub backup (${config.repo}/${config.filePath})!`);
         } else {
@@ -180,11 +211,7 @@ export const GithubSyncPanel: React.FC<GithubSyncPanelProps> = ({ onNotify }) =>
       } else {
         onNotify('error', res.message);
       }
-    } catch (err: any) {
-      onNotify('error', err?.message || 'Failed to pull from GitHub.');
-    } finally {
-      setIsPulling(false);
-    }
+      
   };
 
   return (
