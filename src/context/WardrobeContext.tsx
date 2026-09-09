@@ -4166,6 +4166,7 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         if (Array.isArray(parsed.shoppingList)) setShoppingList(parsed.shoppingList);
         if (Array.isArray(parsed.saleItems)) setSaleItems(parsed.saleItems);
         if (Array.isArray(parsed.snapshots)) setSnapshots(parsed.snapshots);
+            if (Array.isArray(parsed.categories) && parsed.categories.length > 0) setCategories(parsed.categories);
         if (parsed.monthlyBudget) setMonthlyBudget(parsed.monthlyBudget);
 
         recordChange(
