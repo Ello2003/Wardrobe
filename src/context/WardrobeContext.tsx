@@ -4139,6 +4139,7 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       saleItems,
       snapshots,
       changeLogs,
+      categories,
       monthlyBudget,
     };
 
@@ -4149,8 +4150,8 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     document.body.appendChild(downloadAnchor);
     downloadAnchor.click();
     downloadAnchor.remove();
-  }, [items, outfits, shoppingList, saleItems, snapshots, changeLogs, monthlyBudget]);
-
+  }, [items, outfits, shoppingList, saleItems, snapshots, changeLogs, categories, monthlyBudget]);
+            
   // 20. IMPORT DATA JSON
   const importDataJSON = useCallback(
     (jsonString: string) => {
