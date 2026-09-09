@@ -8,7 +8,7 @@ import {
   pullDatabaseFromGithub,
 } from '../services/githubSyncService';
 import { useWardrobe } from '../context/WardrobeContext';
-import { createLosslessBackup } from '../services/losslessBackupService';
+import { createLosslessBackup, validateLosslessBackup } from '../services/losslessBackupService';
 import {
   Github,
   CheckCircle2,
@@ -162,31 +162,6 @@ export const GithubSyncPanel: React.FC<GithubSyncPanelProps> = ({ onNotify }) =>
 
     setIsPulling(true);
     try {
-      
-         const res = await pullDatabaseFromGithub(config);
-      if (res.success && res.data) {
-        // Create safety snapshot
-        createSnapshot(
-          '[Pre-GitHub Pull Safety]',
-          `Automatic safety snapshot captured prior to pulling data from GitHub repository "${config.repo}".`,
-          true
-        );
-
-        const validation = validateLosslessBackup(res.data);
-        if (!validation.valid || !validation.payload) {
-          onNotify('error', validation.errors[0] || 'Pulled file is not a recognized backup format.');
-          return;
-        }
-
-        const importResult = importDataJSON(JSON.stringify(validation.payload.data));
-        if (importResult.success) {
-          onNotify('success', `Closet state restored from GitHub backup (${config.repo}/${config.filePath})!`);
-        } else {
-          onNotify('error', importResult.message || 'Failed to import backup data.');
-        }
-      } else {
-        onNotify('error', res.message);
-        
       const res = await pullDatabaseFromGithub(config);
       if (res.success && res.data) {
         // Create safety snapshot
@@ -211,7 +186,11 @@ export const GithubSyncPanel: React.FC<GithubSyncPanelProps> = ({ onNotify }) =>
       } else {
         onNotify('error', res.message);
       }
-      
+    } catch (err: any) {
+      onNotify('error', err?.message || 'Failed to pull from GitHub.');
+    } finally {
+      setIsPulling(false);
+    }
   };
 
   return (
@@ -433,7 +412,24 @@ export const GithubSyncPanel: React.FC<GithubSyncPanelProps> = ({ onNotify }) =>
             />
           </div>
 
-          <div className="pt-2 border-t border-[#E5E5E1]">
+          <div className="pt-2 border-t border-[#E5E5E1] space-y-3">
+            <label className="flex items-center gap-3 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={config.stripImages !== false}
+                onChange={(e) => handleUpdateConfig({ stripImages: e.target.checked })}
+                className="w-4 h-4 text-[#8C7355] border-[#D5D5D0] rounded-none focus:ring-0 cursor-pointer"
+              />
+              <div>
+                <span className="text-xs font-semibold text-[#1A1A1A]">
+                  Strip Large Embedded Photos on GitHub Sync (Recommended)
+                </span>
+                <p className="text-[10px] text-[#767670] font-mono">
+                  Removes bulky local base64 photo data so sync payloads stay under GitHub's 1MB API limit. External photo URLs remain intact, and existing local photos are safely preserved when pulling.
+                </p>
+              </div>
+            </label>
+
             <label className="flex items-center gap-3 cursor-pointer select-none">
               <input
                 type="checkbox"

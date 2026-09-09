@@ -192,6 +192,7 @@ export const VersionHistoryView: React.FC<VersionHistoryViewProps> = ({
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    const inputEl = e.target;
 
     const reader = new FileReader();
     reader.onload = (event) => {
@@ -199,7 +200,13 @@ export const VersionHistoryView: React.FC<VersionHistoryViewProps> = ({
       if (content) {
         const result = importDataJSON(content);
         setImportStatus(result);
+        setStatusNotification({
+          type: result.success ? 'success' : 'error',
+          message: result.message,
+        });
+        setTimeout(() => setStatusNotification(null), 6000);
       }
+      inputEl.value = '';
     };
     reader.readAsText(file);
   };

@@ -101,6 +101,7 @@ export const HumidorLosslessBackupModal: React.FC<HumidorLosslessBackupModalProp
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    const inputEl = e.target;
 
     const reader = new FileReader();
     reader.onload = (event) => {
@@ -127,6 +128,7 @@ export const HumidorLosslessBackupModal: React.FC<HumidorLosslessBackupModalProp
           setDiffSummary(null);
         }
       }
+      inputEl.value = '';
     };
     reader.readAsText(file);
   };
@@ -142,7 +144,7 @@ export const HumidorLosslessBackupModal: React.FC<HumidorLosslessBackupModalProp
       true
     );
 
-    const res = importDataJSON(JSON.stringify(validationResult.payload.data));
+    const res = importDataJSON(importedJson, { mode });
     if (res.success) {
       onNotify(
         'success',
@@ -223,7 +225,8 @@ export const HumidorLosslessBackupModal: React.FC<HumidorLosslessBackupModalProp
         true
       );
 
-      const res = importDataJSON(JSON.stringify(repaired));      if (res.success) {
+      const res = importDataJSON(JSON.stringify({ ...current, data: repaired }));
+      if (res.success) {
         onNotify('success', 'Database Doctor completed repairs! All references and fields harmonized.');
         handleRunDoctor();
       } else {
@@ -570,26 +573,26 @@ export const HumidorLosslessBackupModal: React.FC<HumidorLosslessBackupModalProp
                   <span className="text-xs font-mono font-bold text-[#1A1A1A]">Overall Integrity Score</span>
                   <span
                     className={`text-sm font-mono font-bold ${
-                      healthReport.score >= 90
+                      healthReport.healthScore >= 90
                         ? 'text-emerald-700'
-                        : healthReport.score >= 75
+                        : healthReport.healthScore >= 75
                         ? 'text-amber-700'
                         : 'text-rose-700'
                     }`}
                   >
-                    {healthReport.score}% · {healthReport.score >= 90 ? 'Optimal' : 'Needs Repair'}
+                    {healthReport.healthScore}% · {healthReport.healthScore >= 90 ? 'Optimal' : 'Needs Repair'}
                   </span>
                 </div>
                 <div className="w-full bg-[#E5E5E1] h-2 rounded-full overflow-hidden">
                   <div
                     className={`h-full transition-all ${
-                      healthReport.score >= 90
+                      healthReport.healthScore >= 90
                         ? 'bg-emerald-500'
-                        : healthReport.score >= 75
+                        : healthReport.healthScore >= 75
                         ? 'bg-amber-500'
                         : 'bg-rose-500'
                     }`}
-                    style={{ width: `${healthReport.score}%` }}
+                    style={{ width: `${healthReport.healthScore}%` }}
                   />
                 </div>
 
@@ -618,7 +621,7 @@ export const HumidorLosslessBackupModal: React.FC<HumidorLosslessBackupModalProp
                           <span className="font-bold uppercase tracking-wider text-[10px] mr-2">
                             [{issue.severity}]
                           </span>
-                          <span>{issue.message}</span>
+                          <span>{issue.description}</span>
                         </div>
                       </div>
                     ))

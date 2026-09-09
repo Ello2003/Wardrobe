@@ -40,7 +40,8 @@ export const GarmentImage: React.FC<GarmentImageProps> = ({
 
   // Clean empty or invalid src checks
   const trimmedSrc = src?.trim();
-  const hasValidSrc = Boolean(trimmedSrc && trimmedSrc !== '' && !hasError);
+  const isOmitted = Boolean(trimmedSrc?.startsWith('[image omitted'));
+  const hasValidSrc = Boolean(trimmedSrc && trimmedSrc !== '' && !hasError && !isOmitted);
 
   const getCategoryIcon = () => {
     const cat = (category || '').toLowerCase();
@@ -95,7 +96,8 @@ export const GarmentImage: React.FC<GarmentImageProps> = ({
                 {category || 'Garment'}
               </span>
               <span className="text-[9px] font-mono text-[#A5A59E] flex items-center justify-center gap-1">
-                <ImageOff className="w-2.5 h-2.5" /> No Photo
+                <ImageOff className="w-2.5 h-2.5" />
+                {isOmitted ? 'Photo in Local Cache' : 'No Photo'}
               </span>
             </div>
           )}

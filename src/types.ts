@@ -68,6 +68,7 @@ export interface VintedWorkerAuth {
   csrfToken: string;
   refreshToken?: string;
   cookie?: string;
+  username?: string;
   autoRouteOrders?: boolean; // true = purchased -> wardrobe, sold -> resale
   defaultImportDestination?: 'wardrobe' | 'shopping' | 'selling';
 }
@@ -79,6 +80,7 @@ export const DEFAULT_VINTED_WORKER_AUTH: VintedWorkerAuth = {
   csrfToken: '',
   refreshToken: '',
   cookie: '',
+  username: '',
   autoRouteOrders: true,
   defaultImportDestination: 'wardrobe',
 };
@@ -234,6 +236,7 @@ export interface ShoppingItem {
   addedDate: string;
   createdAt?: string;
   purchasedDate?: string;
+  notes?: string;
   // Vinted & Acquisition Metadata
   size?: string;
   color?: string;
@@ -280,6 +283,8 @@ export interface SaleItem {
   category: Category;
   size?: string;
   color?: string;
+  material?: string;
+  seller?: string;
   condition: Condition;
   originalPricePaid: number; // £ cost basis
   listingPrice: number; // £ asking price

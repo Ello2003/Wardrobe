@@ -145,6 +145,7 @@ interface WardrobeContextType {
   // Global Taxonomy Actions
   renameTagGlobally: (oldTag: string, newTag: string) => void;
   deleteTagGlobally: (tag: string) => void;
+  deleteMultipleTagsGlobally: (tags: string[]) => void;
   renameBrandGlobally: (oldBrand: string, newBrand: string) => void;
 
   // Category Actions
@@ -327,7 +328,10 @@ interface WardrobeContextType {
   };
   updateMonthlyBudget: (newBudgetGbp: number) => void;
   exportDataJSON: () => void;
-  importDataJSON: (jsonString: string) => { success: boolean; message: string };
+  importDataJSON: (
+    jsonString: string,
+    options?: { mode?: 'overwrite' | 'merge' }
+  ) => { success: boolean; message: string };
   resetToDefaultData: () => void;
   clearDatabase: () => void;
 
@@ -3219,6 +3223,53 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     [captureUndoState, updateSettings, settings.customTags, recordChange]
   );
 
+  // GLOBAL TAXONOMY: Delete Multiple Tags Globally in Bulk
+  const deleteMultipleTagsGlobally = useCallback(
+    (tagsToDelete: string[]) => {
+      if (!tagsToDelete || tagsToDelete.length === 0) return;
+      const tagSet = new Set(tagsToDelete.map((t) => t.trim().toLowerCase()));
+      captureUndoState(`Removed ${tagsToDelete.length} tag(s) in bulk`);
+
+      setItems((prev) =>
+        prev.map((i) => ({
+          ...i,
+          tags: (i.tags || []).filter((t) => !tagSet.has(t.trim().toLowerCase())),
+        }))
+      );
+      setShoppingList((prev) =>
+        prev.map((s) => ({
+          ...s,
+          tags: (s.tags || []).filter((t) => !tagSet.has(t.trim().toLowerCase())),
+        }))
+      );
+      setSaleItems((prev) =>
+        prev.map((s) => ({
+          ...s,
+          tags: (s.tags || []).filter((t) => !tagSet.has(t.trim().toLowerCase())),
+        }))
+      );
+      setOutfits((prev) =>
+        prev.map((o) => ({
+          ...o,
+          tags: (o.tags || []).filter((t) => !tagSet.has(t.trim().toLowerCase())),
+        }))
+      );
+      updateSettings({
+        customTags: (settings.customTags || []).filter(
+          (t) => !tagSet.has(t.trim().toLowerCase())
+        ),
+      });
+
+      recordChange(
+        'CATEGORY_DELETED',
+        'system',
+        'Bulk Tags Removed',
+        `Deleted ${tagsToDelete.length} tags across all garments, looks, and listings: ${tagsToDelete.join(', ')}.`
+      );
+    },
+    [captureUndoState, updateSettings, settings.customTags, recordChange]
+  );
+
   // GLOBAL TAXONOMY: Rename Brand Globally
   const renameBrandGlobally = useCallback(
     (oldBrand: string, newBrand: string) => {
@@ -4128,6 +4179,16 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   // 19. EXPORT DATA JSON BACKUP
   const exportDataJSON = useCallback(() => {
+    // Collect all explicit and active categories across all collections
+    const allCategories = Array.from(
+      new Set([
+        ...categories,
+        ...items.map((i) => i.category).filter(Boolean),
+        ...shoppingList.map((s) => s.category).filter(Boolean),
+        ...saleItems.map((sl) => sl.category).filter(Boolean),
+      ])
+    );
+
     const exportPayload = {
       app: 'Wardrobe & Lookbook Studio',
       currency: 'GBP (£)',
@@ -4139,7 +4200,7 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       saleItems,
       snapshots,
       changeLogs,
-      categories,
+      categories: allCategories,
       monthlyBudget,
     };
 
@@ -4154,34 +4215,166 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             
   // 20. IMPORT DATA JSON
   const importDataJSON = useCallback(
-    (jsonString: string) => {
+    (jsonString: string, options?: { mode?: 'overwrite' | 'merge' }) => {
       try {
         const parsed = JSON.parse(jsonString);
-        if (!parsed.items || !Array.isArray(parsed.items)) {
-          return { success: false, message: 'Invalid JSON schema: Missing items array.' };
+        if (!parsed || typeof parsed !== 'object') {
+          return { success: false, message: 'Invalid backup file: Not a valid JSON structure.' };
         }
 
-        setItems(parsed.items);
-        if (Array.isArray(parsed.outfits)) setOutfits(parsed.outfits);
-        if (Array.isArray(parsed.shoppingList)) setShoppingList(parsed.shoppingList);
-        if (Array.isArray(parsed.saleItems)) setSaleItems(parsed.saleItems);
-        if (Array.isArray(parsed.snapshots)) setSnapshots(parsed.snapshots);
-            if (Array.isArray(parsed.categories) && parsed.categories.length > 0) setCategories(parsed.categories);
-        if (parsed.monthlyBudget) setMonthlyBudget(parsed.monthlyBudget);
+        // Unpack from nested payload if needed (handles Humidor lossless format { data: { items: ... } }, flat { items: ... }, or array)
+        let container = parsed;
+        if (parsed.data && typeof parsed.data === 'object' && Array.isArray(parsed.data.items)) {
+          container = parsed.data;
+        } else if (Array.isArray(parsed)) {
+          container = { items: parsed };
+        }
+
+        const incomingItems: WardrobeItem[] = Array.isArray(container.items) ? container.items : [];
+        if (!incomingItems || incomingItems.length === 0) {
+          return { success: false, message: 'Invalid JSON schema: No garments or items collection found.' };
+        }
+
+        const mode = options?.mode || 'overwrite';
+
+        // Strip images fallback: preserve local high-res photos if incoming images are stripped or omitted
+        const existingItemMap = new Map(items.map((it) => [it.id, it]));
+        const sanitizedItems = incomingItems.map((incoming) => {
+          const existing = existingItemMap.get(incoming.id);
+          if (
+            (!incoming.imageUrl || incoming.imageUrl.startsWith('[image omitted') || incoming.imageUrl.trim() === '') &&
+            existing &&
+            existing.imageUrl &&
+            !existing.imageUrl.startsWith('[image omitted')
+          ) {
+            return { ...incoming, imageUrl: existing.imageUrl };
+          }
+          return incoming;
+        });
+
+        const existingSaleMap = new Map(saleItems.map((s) => [s.id, s]));
+        const sanitizedSaleItems = Array.isArray(container.saleItems)
+          ? container.saleItems.map((incoming: any) => {
+              const existing = existingSaleMap.get(incoming.id);
+              if (
+                (!incoming.imageUrl || incoming.imageUrl.startsWith('[image omitted') || incoming.imageUrl.trim() === '') &&
+                existing &&
+                existing.imageUrl &&
+                !existing.imageUrl.startsWith('[image omitted')
+              ) {
+                return { ...incoming, imageUrl: existing.imageUrl };
+              }
+              return incoming;
+            })
+          : [];
+
+        const existingShopMap = new Map(shoppingList.map((sh) => [sh.id, sh]));
+        const sanitizedShoppingList = Array.isArray(container.shoppingList)
+          ? container.shoppingList.map((incoming: any) => {
+              const existing = existingShopMap.get(incoming.id);
+              if (
+                (!incoming.imageUrl || incoming.imageUrl.startsWith('[image omitted') || incoming.imageUrl.trim() === '') &&
+                existing &&
+                existing.imageUrl &&
+                !existing.imageUrl.startsWith('[image omitted')
+              ) {
+                return { ...incoming, imageUrl: existing.imageUrl };
+              }
+              return incoming;
+            })
+          : [];
+
+        // 1. Comprehensive Categories Extraction & Persistence
+        const explicitCategories: string[] = Array.isArray(container.categories)
+          ? container.categories
+          : Array.isArray(parsed.categories)
+          ? parsed.categories
+          : [];
+
+        const extractedCategories = new Set<string>();
+        // Add explicit categories
+        explicitCategories.forEach((c) => {
+          if (typeof c === 'string' && c.trim()) extractedCategories.add(c.trim());
+        });
+        // Discover any categories defined on items, shopping list, and sale items
+        sanitizedItems.forEach((i) => {
+          if (typeof i.category === 'string' && i.category.trim()) extractedCategories.add(i.category.trim());
+        });
+        (container.shoppingList || []).forEach((s: any) => {
+          if (typeof s.category === 'string' && s.category.trim()) extractedCategories.add(s.category.trim());
+        });
+        (container.saleItems || []).forEach((sl: any) => {
+          if (typeof sl.category === 'string' && sl.category.trim()) extractedCategories.add(sl.category.trim());
+        });
+
+        // Fallback to default categories if empty
+        if (extractedCategories.size === 0) {
+          DEFAULT_CATEGORIES.forEach((c) => extractedCategories.add(c));
+        }
+
+        const resolvedCategories = Array.from(extractedCategories);
+        setCategories(resolvedCategories);
+        try {
+          localStorage.setItem(`${STORAGE_KEY}_categories`, JSON.stringify(resolvedCategories));
+        } catch (e) {
+          console.error('Failed to persist categories to localStorage', e);
+        }
+
+        if (mode === 'merge') {
+          // Merge items
+          const incomingIds = new Set(sanitizedItems.map((it) => it.id));
+          const retainedItems = items.filter((it) => !incomingIds.has(it.id));
+          setItems([...sanitizedItems, ...retainedItems]);
+
+          // Merge outfits
+          if (Array.isArray(container.outfits)) {
+            const incomingOutfitIds = new Set(container.outfits.map((o: any) => o.id));
+            const retainedOutfits = outfits.filter((o) => !incomingOutfitIds.has(o.id));
+            setOutfits([...container.outfits, ...retainedOutfits]);
+          }
+
+          // Merge shopping
+          if (Array.isArray(container.shoppingList)) {
+            const incomingShopIds = new Set(sanitizedShoppingList.map((s) => s.id));
+            const retainedShopping = shoppingList.filter((s) => !incomingShopIds.has(s.id));
+            setShoppingList([...sanitizedShoppingList, ...retainedShopping]);
+          }
+
+          // Merge sales
+          if (Array.isArray(container.saleItems)) {
+            const incomingSaleIds = new Set(sanitizedSaleItems.map((s) => s.id));
+            const retainedSales = saleItems.filter((s) => !incomingSaleIds.has(s.id));
+            setSaleItems([...sanitizedSaleItems, ...retainedSales]);
+          }
+        } else {
+          // Overwrite mode
+          setItems(sanitizedItems);
+          if (Array.isArray(container.outfits)) setOutfits(container.outfits);
+          if (Array.isArray(container.shoppingList)) setShoppingList(sanitizedShoppingList);
+          if (Array.isArray(container.saleItems)) setSaleItems(sanitizedSaleItems);
+          if (Array.isArray(container.snapshots)) setSnapshots(container.snapshots);
+        }
+
+        if (container.monthlyBudget || parsed.monthlyBudget) {
+          setMonthlyBudget(Number(container.monthlyBudget || parsed.monthlyBudget));
+        }
 
         recordChange(
           'BULK_IMPORT',
           'system',
           'JSON Backup Restore',
-          `Imported full wardrobe backup containing ${parsed.items.length} items and ${parsed.outfits?.length || 0} looks.`
+          `Restored wardrobe database (${sanitizedItems.length} items, ${resolvedCategories.length} categories, ${container.outfits?.length || 0} looks) in ${mode} mode.`
         );
 
-        return { success: true, message: `Successfully restored ${parsed.items.length} items and ${parsed.outfits?.length || 0} looks.` };
+        return {
+          success: true,
+          message: `Successfully restored ${sanitizedItems.length} items, ${resolvedCategories.length} categories, and ${container.outfits?.length || 0} looks.`,
+        };
       } catch (err: any) {
         return { success: false, message: err?.message || 'Failed to parse JSON file.' };
       }
     },
-    [recordChange]
+    [items, outfits, shoppingList, saleItems, recordChange]
   );
 
   // CATEGORY MANAGEMENT
@@ -4480,6 +4673,7 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       batchAddSaleItems,
       renameTagGlobally,
       deleteTagGlobally,
+      deleteMultipleTagsGlobally,
       renameBrandGlobally,
       addCategory,
       updateCategory,
@@ -4573,6 +4767,7 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       batchAddSaleItems,
       renameTagGlobally,
       deleteTagGlobally,
+      deleteMultipleTagsGlobally,
       renameBrandGlobally,
       addCategory,
       updateCategory,

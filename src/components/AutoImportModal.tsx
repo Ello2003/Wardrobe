@@ -19,6 +19,7 @@ import {
   isCancelledStatus,
   LIFECYCLE_TAGS,
 } from '../utils/tagUtils';
+import { extractAllGarmentAttributes } from '../utils/garmentAttributeExtractor';
 import {
   Link2,
   Sparkles,
@@ -500,15 +501,40 @@ export const AutoImportModal: React.FC<AutoImportModalProps> = ({
 
       const itemDestination = raw.destination || (isSale ? 'selling' : globalDestination);
 
+      // Extract high-accuracy attributes (brand, color, material, size)
+      const attrs = extractAllGarmentAttributes({
+        title: raw.name || raw.title || '',
+        description: [raw.description, raw.notes, raw.careNotes].filter(Boolean).join(' '),
+        brand: raw.brand,
+        color: raw.color || raw.colour,
+        material: raw.material,
+        size: raw.size,
+        seller: raw.seller,
+      });
+
+      // Never allow 'Vinted', 'Designer Brand', 'Unknown', or 'Online Store' to be assigned as the actual fashion brand
+      let resolvedBrand = attrs.brand && attrs.brand !== 'Unbranded' ? attrs.brand : '';
+      if (!resolvedBrand && raw.brand && !/^vinted(?:\s*(?:item|order|listing))?$/i.test(raw.brand) && !/^designer brand$/i.test(raw.brand)) {
+        resolvedBrand = raw.brand;
+      }
+      if (!resolvedBrand) {
+        resolvedBrand = 'Pre-Loved Brand';
+      }
+
+      const resolvedColor = attrs.color || raw.color || raw.colour || 'Neutral';
+      const resolvedMaterial = attrs.material || raw.material || 'Natural Fiber / Blend';
+      const resolvedSize = attrs.size || raw.size || '';
+      const resolvedRetailer = raw.retailerName || (raw.targetStoreUrl?.includes('vinted') || activeTab === 'vinted' ? 'Vinted' : retailer) || 'Vinted';
+
       return {
         id: `extracted-${Date.now()}-${idx}`,
-        name: raw.name || `Garment #${idx + 1}`,
-        brand: raw.brand || 'Designer Brand',
+        name: raw.name || raw.title || `Garment #${idx + 1}`,
+        brand: resolvedBrand,
         category: validCategory,
         purchasePrice: Number(raw.purchasePrice) || 80,
-        color: raw.color || 'Neutral',
-        material: raw.material || 'Premium Fabric',
-        size: raw.size || '',
+        color: resolvedColor,
+        material: resolvedMaterial,
+        size: resolvedSize,
         season: Array.isArray(raw.season) && raw.season.length > 0 ? raw.season : ['Autumn', 'Winter'],
         condition: raw.condition || 'Pristine / New',
         careNotes: raw.careNotes || '',
@@ -519,7 +545,7 @@ export const AutoImportModal: React.FC<AutoImportModalProps> = ({
           ? raw.allCandidateImages.filter((img: string) => img && !img.includes('unsplash.com'))
           : (raw.imageUrl && !raw.imageUrl.includes('unsplash.com') ? [raw.imageUrl] : []),
         targetStoreUrl: raw.targetStoreUrl || (activeTab === 'url' ? urlInput : undefined),
-        retailerName: raw.retailerName || retailer || 'Online Store',
+        retailerName: resolvedRetailer,
         orderStatus: raw.orderStatus || undefined,
         orderDate: raw.orderDate || undefined,
         lastUpdatedDate: raw.lastUpdatedDate || undefined,
@@ -572,14 +598,30 @@ export const AutoImportModal: React.FC<AutoImportModalProps> = ({
             const cat = normalizeCategoryName(inferCategoryFromTitle(vintedItem.title), categories);
             const isSale = globalDestination === 'selling';
 
+            const attrs = extractAllGarmentAttributes({
+              title: vintedItem.title || '',
+              description: vintedItem.description || '',
+              brand: vintedItem.brand,
+              color: vintedItem.colour,
+              material: vintedItem.material,
+              size: vintedItem.size,
+              seller: vintedItem.seller,
+            });
+
+            const garmentBrand = (attrs.brand && attrs.brand !== 'Unbranded')
+              ? attrs.brand
+              : (vintedItem.brand && !/^vinted/i.test(vintedItem.brand) ? vintedItem.brand : 'Pre-Loved Brand');
+
             normalizeExtractedItems(
               [
                 {
                   name: vintedItem.title || 'Vinted Listing',
-                  brand: vintedItem.brand || 'Vinted',
+                  brand: garmentBrand,
                   category: cat,
                   purchasePrice: p,
-                  color: vintedItem.colour || 'Various',
+                  size: attrs.size || vintedItem.size || '',
+                  color: attrs.color || vintedItem.colour || 'Neutral',
+                  material: attrs.material || vintedItem.material || 'Natural Fiber / Blend',
                   condition: vintedItem.condition || 'Good',
                   season: ['All-Season'],
                   imageUrl: vintedItem.image || '',
@@ -951,12 +993,27 @@ export const AutoImportModal: React.FC<AutoImportModalProps> = ({
           sourceType: 'account-scrape',
         });
 
+        const attrs = extractAllGarmentAttributes({
+          title: l.title || '',
+          description: l.description || '',
+          brand: l.brand,
+          color: l.color,
+          material: l.material,
+          size: l.size,
+          seller: result.user?.username,
+        });
+
+        const garmentBrand = (attrs.brand && attrs.brand !== 'Unbranded')
+          ? attrs.brand
+          : (l.brand && !/^vinted/i.test(l.brand) ? l.brand : 'Pre-Loved Brand');
+
         return {
           name: l.title || `Vinted Listing #${l.id || idx + 1}`,
-          brand: l.brand || 'Vinted',
+          brand: garmentBrand,
           category: cat,
-          size: l.size || '',
-          color: l.color || 'Various',
+          size: attrs.size || l.size || '',
+          color: attrs.color || l.color || 'Neutral',
+          material: attrs.material || l.material || 'Natural Fiber / Blend',
           purchasePrice: p,
           season: ['All-Season'],
           condition: l.condition || 'Good',
@@ -1016,14 +1073,29 @@ export const AutoImportModal: React.FC<AutoImportModalProps> = ({
           ? ['purchased', 'sold', 'active']
           : [vintedSyncType];
 
+      // Provide username or profile input if available
+      const accountInput = (workerAuth.username || vintedAccountInput || '').trim();
+      const effectiveAuth = {
+        ...workerAuth,
+        username: accountInput,
+      };
+      if (accountInput && !workerAuth.username) {
+        updateSettings({
+          vintedWorkerAuth: {
+            ...workerAuth,
+            username: accountInput,
+          },
+        });
+      }
+
       const res = await fetchAllVintedOrders(
-        workerAuth,
+        effectiveAuth,
         typesToSync,
         (msg) => setVintedSyncProgress(msg),
         (newToken) => {
           updateSettings({
             vintedWorkerAuth: {
-              ...workerAuth,
+              ...effectiveAuth,
               accessToken: newToken,
             },
           });
@@ -1068,12 +1140,28 @@ export const AutoImportModal: React.FC<AutoImportModalProps> = ({
           ? 'selling'
           : (workerAuth.defaultImportDestination || globalDestination);
 
+        const attrs = extractAllGarmentAttributes({
+          title: o.title || '',
+          description: o.description || o.transactionStatus || '',
+          brand: o.brand,
+          color: o.color,
+          material: o.material,
+          size: o.size,
+          seller: o.seller,
+        });
+
+        const garmentBrand = (attrs.brand && attrs.brand !== 'Unbranded')
+          ? attrs.brand
+          : (o.brand && !/^vinted/i.test(o.brand) ? o.brand : 'Pre-Loved Brand');
+
         return {
           name: o.title || `Vinted Order #${o.orderId}`,
-          brand: 'Vinted',
+          brand: garmentBrand,
           category: cat,
           purchasePrice: p,
-          color: 'Various',
+          size: attrs.size || o.size || '',
+          color: attrs.color || o.color || 'Neutral',
+          material: attrs.material || o.material || 'Natural Fiber / Blend',
           season: ['All-Season'],
           condition: 'Good',
           imageUrl: o.image || '',
@@ -1094,6 +1182,7 @@ export const AutoImportModal: React.FC<AutoImportModalProps> = ({
             existingTags: ['account-sync'],
           }),
           notes: o.transactionStatus ? `Vinted ${o.type} · ${o.transactionStatus}` : `Vinted ${o.type} order`,
+          seller: o.seller,
         };
       });
 
@@ -1158,12 +1247,29 @@ export const AutoImportModal: React.FC<AutoImportModalProps> = ({
         const p = typeof it.price === 'number' ? it.price : parseFloat(String(it.price || '0').replace(/[^0-9.]/g, '')) || 0;
         const cat = normalizeCategoryName(inferCategoryFromTitle(it.title), categories);
         const isSale = globalDestination === 'selling';
+
+        const attrs = extractAllGarmentAttributes({
+          title: it.title || '',
+          description: it.description || '',
+          brand: it.brand,
+          color: it.colour,
+          material: it.material,
+          size: it.size,
+          seller: it.seller,
+        });
+
+        const garmentBrand = (attrs.brand && attrs.brand !== 'Unbranded')
+          ? attrs.brand
+          : (it.brand && !/^vinted/i.test(it.brand) ? it.brand : 'Pre-Loved Brand');
+
         return {
           name: it.title || 'Vinted Listing',
-          brand: it.brand || 'Vinted',
+          brand: garmentBrand,
           category: cat,
           purchasePrice: p,
-          color: it.colour || 'Various',
+          size: attrs.size || it.size || '',
+          color: attrs.color || it.colour || 'Neutral',
+          material: attrs.material || it.material || 'Natural Fiber / Blend',
           condition: it.condition || 'Good',
           season: ['All-Season'],
           imageUrl: it.image || '',
@@ -2438,6 +2544,53 @@ export const AutoImportModal: React.FC<AutoImportModalProps> = ({
                     </div>
                   </div>
 
+                  {/* Active Closet Username Input */}
+                  {(vintedSyncType === 'active' || vintedSyncType === 'all') && (
+                    <div className="p-3 bg-teal-50/70 border border-[#007782]/30 space-y-2">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                        <label className="text-[11px] font-mono font-semibold text-[#004A52] uppercase tracking-wider flex items-center gap-1.5">
+                          <User className="w-3.5 h-3.5 text-[#007782]" />
+                          <span>Vinted Username or Closet URL (for Active Wardrobe)</span>
+                        </label>
+                        {settings.vintedWorkerAuth?.username && (
+                          <span className="text-[10px] font-mono text-[#007782] bg-white px-1.5 py-0.5 border border-[#BCE4E6] self-start sm:self-auto">
+                            Saved: @{settings.vintedWorkerAuth.username}
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          value={vintedAccountInput || settings.vintedWorkerAuth?.username || ''}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setVintedAccountInput(val);
+                            if (settings.vintedWorkerAuth) {
+                              updateSettings({
+                                vintedWorkerAuth: {
+                                  ...settings.vintedWorkerAuth,
+                                  username: val.trim(),
+                                },
+                              });
+                            }
+                          }}
+                          placeholder="e.g. @yourusername or https://www.vinted.co.uk/member/12345678-yourusername"
+                          className="flex-1 px-2.5 py-1.5 text-xs font-mono bg-white border border-[#BCE4E6] text-[#1A1A1A] focus:outline-none focus:border-[#007782]"
+                        />
+                      </div>
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between text-[10px] text-[#00606A] gap-1">
+                        <span>Used to scrape items currently listed for sale in your closet</span>
+                        <button
+                          type="button"
+                          onClick={() => setVintedSubTab('files')}
+                          className="underline hover:text-[#004A52] cursor-pointer text-left sm:text-right"
+                        >
+                          Facing bot verification? Upload saved HTML or PDF instead →
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
                   {/* Sync Progress Banner */}
                   {vintedSyncProgress && (
                     <div className="p-3 bg-teal-50 border border-teal-300 text-teal-900 text-xs font-mono flex items-center gap-2">
@@ -2886,13 +3039,69 @@ export const AutoImportModal: React.FC<AutoImportModalProps> = ({
                 <div className="flex-1">
                   <p className="font-semibold">{error}</p>
                   <p className="text-[11px] text-rose-700 mt-0.5">
-                    Some online retailers protect or block automated web scrapers. You can immediately drag &amp; drop a screenshot or product image below to extract with Vision AI instead.
+                    Some online retailers protect or block automated web scrapers. You can immediately enter your closet details, upload saved HTML, or drag &amp; drop a screenshot/product image below to extract with Vision AI.
                   </p>
+
+                  {/* Vinted-specific inline quick recovery */}
+                  {(error.toLowerCase().includes('vinted') || error.toLowerCase().includes('active listings') || activeTab === 'vinted') && (
+                    <div className="mt-2.5 p-2.5 bg-white border border-rose-200 space-y-2">
+                      <div className="text-[11px] font-mono font-semibold text-[#1A1A1A] flex items-center gap-1.5">
+                        <User className="w-3.5 h-3.5 text-[#007782]" />
+                        <span>Enter your Vinted @username or profile URL to sync active closet items:</span>
+                      </div>
+                      <div className="flex flex-col sm:flex-row gap-2">
+                        <input
+                          type="text"
+                          value={vintedAccountInput}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setVintedAccountInput(val);
+                            if (settings.vintedWorkerAuth) {
+                              updateSettings({
+                                vintedWorkerAuth: {
+                                  ...settings.vintedWorkerAuth,
+                                  username: val.trim(),
+                                },
+                              });
+                            }
+                          }}
+                          placeholder="e.g. @yourusername or https://www.vinted.co.uk/member/12345-username"
+                          className="flex-1 px-2 py-1 text-xs border border-[#D5D5D0] font-mono focus:outline-none focus:border-[#007782]"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setError(null);
+                            handleSyncVintedOrders('preview');
+                          }}
+                          disabled={!vintedAccountInput.trim()}
+                          className="px-3 py-1 bg-[#007782] text-white text-xs font-mono font-semibold hover:bg-[#005E67] disabled:opacity-50 cursor-pointer"
+                        >
+                          Retry Active Sync
+                        </button>
+                      </div>
+                      <div className="flex flex-wrap items-center justify-between text-[10px] text-[#767670] pt-0.5 gap-1">
+                        <span>Protected by Cloudflare verification in your region?</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setError(null);
+                            setActiveTab('vinted');
+                            setVintedSubTab('files');
+                          }}
+                          className="text-[#007782] font-semibold underline hover:text-[#005E67] cursor-pointer"
+                        >
+                          Bypass 100%: Drop saved closet HTML file or paste source code →
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
                   {Boolean(
                     settings.vintedWorkerAuth?.accessToken ||
                     settings.vintedWorkerAuth?.cookie ||
                     settings.vintedWorkerAuth?.workerEndpoint
-                  ) && (
+                  ) && !error.toLowerCase().includes('vinted') && (
                     <div className="mt-2.5 pt-2 border-t border-rose-200 flex items-center justify-between gap-2">
                       <span className="text-[11px] text-[#004A52] font-mono">
                         ⚡ Connected Vinted session available
@@ -3344,17 +3553,24 @@ export const AutoImportModal: React.FC<AutoImportModalProps> = ({
 
                         {/* Fields Column */}
                         <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                          {/* Brand */}
+                          {/* Garment Brand */}
                           <div>
-                            <label className="text-[10px] font-mono text-[#767670] uppercase font-semibold">
-                              Brand / Retailer
-                            </label>
+                            <div className="flex items-center justify-between">
+                              <label className="text-[10px] font-mono text-[#767670] uppercase font-semibold">
+                                Garment Brand
+                              </label>
+                              {item.retailerName && (
+                                <span className="text-[9px] font-mono text-[#007782] bg-[#E6F4F5] px-1 rounded-xs">
+                                  via {item.retailerName}
+                                </span>
+                              )}
+                            </div>
                             <input
                               type="text"
                               value={item.brand || ''}
                               onChange={(e) => handleUpdateItemField(idx, 'brand', e.target.value)}
                               className="w-full px-2 py-1 border border-[#D5D5D0] bg-white text-xs font-semibold text-[#1A1A1A] focus:outline-none focus:border-[#8C7355]"
-                              placeholder="e.g. Barbour"
+                              placeholder="e.g. Barbour, Ralph Lauren, COS"
                             />
                           </div>
 
@@ -3408,6 +3624,20 @@ export const AutoImportModal: React.FC<AutoImportModalProps> = ({
                             </select>
                           </div>
 
+                          {/* Size */}
+                          <div>
+                            <label className="text-[10px] font-mono text-[#767670] uppercase font-semibold">
+                              Size / Fit
+                            </label>
+                            <input
+                              type="text"
+                              value={item.size || ''}
+                              onChange={(e) => handleUpdateItemField(idx, 'size', e.target.value)}
+                              className="w-full px-2 py-1 border border-[#D5D5D0] bg-white text-xs text-[#1A1A1A] focus:outline-none focus:border-[#8C7355]"
+                              placeholder="e.g. M, UK 10, W32 L32"
+                            />
+                          </div>
+
                           {/* Color */}
                           <div>
                             <label className="text-[10px] font-mono text-[#767670] uppercase font-semibold">
@@ -3418,21 +3648,21 @@ export const AutoImportModal: React.FC<AutoImportModalProps> = ({
                               value={item.color || ''}
                               onChange={(e) => handleUpdateItemField(idx, 'color', e.target.value)}
                               className="w-full px-2 py-1 border border-[#D5D5D0] bg-white text-xs text-[#1A1A1A] focus:outline-none focus:border-[#8C7355]"
-                              placeholder="e.g. Sage Olive"
+                              placeholder="e.g. Sage Olive, Navy, Camel"
                             />
                           </div>
 
-                          {/* Material / Notes */}
-                          <div className="sm:col-span-2">
+                          {/* Material */}
+                          <div>
                             <label className="text-[10px] font-mono text-[#767670] uppercase font-semibold">
-                              Fabric Composition / Notes
+                              Material / Fabric Composition
                             </label>
                             <input
                               type="text"
-                              value={item.material || item.notes || ''}
+                              value={item.material || ''}
                               onChange={(e) => handleUpdateItemField(idx, 'material', e.target.value)}
                               className="w-full px-2 py-1 border border-[#D5D5D0] bg-white text-xs text-[#1A1A1A] focus:outline-none focus:border-[#8C7355]"
-                              placeholder="e.g. 100% Waxed Cotton with corduroy trim"
+                              placeholder="e.g. 100% Waxed Cotton, Merino Wool"
                             />
                           </div>
 

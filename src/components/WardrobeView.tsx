@@ -24,6 +24,9 @@ import {
   Search,
   MapPin,
   ExternalLink,
+  CheckCircle,
+  Ban,
+  Shirt,
 } from 'lucide-react';
 import { useWardrobe } from '../context/WardrobeContext';
 import { WardrobeItem, Category, Season, Condition } from '../types';
@@ -118,15 +121,147 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
     };
   }, []);
 
-  const [selectedCategory, setSelectedCategory] = useState<string | 'All'>('All');
-  const [selectedBrand, setSelectedBrand] = useState<string | 'All'>('All');
-  const [selectedSeason, setSelectedSeason] = useState<Season | 'All'>('All');
-  const [selectedCondition, setSelectedCondition] = useState<Condition | 'All'>('All');
+  const [pipelineTab, setPipelineTab] = useState<'All' | 'Closet' | 'Purchased' | 'Sold' | 'Cancelled'>(() => {
+    try {
+      const saved = localStorage.getItem('inventory_pipeline_tab');
+      if (saved && ['All', 'Closet', 'Purchased', 'Sold', 'Cancelled'].includes(saved)) {
+        return saved as any;
+      }
+    } catch (e) {}
+    return 'All';
+  });
+
+  const handleSetPipelineTab = (tab: 'All' | 'Closet' | 'Purchased' | 'Sold' | 'Cancelled') => {
+    setPipelineTab(tab);
+    try {
+      localStorage.setItem('inventory_pipeline_tab', tab);
+    } catch (e) {}
+  };
+
+  const [selectedTag, setSelectedTag] = useState<string>(() => {
+    try {
+      return localStorage.getItem('inventory_selected_tag') || 'All';
+    } catch (e) {}
+    return 'All';
+  });
+
+  const handleSetSelectedTag = (tag: string) => {
+    setSelectedTag(tag);
+    try {
+      localStorage.setItem('inventory_selected_tag', tag);
+    } catch (e) {}
+  };
+
+  const [selectedCategory, setSelectedCategory] = useState<string | 'All'>(() => {
+    try {
+      return localStorage.getItem('inventory_selected_category') || 'All';
+    } catch (e) {}
+    return 'All';
+  });
+
+  const handleSetSelectedCategory = (cat: string | 'All') => {
+    setSelectedCategory(cat);
+    try {
+      localStorage.setItem('inventory_selected_category', cat);
+    } catch (e) {}
+  };
+
+  const [selectedBrand, setSelectedBrand] = useState<string | 'All'>(() => {
+    try {
+      return localStorage.getItem('inventory_selected_brand') || 'All';
+    } catch (e) {}
+    return 'All';
+  });
+
+  const handleSetSelectedBrand = (brand: string | 'All') => {
+    setSelectedBrand(brand);
+    try {
+      localStorage.setItem('inventory_selected_brand', brand);
+    } catch (e) {}
+  };
+
+  const [selectedSeason, setSelectedSeason] = useState<Season | 'All'>(() => {
+    try {
+      return (localStorage.getItem('inventory_selected_season') as any) || 'All';
+    } catch (e) {}
+    return 'All';
+  });
+
+  const handleSetSelectedSeason = (s: Season | 'All') => {
+    setSelectedSeason(s);
+    try {
+      localStorage.setItem('inventory_selected_season', s);
+    } catch (e) {}
+  };
+
+  const [selectedCondition, setSelectedCondition] = useState<Condition | 'All'>(() => {
+    try {
+      return (localStorage.getItem('inventory_selected_condition') as any) || 'All';
+    } catch (e) {}
+    return 'All';
+  });
+
+  const handleSetSelectedCondition = (c: Condition | 'All') => {
+    setSelectedCondition(c);
+    try {
+      localStorage.setItem('inventory_selected_condition', c);
+    } catch (e) {}
+  };
+
   const [sortBy, setSortBy] = useState<
     'wears_desc' | 'price_desc' | 'price_asc' | 'newest'
-  >('wears_desc');
-  const [viewMode, setViewMode] = useState<'grid' | 'table'>('grid');
-  const [favoritesOnly, setFavoritesOnly] = useState<boolean>(false);
+  >(() => {
+    try {
+      const saved = localStorage.getItem('inventory_sort_by');
+      if (saved && ['wears_desc', 'price_desc', 'price_asc', 'newest'].includes(saved)) {
+        return saved as any;
+      }
+    } catch (e) {}
+    return 'wears_desc';
+  });
+
+  const handleSetSortBy = (sort: 'wears_desc' | 'price_desc' | 'price_asc' | 'newest') => {
+    setSortBy(sort);
+    try {
+      localStorage.setItem('inventory_sort_by', sort);
+    } catch (e) {}
+  };
+
+  const [favoritesOnly, setFavoritesOnly] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('inventory_favorites_only') === 'true';
+    } catch (e) {}
+    return false;
+  });
+
+  const handleSetFavoritesOnly = (fav: boolean) => {
+    setFavoritesOnly(fav);
+    try {
+      localStorage.setItem('inventory_favorites_only', String(fav));
+    } catch (e) {}
+  };
+
+  const [viewMode, setViewMode] = useState<'grid' | 'table'>(() => {
+    try {
+      const saved = localStorage.getItem('inventory_display_settings');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.viewMode === 'table') return 'table';
+      }
+    } catch (e) {}
+    return displaySettings.viewMode === 'table' ? 'table' : 'grid';
+  });
+
+  const handleSetViewMode = (mode: 'grid' | 'table') => {
+    setViewMode(mode);
+    handleUpdateDisplaySettings({ ...displaySettings, viewMode: mode });
+  };
+
+  useEffect(() => {
+    if (displaySettings.viewMode) {
+      setViewMode(displaySettings.viewMode === 'table' ? 'table' : 'grid');
+    }
+  }, [displaySettings.viewMode]);
 
   // Multi-item selection state for bulk deletion
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
@@ -166,12 +301,126 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
       .map(([brand, count]) => ({ brand, count }));
   }, [items]);
 
+  // Unique Tags with counts across wardrobe items
+  const uniqueTags = useMemo(() => {
+    const counts: Record<string, number> = {};
+    items.forEach((it) => {
+      if (!it.isArchived && Array.isArray(it.tags)) {
+        it.tags.forEach((t) => {
+          const clean = t.trim();
+          if (clean) {
+            counts[clean] = (counts[clean] || 0) + 1;
+          }
+        });
+      }
+    });
+    return Object.entries(counts)
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .map(([tag, count]) => ({ tag, count }));
+  }, [items]);
+
+  // Pipeline Counts (All, Closet, Purchased, Sold, Cancelled)
+  const pipelineStats = useMemo(() => {
+    let closet = 0;
+    let purchased = 0;
+    let sold = 0;
+    let cancelled = 0;
+
+    items.forEach((it) => {
+      if (it.isArchived) return;
+      const lowerTags = (it.tags || []).map((t) => t.toLowerCase());
+      const lowerStatus = (it.orderStatus || '').toLowerCase();
+      const lowerNotes = (it.notes || '').toLowerCase();
+
+      const isSold =
+        lowerTags.includes('sold') ||
+        lowerStatus === 'sold' ||
+        it.transactionType === 'Sale';
+
+      const isCancelled =
+        lowerStatus.includes('cancel') ||
+        lowerStatus.includes('refund') ||
+        lowerTags.includes('cancelled') ||
+        lowerTags.includes('refunded') ||
+        lowerNotes.includes('cancelled');
+
+      const isPurchased =
+        Boolean(it.orderNumber) ||
+        it.transactionType === 'Purchase' ||
+        lowerStatus.includes('purchase') ||
+        lowerStatus.includes('delivered') ||
+        lowerStatus.includes('completed') ||
+        lowerTags.includes('bought') ||
+        lowerTags.includes('purchased') ||
+        lowerTags.includes('order-history') ||
+        lowerTags.includes('pre-owned') ||
+        lowerTags.includes('vinted');
+
+      if (isSold) sold++;
+      if (isCancelled) cancelled++;
+      if (isPurchased) purchased++;
+      if (!isSold && !isCancelled) closet++;
+    });
+
+    return {
+      all: items.filter((i) => !i.isArchived).length,
+      closet,
+      purchased,
+      sold,
+      cancelled,
+    };
+  }, [items]);
+
   // Filtered & Sorted items
   const filteredItems = useMemo(() => {
     return items
       .filter((item) => {
         if (item.isArchived) return false;
         if (favoritesOnly && !item.isFavorite) return false;
+
+        // Pipeline Filter
+        if (pipelineTab !== 'All') {
+          const lowerTags = (item.tags || []).map((t) => t.toLowerCase());
+          const lowerStatus = (item.orderStatus || '').toLowerCase();
+          const lowerNotes = (item.notes || '').toLowerCase();
+
+          const isSold =
+            lowerTags.includes('sold') ||
+            lowerStatus === 'sold' ||
+            item.transactionType === 'Sale';
+
+          const isCancelled =
+            lowerStatus.includes('cancel') ||
+            lowerStatus.includes('refund') ||
+            lowerTags.includes('cancelled') ||
+            lowerTags.includes('refunded') ||
+            lowerNotes.includes('cancelled');
+
+          const isPurchased =
+            Boolean(item.orderNumber) ||
+            item.transactionType === 'Purchase' ||
+            lowerStatus.includes('purchase') ||
+            lowerStatus.includes('delivered') ||
+            lowerStatus.includes('completed') ||
+            lowerTags.includes('bought') ||
+            lowerTags.includes('purchased') ||
+            lowerTags.includes('order-history') ||
+            lowerTags.includes('pre-owned') ||
+            lowerTags.includes('vinted');
+
+          if (pipelineTab === 'Closet' && (isSold || isCancelled)) return false;
+          if (pipelineTab === 'Purchased' && !isPurchased) return false;
+          if (pipelineTab === 'Sold' && !isSold) return false;
+          if (pipelineTab === 'Cancelled' && !isCancelled) return false;
+        }
+
+        // Tag Filter
+        if (selectedTag !== 'All') {
+          if (!item.tags || !item.tags.some((t) => t.toLowerCase() === selectedTag.toLowerCase())) {
+            return false;
+          }
+        }
+
         if (
           selectedCategory !== 'All' &&
           (item.category || '').trim().toLowerCase() !== selectedCategory.trim().toLowerCase()
@@ -248,7 +497,7 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
             return 0;
         }
       });
-  }, [items, selectedCategory, selectedBrand, selectedSeason, selectedCondition, favoritesOnly, searchQuery, sortBy]);
+  }, [items, pipelineTab, selectedTag, selectedCategory, selectedBrand, selectedSeason, selectedCondition, favoritesOnly, searchQuery, sortBy]);
 
   const filteredTotalValue = filteredItems.reduce((acc, item) => acc + item.purchasePrice, 0);
   const filteredTotalWears = filteredItems.reduce((acc, item) => acc + item.wearCount, 0);
@@ -564,6 +813,90 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
         )}
       </div>
 
+      {/* Interactive Pipeline Status Tabs */}
+      <div className="bg-[#F8F7F4] border border-[#E5E5E1] p-2.5 flex flex-wrap items-center justify-between gap-2 shadow-xs">
+        <div className="flex items-center gap-1.5 text-[11px] font-mono text-[#767670]">
+          <span className="font-semibold text-[#1A1A1A] uppercase tracking-wider">Pipeline:</span>
+          <span className="text-[10px] text-[#767670]">({items.length} items total)</span>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-1.5">
+          {/* All */}
+          <button
+            type="button"
+            onClick={() => handleSetPipelineTab('All')}
+            className={`px-2.5 py-1 text-xs font-mono transition-all cursor-pointer border flex items-center gap-1.5 ${
+              pipelineTab === 'All'
+                ? 'bg-[#1A1A1A] text-white border-[#1A1A1A] shadow-xs font-bold'
+                : 'bg-white text-[#4A4A45] border-[#D5D5D0] hover:border-[#8C7355]'
+            }`}
+          >
+            <span>All</span>
+            <span className="opacity-75">({pipelineStats.all})</span>
+          </button>
+
+          {/* Closet */}
+          <button
+            type="button"
+            onClick={() => handleSetPipelineTab('Closet')}
+            className={`px-2.5 py-1 text-xs font-mono transition-all cursor-pointer border flex items-center gap-1.5 ${
+              pipelineTab === 'Closet'
+                ? 'bg-[#8C7355] text-white border-[#8C7355] shadow-xs font-bold'
+                : 'bg-white text-[#4A4A45] border-[#D5D5D0] hover:border-[#8C7355]'
+            }`}
+          >
+            <Shirt className="w-3 h-3" />
+            <span>In Closet</span>
+            <span className="opacity-75">({pipelineStats.closet})</span>
+          </button>
+
+          {/* Purchased */}
+          <button
+            type="button"
+            onClick={() => handleSetPipelineTab('Purchased')}
+            className={`px-2.5 py-1 text-xs font-mono transition-all cursor-pointer border flex items-center gap-1.5 ${
+              pipelineTab === 'Purchased'
+                ? 'bg-emerald-800 text-white border-emerald-800 shadow-xs font-bold'
+                : 'bg-white text-[#4A4A45] border-[#D5D5D0] hover:border-emerald-700 hover:text-emerald-800'
+            }`}
+          >
+            <CheckCircle className="w-3 h-3 text-emerald-300" />
+            <span>Purchased</span>
+            <span className="opacity-75">({pipelineStats.purchased})</span>
+          </button>
+
+          {/* Sold */}
+          <button
+            type="button"
+            onClick={() => handleSetPipelineTab('Sold')}
+            className={`px-2.5 py-1 text-xs font-mono transition-all cursor-pointer border flex items-center gap-1.5 ${
+              pipelineTab === 'Sold'
+                ? 'bg-teal-800 text-white border-teal-800 shadow-xs font-bold'
+                : 'bg-white text-[#4A4A45] border-[#D5D5D0] hover:border-teal-700 hover:text-teal-800'
+            }`}
+          >
+            <Tag className="w-3 h-3 text-teal-300" />
+            <span>Sold</span>
+            <span className="opacity-75">({pipelineStats.sold})</span>
+          </button>
+
+          {/* Cancelled */}
+          <button
+            type="button"
+            onClick={() => handleSetPipelineTab('Cancelled')}
+            className={`px-2.5 py-1 text-xs font-mono transition-all cursor-pointer border flex items-center gap-1.5 ${
+              pipelineTab === 'Cancelled'
+                ? 'bg-rose-800 text-white border-rose-800 shadow-xs font-bold'
+                : 'bg-white text-[#4A4A45] border-[#D5D5D0] hover:border-rose-700 hover:text-rose-800'
+            }`}
+          >
+            <Ban className="w-3 h-3 text-rose-300" />
+            <span>Cancelled</span>
+            <span className="opacity-75">({pipelineStats.cancelled})</span>
+          </button>
+        </div>
+      </div>
+
       {/* Category Manager & Filter Bar */}
       {displaySettings.showCategoryTabs && (
         <div className="bg-white border border-[#E5E5E1] p-3 space-y-2.5 shadow-xs">
@@ -578,7 +911,28 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
               </span>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-3">
+              {selectedCategory !== 'All' && (
+                <button
+                  type="button"
+                  onClick={() => handleSetSelectedCategory('All')}
+                  className="text-[10px] font-mono text-[#8C7355] hover:text-[#1A1A1A] hover:underline cursor-pointer flex items-center gap-1"
+                >
+                  <X className="w-3 h-3" />
+                  Clear category ({selectedCategory})
+                </button>
+              )}
+              {selectedTag !== 'All' && (
+                <button
+                  type="button"
+                  onClick={() => handleSetSelectedTag('All')}
+                  className="text-[10px] font-mono text-[#1A1A1A] hover:text-rose-600 hover:underline cursor-pointer flex items-center gap-1"
+                >
+                  <X className="w-3 h-3" />
+                  Clear tag (#{selectedTag})
+                </button>
+              )}
+
               {!isAddingCategory ? (
                 <button
                   onClick={() => setIsAddingCategory(true)}
@@ -636,7 +990,7 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
           <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-1">
             {/* All Garments Pill */}
             <button
-              onClick={() => setSelectedCategory('All')}
+              onClick={() => handleSetSelectedCategory('All')}
               className={`px-2.5 py-1 text-xs border transition-all cursor-pointer whitespace-nowrap font-mono ${
                 selectedCategory === 'All'
                   ? 'bg-[#8C7355] text-white border-[#8C7355] font-semibold shadow-xs'
@@ -696,7 +1050,7 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
                   }`}
                 >
                   <span
-                    onClick={() => setSelectedCategory(cat)}
+                    onClick={() => handleSetSelectedCategory(cat)}
                     className="cursor-pointer hover:underline"
                     title={`Filter by ${cat}`}
                   >
@@ -735,6 +1089,47 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
               );
             })}
           </div>
+
+          {/* Dynamic Tags filter strip */}
+          {uniqueTags.length > 0 && (
+            <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pt-2 border-t border-[#E5E5E1]/70 text-xs">
+              <span className="text-[10px] font-mono text-[#767670] uppercase tracking-wider shrink-0">
+                Tags:
+              </span>
+              <button
+                type="button"
+                onClick={() => handleSetSelectedTag('All')}
+                className={`px-2 py-0.5 text-[10px] font-mono border transition-all cursor-pointer whitespace-nowrap ${
+                  selectedTag === 'All'
+                    ? 'bg-[#1A1A1A] text-white border-[#1A1A1A] font-semibold'
+                    : 'bg-[#F8F7F4] text-[#767670] hover:bg-[#EAE8E3] border-[#E5E5E1]'
+                }`}
+              >
+                All Tags
+              </button>
+              {uniqueTags.map((ut) => {
+                const isSelected = selectedTag.toLowerCase() === ut.tag.toLowerCase();
+                return (
+                  <button
+                    key={ut.tag}
+                    type="button"
+                    onClick={() => handleSetSelectedTag(isSelected ? 'All' : ut.tag)}
+                    className={`inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-mono border transition-all cursor-pointer whitespace-nowrap ${
+                      isSelected
+                        ? 'bg-[#1A1A1A] text-white border-[#1A1A1A] font-semibold shadow-xs'
+                        : 'bg-[#F2F1ED] text-[#4A4A45] hover:bg-[#E5E3DC] border-[#E5E5E1]'
+                    }`}
+                    title={`Filter by tag #${ut.tag}`}
+                  >
+                    #{ut.tag}
+                    <span className={`text-[9px] ${isSelected ? 'text-zinc-300' : 'text-[#767670]'}`}>
+                      ({ut.count})
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 
@@ -778,7 +1173,7 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
                 <div className="relative">
                   <select
                     value={selectedBrand}
-                    onChange={(e) => setSelectedBrand(e.target.value)}
+                    onChange={(e) => handleSetSelectedBrand(e.target.value)}
                     className="bg-[#F8F7F4] border border-[#E5E5E1] text-[#1A1A1A] text-xs px-2 py-1 pr-6 focus:outline-none focus:border-[#8C7355] appearance-none max-w-[160px] truncate font-medium"
                   >
                     <option value="All">All Brands ({items.filter((i) => !i.isArchived).length})</option>
@@ -792,7 +1187,7 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
                 </div>
                 {selectedBrand !== 'All' && (
                   <button
-                    onClick={() => setSelectedBrand('All')}
+                    onClick={() => handleSetSelectedBrand('All')}
                     className="text-[#767670] hover:text-rose-600 p-0.5"
                     title="Clear brand filter"
                   >
@@ -807,7 +1202,7 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
                 <div className="relative">
                   <select
                     value={selectedSeason}
-                    onChange={(e) => setSelectedSeason(e.target.value as any)}
+                    onChange={(e) => handleSetSelectedSeason(e.target.value as any)}
                     className="bg-[#F8F7F4] border border-[#E5E5E1] text-[#1A1A1A] text-xs px-2 py-1 pr-6 focus:outline-none focus:border-[#8C7355] appearance-none"
                   >
                     {SEASONS.map((s) => (
@@ -820,7 +1215,7 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
                 </div>
                 {selectedSeason !== 'All' && (
                   <button
-                    onClick={() => setSelectedSeason('All')}
+                    onClick={() => handleSetSelectedSeason('All')}
                     className="text-[#767670] hover:text-rose-600 p-0.5"
                     title="Clear season filter"
                   >
@@ -835,7 +1230,7 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
                 <div className="relative">
                   <select
                     value={selectedCondition}
-                    onChange={(e) => setSelectedCondition(e.target.value as any)}
+                    onChange={(e) => handleSetSelectedCondition(e.target.value as any)}
                     className="bg-[#F8F7F4] border border-[#E5E5E1] text-[#1A1A1A] text-xs px-2 py-1 pr-6 focus:outline-none focus:border-[#8C7355] appearance-none"
                   >
                     <option value="All">All Conditions</option>
@@ -849,7 +1244,7 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
                 </div>
                 {selectedCondition !== 'All' && (
                   <button
-                    onClick={() => setSelectedCondition('All')}
+                    onClick={() => handleSetSelectedCondition('All')}
                     className="text-[#767670] hover:text-rose-600 p-0.5"
                     title="Clear condition filter"
                   >
@@ -860,7 +1255,7 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
 
               {/* Favorites Toggle */}
               <button
-                onClick={() => setFavoritesOnly(!favoritesOnly)}
+                onClick={() => handleSetFavoritesOnly(!favoritesOnly)}
                 className={`flex items-center gap-1 px-2.5 py-1 text-xs border transition-all cursor-pointer ${
                   favoritesOnly
                     ? 'bg-rose-50 text-rose-800 border-rose-200 font-semibold'
@@ -873,7 +1268,7 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
                   <span
                     onClick={(e) => {
                       e.stopPropagation();
-                      setFavoritesOnly(false);
+                      handleSetFavoritesOnly(false);
                     }}
                     className="hover:text-rose-900 ml-0.5"
                   >
@@ -885,7 +1280,9 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
 
             {/* Sort Dropdown & Reset Filters */}
             <div className="flex items-center gap-2">
-              {(selectedCategory !== 'All' ||
+              {(pipelineTab !== 'All' ||
+                selectedTag !== 'All' ||
+                selectedCategory !== 'All' ||
                 selectedBrand !== 'All' ||
                 selectedSeason !== 'All' ||
                 selectedCondition !== 'All' ||
@@ -893,11 +1290,13 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
                 searchQuery) && (
                 <button
                   onClick={() => {
-                    setSelectedCategory('All');
-                    setSelectedBrand('All');
-                    setSelectedSeason('All');
-                    setSelectedCondition('All');
-                    setFavoritesOnly(false);
+                    handleSetPipelineTab('All');
+                    handleSetSelectedTag('All');
+                    handleSetSelectedCategory('All');
+                    handleSetSelectedBrand('All');
+                    handleSetSelectedSeason('All');
+                    handleSetSelectedCondition('All');
+                    handleSetFavoritesOnly(false);
                     setSearchQuery('');
                   }}
                   className="text-[11px] font-mono text-[#8C7355] hover:text-[#1A1A1A] flex items-center gap-1 cursor-pointer"
@@ -913,7 +1312,7 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
                 <div className="relative">
                   <select
                     value={sortBy}
-                    onChange={(e) => setSortBy(e.target.value as any)}
+                    onChange={(e) => handleSetSortBy(e.target.value as any)}
                     className="bg-[#F8F7F4] border border-[#E5E5E1] text-[#1A1A1A] text-xs px-2 py-1 pr-6 focus:outline-none focus:border-[#8C7355] appearance-none font-medium"
                   >
                     <option value="wears_desc">Most Worn (Frequency)</option>
@@ -926,6 +1325,117 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
               </div>
             </div>
           </div>
+
+          {/* Active Filter Pills Bar */}
+          {(pipelineTab !== 'All' ||
+            selectedTag !== 'All' ||
+            selectedCategory !== 'All' ||
+            selectedBrand !== 'All' ||
+            selectedSeason !== 'All' ||
+            selectedCondition !== 'All' ||
+            favoritesOnly) && (
+            <div className="flex flex-wrap items-center gap-1.5 pt-2 border-t border-[#E5E5E1] text-[11px] font-mono">
+              <span className="text-[#767670] uppercase tracking-wider text-[10px]">Active Filters:</span>
+
+              {pipelineTab !== 'All' && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-[#FAF9F6] border border-[#8C7355] text-[#8C7355] rounded-xs font-medium">
+                  Pipeline: {pipelineTab}
+                  <button
+                    type="button"
+                    onClick={() => handleSetPipelineTab('All')}
+                    className="hover:text-rose-600 cursor-pointer"
+                    title="Remove pipeline filter"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </span>
+              )}
+
+              {selectedTag !== 'All' && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-[#1A1A1A] text-white rounded-xs font-medium">
+                  #{selectedTag}
+                  <button
+                    type="button"
+                    onClick={() => handleSetSelectedTag('All')}
+                    className="hover:text-rose-300 cursor-pointer"
+                    title="Remove tag filter"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </span>
+              )}
+
+              {selectedCategory !== 'All' && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-[#FAF9F6] border border-[#8C7355] text-[#8C7355] rounded-xs font-medium">
+                  Category: {selectedCategory}
+                  <button
+                    type="button"
+                    onClick={() => handleSetSelectedCategory('All')}
+                    className="hover:text-rose-600 cursor-pointer"
+                    title="Remove category filter"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </span>
+              )}
+
+              {selectedBrand !== 'All' && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-[#FAF9F6] border border-[#E5E5E1] text-[#1A1A1A] rounded-xs">
+                  Brand: {selectedBrand}
+                  <button
+                    type="button"
+                    onClick={() => handleSetSelectedBrand('All')}
+                    className="hover:text-rose-600 cursor-pointer"
+                    title="Remove brand filter"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </span>
+              )}
+
+              {selectedSeason !== 'All' && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-[#FAF9F6] border border-[#E5E5E1] text-[#1A1A1A] rounded-xs">
+                  Season: {selectedSeason}
+                  <button
+                    type="button"
+                    onClick={() => handleSetSelectedSeason('All')}
+                    className="hover:text-rose-600 cursor-pointer"
+                    title="Remove season filter"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </span>
+              )}
+
+              {selectedCondition !== 'All' && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-[#FAF9F6] border border-[#E5E5E1] text-[#1A1A1A] rounded-xs">
+                  Condition: {selectedCondition}
+                  <button
+                    type="button"
+                    onClick={() => handleSetSelectedCondition('All')}
+                    className="hover:text-rose-600 cursor-pointer"
+                    title="Remove condition filter"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </span>
+              )}
+
+              {favoritesOnly && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-rose-50 border border-rose-200 text-rose-800 rounded-xs font-medium">
+                  Favorites Only
+                  <button
+                    type="button"
+                    onClick={() => handleSetFavoritesOnly(false)}
+                    className="hover:text-rose-950 cursor-pointer"
+                    title="Remove favorites filter"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </span>
+              )}
+            </div>
+          )}
         </div>
       )}
 

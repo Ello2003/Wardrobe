@@ -28,6 +28,7 @@ import {
   Sparkles,
   Pencil,
   Check,
+  ShoppingBag,
 } from 'lucide-react';
 
 interface ShoppingDatabaseTableProps {

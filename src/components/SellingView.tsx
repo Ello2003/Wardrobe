@@ -129,7 +129,7 @@ export const SellingView: React.FC = () => {
   const [selectedTag, setSelectedTag] = useState<string>('All');
   const [sortBy, setSortBy] = useState<string>('newest');
   const [viewMode, setViewMode] = useState<'grid' | 'table'>(
-    displaySettings.viewMode === 'database' || (displaySettings.viewMode as any) === 'table' ? 'table' : 'grid'
+    (displaySettings.viewMode as string) === 'database' || displaySettings.viewMode === 'table' ? 'table' : 'grid'
   );
 
   // Sync viewMode changes to displaySettings
@@ -142,7 +142,7 @@ export const SellingView: React.FC = () => {
   useEffect(() => {
     if (displaySettings.viewMode) {
       const mode =
-        displaySettings.viewMode === 'database' || (displaySettings.viewMode as any) === 'table'
+        (displaySettings.viewMode as string) === 'database' || displaySettings.viewMode === 'table'
           ? 'table'
           : 'grid';
       setViewMode(mode);

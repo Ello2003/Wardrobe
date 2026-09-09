@@ -624,9 +624,6 @@ export const INITIAL_SALE_ITEMS: SaleItem[] = [
   }
 ];
 
-
-
-
 export const INITIAL_VERSION_LOGS: VersionChangeLog[] = [
   {
     id: 'log-1',
@@ -891,5 +888,3 @@ export const TREND_RESEARCH_DATA: TrendInspiration[] = [
     ]
   }
 ];
-
-

@@ -31,6 +31,7 @@ import {
   CheckCheck,
   Ban,
   Search,
+  Shirt,
 } from 'lucide-react';
 import { useWardrobe } from '../context/WardrobeContext';
 import { ShoppingItem, ShoppingPriority, ShoppingStatus, Category } from '../types';
@@ -98,10 +99,113 @@ export const ShoppingView: React.FC<ShoppingViewProps> = ({
     formatCurrency,
   } = useWardrobe();
 
-  const [selectedStatus, setSelectedStatus] = useState<ShoppingStatus | 'All'>('All');
-  const [selectedBrand, setSelectedBrand] = useState<string | 'All'>('All');
-  const [selectedPriority, setSelectedPriority] = useState<ShoppingPriority | 'All'>('All');
-  const [selectedCategory, setSelectedCategory] = useState<string | 'All'>('All');
+  // Persistent filters & view options with lazy local storage initializers
+  const [pipelineTab, setPipelineTab] = useState<string>(() => {
+    try {
+      return localStorage.getItem('shopping_pipeline_tab') || 'All';
+    } catch {
+      return 'All';
+    }
+  });
+
+  const [selectedTag, setSelectedTag] = useState<string>(() => {
+    try {
+      return localStorage.getItem('shopping_selected_tag') || 'All';
+    } catch {
+      return 'All';
+    }
+  });
+
+  const [selectedStatus, setSelectedStatus] = useState<ShoppingStatus | 'All'>(() => {
+    try {
+      return (localStorage.getItem('shopping_selected_status') as any) || 'All';
+    } catch {
+      return 'All';
+    }
+  });
+
+  const [selectedBrand, setSelectedBrand] = useState<string | 'All'>(() => {
+    try {
+      return localStorage.getItem('shopping_selected_brand') || 'All';
+    } catch {
+      return 'All';
+    }
+  });
+
+  const [selectedPriority, setSelectedPriority] = useState<ShoppingPriority | 'All'>(() => {
+    try {
+      return (localStorage.getItem('shopping_selected_priority') as any) || 'All';
+    } catch {
+      return 'All';
+    }
+  });
+
+  const [selectedCategory, setSelectedCategory] = useState<string | 'All'>(() => {
+    try {
+      return localStorage.getItem('shopping_selected_category') || 'All';
+    } catch {
+      return 'All';
+    }
+  });
+
+  const [sortBy, setSortBy] = useState<string>(() => {
+    try {
+      return localStorage.getItem('shopping_sort_by') || 'priority';
+    } catch {
+      return 'priority';
+    }
+  });
+
+  // Persistent setters
+  const handleSetPipelineTab = useCallback((tab: string) => {
+    setPipelineTab(tab);
+    try {
+      localStorage.setItem('shopping_pipeline_tab', tab);
+    } catch {}
+  }, []);
+
+  const handleSetSelectedTag = useCallback((tag: string) => {
+    setSelectedTag(tag);
+    try {
+      localStorage.setItem('shopping_selected_tag', tag);
+    } catch {}
+  }, []);
+
+  const handleSetSelectedStatus = useCallback((status: ShoppingStatus | 'All') => {
+    setSelectedStatus(status);
+    try {
+      localStorage.setItem('shopping_selected_status', status);
+    } catch {}
+  }, []);
+
+  const handleSetSelectedBrand = useCallback((brand: string | 'All') => {
+    setSelectedBrand(brand);
+    try {
+      localStorage.setItem('shopping_selected_brand', brand);
+    } catch {}
+  }, []);
+
+  const handleSetSelectedPriority = useCallback((priority: ShoppingPriority | 'All') => {
+    setSelectedPriority(priority);
+    try {
+      localStorage.setItem('shopping_selected_priority', priority);
+    } catch {}
+  }, []);
+
+  const handleSetSelectedCategory = useCallback((cat: string | 'All') => {
+    setSelectedCategory(cat);
+    try {
+      localStorage.setItem('shopping_selected_category', cat);
+    } catch {}
+  }, []);
+
+  const handleSetSortBy = useCallback((sb: string) => {
+    setSortBy(sb);
+    try {
+      localStorage.setItem('shopping_sort_by', sb);
+    } catch {}
+  }, []);
+
   const [isEditingBudget, setIsEditingBudget] = useState<boolean>(false);
   const [tempBudgetInput, setTempBudgetInput] = useState<string>(monthlyBudget.toString());
 
@@ -109,11 +213,21 @@ export const ShoppingView: React.FC<ShoppingViewProps> = ({
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
   const [isBulkEditOpen, setIsBulkEditOpen] = useState(false);
 
-  // Display Settings & Database View State
+  // Display Settings & Database View State (remembers view mode and options without defaulting back)
   const [displaySettings, setDisplaySettings] = useState<ShoppingDisplaySettings>(() => {
     try {
       const saved = localStorage.getItem('shopping_display_settings');
-      if (saved) return { ...DEFAULT_SHOPPING_DISPLAY_SETTINGS, ...JSON.parse(saved) };
+      const savedMode = localStorage.getItem('shopping_view_mode');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (savedMode && (savedMode === 'grid' || savedMode === 'database')) {
+          parsed.viewMode = savedMode;
+        }
+        return { ...DEFAULT_SHOPPING_DISPLAY_SETTINGS, ...parsed };
+      }
+      if (savedMode && (savedMode === 'grid' || savedMode === 'database')) {
+        return { ...DEFAULT_SHOPPING_DISPLAY_SETTINGS, viewMode: savedMode as any };
+      }
     } catch (e) {
       // ignore
     }
@@ -126,6 +240,7 @@ export const ShoppingView: React.FC<ShoppingViewProps> = ({
     setDisplaySettings(updated);
     try {
       localStorage.setItem('shopping_display_settings', JSON.stringify(updated));
+      localStorage.setItem('shopping_view_mode', updated.viewMode);
       window.dispatchEvent(new Event('storage'));
     } catch (e) {
       // ignore
@@ -137,8 +252,13 @@ export const ShoppingView: React.FC<ShoppingViewProps> = ({
     const handleSync = () => {
       try {
         const saved = localStorage.getItem('shopping_display_settings');
+        const savedMode = localStorage.getItem('shopping_view_mode');
         if (saved) {
-          setDisplaySettings({ ...DEFAULT_SHOPPING_DISPLAY_SETTINGS, ...JSON.parse(saved) });
+          const parsed = JSON.parse(saved);
+          if (savedMode && (savedMode === 'grid' || savedMode === 'database')) {
+            parsed.viewMode = savedMode;
+          }
+          setDisplaySettings({ ...DEFAULT_SHOPPING_DISPLAY_SETTINGS, ...parsed });
         }
       } catch (e) {
         console.error('Failed to sync shopping display settings', e);
@@ -185,8 +305,129 @@ export const ShoppingView: React.FC<ShoppingViewProps> = ({
       .map(([brand, count]) => ({ brand, count }));
   }, [shoppingList]);
 
+  // Unique Tags aggregated across shopping items
+  const uniqueTags = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const it of shoppingList) {
+      if (Array.isArray(it.tags)) {
+        for (const t of it.tags) {
+          const clean = typeof t === 'string' ? t.trim().toLowerCase().replace(/^#/, '') : '';
+          if (clean) counts[clean] = (counts[clean] || 0) + 1;
+        }
+      } else if (typeof it.tags === 'string' && it.tags) {
+        const clean = (it.tags as string).trim().toLowerCase().replace(/^#/, '');
+        if (clean) counts[clean] = (counts[clean] || 0) + 1;
+      }
+    }
+    return Object.entries(counts)
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .map(([tag, count]) => ({ tag, count }));
+  }, [shoppingList]);
+
+  // Shopping Pipeline Stats: All, Planned, Purchased, Sold, Cancelled
+  const pipelineStats = useMemo(() => {
+    let all = shoppingList.length;
+    let planned = 0;
+    let purchased = 0;
+    let sold = 0;
+    let cancelled = 0;
+
+    for (const it of shoppingList) {
+      const statusLower = (it.status || '').toLowerCase();
+      const orderStatusLower = (it.orderStatus || '').toLowerCase();
+      const notesLower = (it.notes || '').toLowerCase();
+      const tags = Array.isArray(it.tags) ? it.tags.map((t) => (typeof t === 'string' ? t.toLowerCase() : '')) : [];
+
+      const isSold =
+        statusLower === 'sold' ||
+        tags.includes('sold') ||
+        orderStatusLower.includes('sold') ||
+        notesLower.includes('sold') ||
+        (it.transactionType && it.transactionType.toLowerCase() === 'sale');
+
+      const isCancelled =
+        statusLower === 'cancelled' ||
+        statusLower === 'passed' ||
+        orderStatusLower.includes('cancel') ||
+        orderStatusLower.includes('refund') ||
+        notesLower.includes('cancel') ||
+        tags.includes('cancelled') ||
+        tags.includes('passed');
+
+      const isPurchased =
+        statusLower === 'purchased' ||
+        tags.includes('purchased') ||
+        orderStatusLower.includes('purchase') ||
+        orderStatusLower.includes('delivered') ||
+        orderStatusLower.includes('received') ||
+        (it.transactionType && it.transactionType.toLowerCase() === 'purchase');
+
+      if (isSold) sold++;
+      else if (isCancelled) cancelled++;
+      else if (isPurchased) purchased++;
+      else planned++;
+    }
+
+    return { all, planned, purchased, sold, cancelled };
+  }, [shoppingList]);
+
   const filteredItems = useMemo(() => {
-    return shoppingList.filter((item) => {
+    const matched = shoppingList.filter((item) => {
+      // Pipeline status tab filter
+      if (pipelineTab !== 'All') {
+        const statusLower = (item.status || '').toLowerCase();
+        const orderStatusLower = (item.orderStatus || '').toLowerCase();
+        const notesLower = (item.notes || '').toLowerCase();
+        const tags = Array.isArray(item.tags)
+          ? item.tags.map((t) => (typeof t === 'string' ? t.toLowerCase() : ''))
+          : [];
+
+        const isSold =
+          statusLower === 'sold' ||
+          tags.includes('sold') ||
+          orderStatusLower.includes('sold') ||
+          notesLower.includes('sold') ||
+          (item.transactionType && item.transactionType.toLowerCase() === 'sale');
+
+        const isCancelled =
+          statusLower === 'cancelled' ||
+          statusLower === 'passed' ||
+          orderStatusLower.includes('cancel') ||
+          orderStatusLower.includes('refund') ||
+          notesLower.includes('cancel') ||
+          tags.includes('cancelled') ||
+          tags.includes('passed');
+
+        const isPurchased =
+          statusLower === 'purchased' ||
+          tags.includes('purchased') ||
+          orderStatusLower.includes('purchase') ||
+          orderStatusLower.includes('delivered') ||
+          orderStatusLower.includes('received') ||
+          (item.transactionType && item.transactionType.toLowerCase() === 'purchase');
+
+        if (pipelineTab === 'Purchased') {
+          if (!isPurchased) return false;
+        } else if (pipelineTab === 'Sold') {
+          if (!isSold) return false;
+        } else if (pipelineTab === 'Cancelled') {
+          if (!isCancelled) return false;
+        } else if (pipelineTab === 'Planned' || pipelineTab === 'Wishlist') {
+          if (isPurchased || isSold || isCancelled) return false;
+        }
+      }
+
+      // Tag filter
+      if (selectedTag !== 'All') {
+        const targetTag = selectedTag.toLowerCase().replace(/^#/, '');
+        const itemTags = Array.isArray(item.tags)
+          ? item.tags.map((t) => (typeof t === 'string' ? t.toLowerCase().replace(/^#/, '') : ''))
+          : typeof item.tags === 'string'
+          ? [(item.tags as string).toLowerCase().replace(/^#/, '')]
+          : [];
+        if (!itemTags.includes(targetTag)) return false;
+      }
+
       if (selectedStatus !== 'All' && item.status !== selectedStatus) return false;
       if (selectedBrand !== 'All' && item.brand !== selectedBrand) return false;
       if (selectedPriority !== 'All' && item.priority !== selectedPriority) return false;
@@ -239,7 +480,48 @@ export const ShoppingView: React.FC<ShoppingViewProps> = ({
 
       return true;
     });
-  }, [shoppingList, selectedStatus, selectedBrand, selectedPriority, selectedCategory, searchQuery]);
+
+    // Sort items according to active sortBy
+    return matched.sort((a, b) => {
+      if (sortBy === 'price_desc') {
+        const priceA = a.actualPricePaid ?? a.estimatedPrice ?? 0;
+        const priceB = b.actualPricePaid ?? b.estimatedPrice ?? 0;
+        return priceB - priceA;
+      }
+      if (sortBy === 'price_asc') {
+        const priceA = a.actualPricePaid ?? a.estimatedPrice ?? 0;
+        const priceB = b.actualPricePaid ?? b.estimatedPrice ?? 0;
+        return priceA - priceB;
+      }
+      if (sortBy === 'name') {
+        return (a.name || '').localeCompare(b.name || '');
+      }
+      if (sortBy === 'newest') {
+        return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
+      }
+      // default: priority
+      const priorityWeights: Record<string, number> = {
+        'Essential / Must-Have': 4,
+        'High': 3,
+        'Medium': 2,
+        'Low / Wishlist': 1,
+      };
+      const pA = priorityWeights[a.priority] || 0;
+      const pB = priorityWeights[b.priority] || 0;
+      if (pB !== pA) return pB - pA;
+      return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
+    });
+  }, [
+    shoppingList,
+    pipelineTab,
+    selectedTag,
+    selectedStatus,
+    selectedBrand,
+    selectedPriority,
+    selectedCategory,
+    searchQuery,
+    sortBy,
+  ]);
 
   // Aggregated Financial & Pipeline Insights across all purchases
   const totalWishlistValuation = useMemo(() => {
@@ -804,129 +1086,89 @@ export const ShoppingView: React.FC<ShoppingViewProps> = ({
         </div>
       )}
 
-      {/* Interactive Pipeline Stage Breakdown Ribbon */}
-      {displaySettings.showStatusFilter !== false && (
-        <div className="bg-[#F8F7F4] border border-[#E5E5E1] p-2 flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-1 text-[11px] font-mono text-[#767670]">
-            <span className="font-semibold text-[#1A1A1A]">Pipeline &amp; Status Filter:</span>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-1.5">
-            {/* All */}
-            <button
-              onClick={() => setSelectedStatus('All')}
-              className={`px-2.5 py-1 text-xs font-mono transition-all cursor-pointer border flex items-center gap-1.5 ${
-                selectedStatus === 'All'
-                  ? 'bg-[#1A1A1A] text-white border-[#1A1A1A] shadow-xs'
-                  : 'bg-white text-[#4A4A45] border-[#D5D5D0] hover:border-[#8C7355]'
-              }`}
-            >
-              <span>All</span>
-              <span className="opacity-75">({shoppingList.length})</span>
-              <span className="font-bold ml-0.5">{formatGbp(totalWishlistValuation)}</span>
-            </button>
-
-            {/* In Basket */}
-            <button
-              onClick={() => setSelectedStatus('In Basket')}
-              className={`px-2.5 py-1 text-xs font-mono transition-all cursor-pointer border flex items-center gap-1.5 ${
-                selectedStatus === 'In Basket'
-                  ? 'bg-[#8C7355] text-white border-[#8C7355] shadow-xs'
-                  : 'bg-white text-[#4A4A45] border-[#D5D5D0] hover:border-[#8C7355]'
-              }`}
-            >
-              <span>In Basket</span>
-              <span className="opacity-75">({inBasketItems.length})</span>
-              <span className="font-bold ml-0.5">{formatGbp(inBasketValue)}</span>
-            </button>
-
-            {/* To Buy */}
-            <button
-              onClick={() => setSelectedStatus('To Buy')}
-              className={`px-2.5 py-1 text-xs font-mono transition-all cursor-pointer border flex items-center gap-1.5 ${
-                selectedStatus === 'To Buy'
-                  ? 'bg-[#8C7355] text-white border-[#8C7355] shadow-xs'
-                  : 'bg-white text-[#4A4A45] border-[#D5D5D0] hover:border-[#8C7355]'
-              }`}
-            >
-              <span>To Buy</span>
-              <span className="opacity-75">({toBuyItems.length})</span>
-              <span className="font-bold ml-0.5">{formatGbp(toBuyValue)}</span>
-            </button>
-
-            {/* Researching */}
-            <button
-              onClick={() => setSelectedStatus('Researching')}
-              className={`px-2.5 py-1 text-xs font-mono transition-all cursor-pointer border flex items-center gap-1.5 ${
-                selectedStatus === 'Researching'
-                  ? 'bg-[#8C7355] text-white border-[#8C7355] shadow-xs'
-                  : 'bg-white text-[#4A4A45] border-[#D5D5D0] hover:border-[#8C7355]'
-              }`}
-            >
-              <span>Researching</span>
-              <span className="opacity-75">({researchingItems.length})</span>
-              <span className="font-bold ml-0.5">{formatGbp(researchingValue)}</span>
-            </button>
-
-            {/* Purchased */}
-            <button
-              onClick={() => setSelectedStatus('Purchased')}
-              className={`px-2.5 py-1 text-xs font-mono transition-all cursor-pointer border flex items-center gap-1.5 ${
-                selectedStatus === 'Purchased'
-                  ? 'bg-emerald-800 text-white border-emerald-800 shadow-xs font-bold'
-                  : 'bg-white text-[#4A4A45] border-[#D5D5D0] hover:border-emerald-700 hover:text-emerald-800'
-              }`}
-            >
-              <CheckCircle className="w-3 h-3 text-emerald-300" />
-              <span>Purchased</span>
-              <span className="opacity-75">({purchasedItems.length})</span>
-              <span className="font-bold ml-0.5">{formatGbp(purchasedValue)}</span>
-            </button>
-
-            {/* Sold */}
-            <button
-              onClick={() => setSelectedStatus('Sold')}
-              className={`px-2.5 py-1 text-xs font-mono transition-all cursor-pointer border flex items-center gap-1.5 ${
-                selectedStatus === 'Sold'
-                  ? 'bg-teal-800 text-white border-teal-800 shadow-xs font-bold'
-                  : 'bg-white text-[#4A4A45] border-[#D5D5D0] hover:border-teal-700 hover:text-teal-800'
-              }`}
-            >
-              <Tag className="w-3 h-3 text-teal-300" />
-              <span>Sold</span>
-              <span className="opacity-75">({soldItems.length})</span>
-              <span className="font-bold ml-0.5">{formatGbp(soldValue)}</span>
-            </button>
-
-            {/* Cancelled */}
-            <button
-              onClick={() => setSelectedStatus('Cancelled')}
-              className={`px-2.5 py-1 text-xs font-mono transition-all cursor-pointer border flex items-center gap-1.5 ${
-                selectedStatus === 'Cancelled'
-                  ? 'bg-rose-800 text-white border-rose-800 shadow-xs font-bold'
-                  : 'bg-white text-[#4A4A45] border-[#D5D5D0] hover:border-rose-700 hover:text-rose-800'
-              }`}
-            >
-              <Ban className="w-3 h-3 text-rose-300" />
-              <span>Cancelled</span>
-              <span className="opacity-75">({cancelledItems.length})</span>
-            </button>
-
-            {/* Passed */}
-            <button
-              onClick={() => setSelectedStatus('Passed')}
-              className={`px-2.5 py-1 text-xs font-mono transition-all cursor-pointer border flex items-center gap-1.5 ${
-                selectedStatus === 'Passed'
-                  ? 'bg-slate-700 text-white border-slate-700 shadow-xs font-bold'
-                  : 'bg-white text-[#4A4A45] border-[#D5D5D0] hover:border-slate-600'
-              }`}
-            >
-              <span>Passed</span>
-              <span className="opacity-75">({passedItems.length})</span>
-            </button>
-          </div>
+      {/* Interactive Pipeline Status Tabs */}
+      <div className="bg-[#F8F7F4] border border-[#E5E5E1] p-2.5 flex flex-wrap items-center justify-between gap-2 shadow-xs">
+        <div className="flex items-center gap-1.5 text-[11px] font-mono text-[#767670]">
+          <span className="font-semibold text-[#1A1A1A] uppercase tracking-wider">Pipeline:</span>
+          <span className="text-[10px] text-[#767670]">({shoppingList.length} items total)</span>
         </div>
-      )}
+
+        <div className="flex flex-wrap items-center gap-1.5">
+          {/* All */}
+          <button
+            type="button"
+            onClick={() => handleSetPipelineTab('All')}
+            className={`px-2.5 py-1 text-xs font-mono transition-all cursor-pointer border flex items-center gap-1.5 ${
+              pipelineTab === 'All'
+                ? 'bg-[#1A1A1A] text-white border-[#1A1A1A] shadow-xs font-bold'
+                : 'bg-white text-[#4A4A45] border-[#D5D5D0] hover:border-[#8C7355]'
+            }`}
+          >
+            <span>All</span>
+            <span className="opacity-75">({pipelineStats.all})</span>
+          </button>
+
+          {/* Planned / Wishlist */}
+          <button
+            type="button"
+            onClick={() => handleSetPipelineTab('Planned')}
+            className={`px-2.5 py-1 text-xs font-mono transition-all cursor-pointer border flex items-center gap-1.5 ${
+              pipelineTab === 'Planned' || pipelineTab === 'Wishlist'
+                ? 'bg-[#8C7355] text-white border-[#8C7355] shadow-xs font-bold'
+                : 'bg-white text-[#4A4A45] border-[#D5D5D0] hover:border-[#8C7355]'
+            }`}
+          >
+            <ShoppingBag className="w-3 h-3" />
+            <span>Wishlist / Planned</span>
+            <span className="opacity-75">({pipelineStats.planned})</span>
+          </button>
+
+          {/* Purchased */}
+          <button
+            type="button"
+            onClick={() => handleSetPipelineTab('Purchased')}
+            className={`px-2.5 py-1 text-xs font-mono transition-all cursor-pointer border flex items-center gap-1.5 ${
+              pipelineTab === 'Purchased'
+                ? 'bg-emerald-800 text-white border-emerald-800 shadow-xs font-bold'
+                : 'bg-white text-[#4A4A45] border-[#D5D5D0] hover:border-emerald-700 hover:text-emerald-800'
+            }`}
+          >
+            <CheckCircle className="w-3 h-3 text-emerald-300" />
+            <span>Purchased</span>
+            <span className="opacity-75">({pipelineStats.purchased})</span>
+          </button>
+
+          {/* Sold */}
+          <button
+            type="button"
+            onClick={() => handleSetPipelineTab('Sold')}
+            className={`px-2.5 py-1 text-xs font-mono transition-all cursor-pointer border flex items-center gap-1.5 ${
+              pipelineTab === 'Sold'
+                ? 'bg-teal-800 text-white border-teal-800 shadow-xs font-bold'
+                : 'bg-white text-[#4A4A45] border-[#D5D5D0] hover:border-teal-700 hover:text-teal-800'
+            }`}
+          >
+            <Tag className="w-3 h-3 text-teal-300" />
+            <span>Sold</span>
+            <span className="opacity-75">({pipelineStats.sold})</span>
+          </button>
+
+          {/* Cancelled */}
+          <button
+            type="button"
+            onClick={() => handleSetPipelineTab('Cancelled')}
+            className={`px-2.5 py-1 text-xs font-mono transition-all cursor-pointer border flex items-center gap-1.5 ${
+              pipelineTab === 'Cancelled'
+                ? 'bg-rose-800 text-white border-rose-800 shadow-xs font-bold'
+                : 'bg-white text-[#4A4A45] border-[#D5D5D0] hover:border-rose-700 hover:text-rose-800'
+            }`}
+          >
+            <Ban className="w-3 h-3 text-rose-300" />
+            <span>Cancelled</span>
+            <span className="opacity-75">({pipelineStats.cancelled})</span>
+          </button>
+        </div>
+      </div>
 
       {/* Category Manager & Filter Bar */}
       {displaySettings.showCategoryFilter && (
@@ -942,7 +1184,27 @@ export const ShoppingView: React.FC<ShoppingViewProps> = ({
             </span>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
+            {selectedCategory !== 'All' && (
+              <button
+                type="button"
+                onClick={() => handleSetSelectedCategory('All')}
+                className="text-[10px] font-mono text-[#8C7355] hover:text-[#1A1A1A] hover:underline cursor-pointer flex items-center gap-1"
+              >
+                <X className="w-3 h-3" />
+                Clear category ({selectedCategory})
+              </button>
+            )}
+            {selectedTag !== 'All' && (
+              <button
+                type="button"
+                onClick={() => handleSetSelectedTag('All')}
+                className="text-[10px] font-mono text-[#1A1A1A] hover:text-rose-600 hover:underline cursor-pointer flex items-center gap-1"
+              >
+                <X className="w-3 h-3" />
+                Clear tag (#{selectedTag})
+              </button>
+            )}
             {!isAddingCategory ? (
               <button
                 onClick={() => setIsAddingCategory(true)}
@@ -1000,7 +1262,7 @@ export const ShoppingView: React.FC<ShoppingViewProps> = ({
         <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-1">
           {/* All Categories Pill */}
           <button
-            onClick={() => setSelectedCategory('All')}
+            onClick={() => handleSetSelectedCategory('All')}
             className={`px-2.5 py-1 text-xs border transition-all cursor-pointer whitespace-nowrap font-mono ${
               selectedCategory === 'All'
                 ? 'bg-[#8C7355] text-white border-[#8C7355] font-semibold shadow-xs'
@@ -1060,7 +1322,7 @@ export const ShoppingView: React.FC<ShoppingViewProps> = ({
                 }`}
               >
                 <span
-                  onClick={() => setSelectedCategory(cat)}
+                  onClick={() => handleSetSelectedCategory(cat)}
                   className="cursor-pointer hover:underline"
                   title={`Filter by ${cat}`}
                 >
@@ -1099,6 +1361,45 @@ export const ShoppingView: React.FC<ShoppingViewProps> = ({
             );
           })}
         </div>
+
+        {/* Dynamic Tag Filter Strip */}
+        {uniqueTags.length > 0 && (
+          <div className="pt-2 border-t border-[#F2F1ED] flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-0.5">
+            <span className="text-[10px] font-mono text-[#767670] shrink-0 font-semibold">
+              Tags:
+            </span>
+            <button
+              type="button"
+              onClick={() => handleSetSelectedTag('All')}
+              className={`px-2 py-0.5 text-[11px] font-mono border transition-all cursor-pointer whitespace-nowrap rounded-xs ${
+                selectedTag === 'All'
+                  ? 'bg-[#1A1A1A] text-white border-[#1A1A1A] font-semibold shadow-xs'
+                  : 'bg-[#FAF9F6] text-[#767670] hover:text-[#1A1A1A] border-[#E5E5E1]'
+              }`}
+            >
+              All Tags
+            </button>
+            {uniqueTags.map(({ tag, count }) => {
+              const isSelected = selectedTag.toLowerCase() === tag.toLowerCase();
+              return (
+                <button
+                  key={tag}
+                  type="button"
+                  onClick={() => handleSetSelectedTag(isSelected ? 'All' : tag)}
+                  className={`px-2 py-0.5 text-[11px] font-mono border transition-all cursor-pointer whitespace-nowrap rounded-xs flex items-center gap-1 ${
+                    isSelected
+                      ? 'bg-[#8C7355] text-white border-[#8C7355] font-semibold shadow-xs'
+                      : 'bg-[#FAF9F6] text-[#5A5A55] hover:bg-[#EAE8E3] hover:text-[#1A1A1A] border-[#E5E5E1]'
+                  }`}
+                >
+                  <span>#{tag}</span>
+                  <span className="text-[9px] opacity-75">({count})</span>
+                  {isSelected && <X className="w-2.5 h-2.5 ml-0.5" />}
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
       )}
 
@@ -1133,123 +1434,246 @@ export const ShoppingView: React.FC<ShoppingViewProps> = ({
           </div>
         </div>
 
-        {/* Status Filter Pills with (x) */}
-        {displaySettings.showStatusFilter && (
-          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-1">
-            <span className="text-[11px] text-[#767670] font-mono font-semibold mr-1 shrink-0">
-              Status:
-            </span>
-            {STATUSES.map((status) => {
-              const isSelected = selectedStatus === status;
-              return (
-                <button
-                  key={status}
-                  onClick={() => setSelectedStatus(status)}
-                  className={`px-2.5 py-1 text-xs border transition-all cursor-pointer whitespace-nowrap flex items-center gap-1 ${
-                    isSelected
-                      ? 'bg-[#1A1A1A] text-white border-[#1A1A1A] font-semibold shadow-xs'
-                      : 'bg-[#F8F7F4] text-[#4A4A45] hover:bg-[#EAE8E3] border-[#E5E5E1]'
-                  }`}
+        {/* Secondary Priority, Brand, Status & Sort Filters */}
+        <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-[#E5E5E1]">
+          <div className="flex flex-wrap items-center gap-3">
+            {/* Status Dropdown */}
+            <div className="flex items-center gap-1 text-xs">
+              <span className="text-[#767670] font-mono text-[11px]">Status:</span>
+              <div className="relative">
+                <select
+                  value={selectedStatus}
+                  onChange={(e) => handleSetSelectedStatus(e.target.value as any)}
+                  className="bg-[#F8F7F4] border border-[#E5E5E1] text-[#1A1A1A] text-xs px-2 py-1 pr-6 focus:outline-none focus:border-[#8C7355] appearance-none max-w-[140px] truncate font-medium"
                 >
-                  <span>{status}</span>
-                  {isSelected && status !== 'All' && (
-                    <span
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSelectedStatus('All');
-                      }}
-                      className="hover:text-rose-300 ml-0.5 p-0.5"
-                      title="Clear status filter (✕)"
-                    >
-                      <X className="w-3 h-3" />
-                    </span>
-                  )}
+                  {STATUSES.map((st) => (
+                    <option key={st} value={st}>
+                      {st}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown className="w-3 h-3 text-[#767670] absolute right-1.5 top-2 pointer-events-none" />
+              </div>
+              {selectedStatus !== 'All' && (
+                <button
+                  onClick={() => handleSetSelectedStatus('All')}
+                  className="text-[#767670] hover:text-rose-600 p-0.5 cursor-pointer"
+                  title="Clear status filter (✕)"
+                >
+                  <X className="w-3 h-3" />
                 </button>
-              );
-            })}
-          </div>
-        )}
-
-        {/* Secondary Priority & Brand Filters */}
-        {displaySettings.showSecondaryFilters && (
-          <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-[#E5E5E1]">
-            <div className="flex flex-wrap items-center gap-3">
-              {/* Brand Filter */}
-              <div className="flex items-center gap-1 text-xs">
-                <span className="text-[#767670] font-mono text-[11px]">Brand:</span>
-                <div className="relative">
-                  <select
-                    value={selectedBrand}
-                    onChange={(e) => setSelectedBrand(e.target.value)}
-                    className="bg-[#F8F7F4] border border-[#E5E5E1] text-[#1A1A1A] text-xs px-2 py-1 pr-6 focus:outline-none focus:border-[#8C7355] appearance-none max-w-[160px] truncate font-medium"
-                  >
-                    <option value="All">All Brands ({shoppingList.length})</option>
-                    {uniqueBrands.map(({ brand, count }) => (
-                      <option key={brand} value={brand}>
-                        {brand} ({count})
-                      </option>
-                    ))}
-                  </select>
-                  <ChevronDown className="w-3 h-3 text-[#767670] absolute right-1.5 top-2 pointer-events-none" />
-                </div>
-                {selectedBrand !== 'All' && (
-                  <button
-                    onClick={() => setSelectedBrand('All')}
-                    className="text-[#767670] hover:text-rose-600 p-0.5 cursor-pointer"
-                    title="Clear brand filter (✕)"
-                  >
-                    <X className="w-3 h-3" />
-                  </button>
-                )}
-              </div>
-
-              {/* Priority Filter */}
-              <div className="flex items-center gap-1 text-xs">
-                <span className="text-[#767670] font-mono text-[11px]">Priority:</span>
-                <div className="relative">
-                  <select
-                    value={selectedPriority}
-                    onChange={(e) => setSelectedPriority(e.target.value as any)}
-                    className="bg-[#F8F7F4] border border-[#E5E5E1] text-[#1A1A1A] text-xs px-2 py-1 pr-6 focus:outline-none focus:border-[#8C7355] appearance-none"
-                  >
-                    {PRIORITIES.map((p) => (
-                      <option key={p} value={p}>
-                        {p}
-                      </option>
-                    ))}
-                  </select>
-                  <ChevronDown className="w-3 h-3 text-[#767670] absolute right-1.5 top-2 pointer-events-none" />
-                </div>
-                {selectedPriority !== 'All' && (
-                  <button
-                    onClick={() => setSelectedPriority('All')}
-                    className="text-[#767670] hover:text-rose-600 p-0.5 cursor-pointer"
-                    title="Clear priority (✕)"
-                  >
-                    <X className="w-3 h-3" />
-                  </button>
-                )}
-              </div>
+              )}
             </div>
 
-            {(selectedStatus !== 'All' ||
-              selectedBrand !== 'All' ||
-              selectedPriority !== 'All' ||
-              selectedCategory !== 'All' ||
-              searchQuery) && (
-              <button
-                onClick={() => {
-                  setSelectedStatus('All');
-                  setSelectedBrand('All');
-                  setSelectedPriority('All');
-                  setSelectedCategory('All');
-                  setSearchQuery('');
-                }}
-                className="text-[11px] font-mono text-[#8C7355] hover:text-[#1A1A1A] flex items-center gap-1 cursor-pointer"
-              >
-                <RotateCcw className="w-3 h-3" />
-                Clear Filters (✕)
-              </button>
+            {/* Brand Filter */}
+            <div className="flex items-center gap-1 text-xs">
+              <span className="text-[#767670] font-mono text-[11px]">Brand:</span>
+              <div className="relative">
+                <select
+                  value={selectedBrand}
+                  onChange={(e) => handleSetSelectedBrand(e.target.value)}
+                  className="bg-[#F8F7F4] border border-[#E5E5E1] text-[#1A1A1A] text-xs px-2 py-1 pr-6 focus:outline-none focus:border-[#8C7355] appearance-none max-w-[150px] truncate font-medium"
+                >
+                  <option value="All">All Brands ({shoppingList.length})</option>
+                  {uniqueBrands.map(({ brand, count }) => (
+                    <option key={brand} value={brand}>
+                      {brand} ({count})
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown className="w-3 h-3 text-[#767670] absolute right-1.5 top-2 pointer-events-none" />
+              </div>
+              {selectedBrand !== 'All' && (
+                <button
+                  onClick={() => handleSetSelectedBrand('All')}
+                  className="text-[#767670] hover:text-rose-600 p-0.5 cursor-pointer"
+                  title="Clear brand filter (✕)"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              )}
+            </div>
+
+            {/* Priority Filter */}
+            <div className="flex items-center gap-1 text-xs">
+              <span className="text-[#767670] font-mono text-[11px]">Priority:</span>
+              <div className="relative">
+                <select
+                  value={selectedPriority}
+                  onChange={(e) => handleSetSelectedPriority(e.target.value as any)}
+                  className="bg-[#F8F7F4] border border-[#E5E5E1] text-[#1A1A1A] text-xs px-2 py-1 pr-6 focus:outline-none focus:border-[#8C7355] appearance-none"
+                >
+                  {PRIORITIES.map((p) => (
+                    <option key={p} value={p}>
+                      {p}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown className="w-3 h-3 text-[#767670] absolute right-1.5 top-2 pointer-events-none" />
+              </div>
+              {selectedPriority !== 'All' && (
+                <button
+                  onClick={() => handleSetSelectedPriority('All')}
+                  className="text-[#767670] hover:text-rose-600 p-0.5 cursor-pointer"
+                  title="Clear priority (✕)"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              )}
+            </div>
+
+            {/* Sort Options */}
+            <div className="flex items-center gap-1 text-xs">
+              <span className="text-[#767670] font-mono text-[11px]">Sort:</span>
+              <div className="relative">
+                <select
+                  value={sortBy}
+                  onChange={(e) => handleSetSortBy(e.target.value)}
+                  className="bg-[#F8F7F4] border border-[#E5E5E1] text-[#1A1A1A] text-xs px-2 py-1 pr-6 focus:outline-none focus:border-[#8C7355] appearance-none font-medium"
+                >
+                  <option value="priority">Priority: High to Low</option>
+                  <option value="price_desc">Price: High to Low</option>
+                  <option value="price_asc">Price: Low to High</option>
+                  <option value="newest">Newest Added</option>
+                  <option value="name">Alphabetical (A-Z)</option>
+                </select>
+                <ChevronDown className="w-3 h-3 text-[#767670] absolute right-1.5 top-2 pointer-events-none" />
+              </div>
+            </div>
+          </div>
+
+          {(pipelineTab !== 'All' ||
+            selectedTag !== 'All' ||
+            selectedStatus !== 'All' ||
+            selectedBrand !== 'All' ||
+            selectedPriority !== 'All' ||
+            selectedCategory !== 'All' ||
+            searchQuery) && (
+            <button
+              onClick={() => {
+                handleSetPipelineTab('All');
+                handleSetSelectedTag('All');
+                handleSetSelectedStatus('All');
+                handleSetSelectedBrand('All');
+                handleSetSelectedPriority('All');
+                handleSetSelectedCategory('All');
+                setSearchQuery('');
+              }}
+              className="text-[11px] font-mono text-[#8C7355] hover:text-[#1A1A1A] flex items-center gap-1 cursor-pointer font-semibold"
+            >
+              <RotateCcw className="w-3 h-3" />
+              Reset Filters (✕)
+            </button>
+          )}
+        </div>
+
+        {/* Active Filters Pills Bar */}
+        {(pipelineTab !== 'All' ||
+          selectedTag !== 'All' ||
+          selectedCategory !== 'All' ||
+          selectedBrand !== 'All' ||
+          selectedPriority !== 'All' ||
+          selectedStatus !== 'All' ||
+          searchQuery.trim() !== '') && (
+          <div className="flex flex-wrap items-center gap-1.5 pt-2 border-t border-[#F2F1ED] text-[11px] font-mono">
+            <span className="text-[#767670] font-semibold">Active Filters:</span>
+
+            {pipelineTab !== 'All' && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-[#FAF9F6] border border-[#E5E5E1] text-[#1A1A1A] rounded-xs">
+                Pipeline: {pipelineTab}
+                <button
+                  type="button"
+                  onClick={() => handleSetPipelineTab('All')}
+                  className="hover:text-rose-600 cursor-pointer"
+                  title="Remove pipeline filter"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            )}
+
+            {selectedStatus !== 'All' && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-[#FAF9F6] border border-[#E5E5E1] text-[#1A1A1A] rounded-xs">
+                Status: {selectedStatus}
+                <button
+                  type="button"
+                  onClick={() => handleSetSelectedStatus('All')}
+                  className="hover:text-rose-600 cursor-pointer"
+                  title="Remove status filter"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            )}
+
+            {selectedCategory !== 'All' && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-[#FAF9F6] border border-[#E5E5E1] text-[#1A1A1A] rounded-xs">
+                Category: {selectedCategory}
+                <button
+                  type="button"
+                  onClick={() => handleSetSelectedCategory('All')}
+                  className="hover:text-rose-600 cursor-pointer"
+                  title="Remove category filter"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            )}
+
+            {selectedTag !== 'All' && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-[#FAF9F6] border border-[#E5E5E1] text-[#1A1A1A] rounded-xs">
+                Tag: #{selectedTag}
+                <button
+                  type="button"
+                  onClick={() => handleSetSelectedTag('All')}
+                  className="hover:text-rose-600 cursor-pointer"
+                  title="Remove tag filter"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            )}
+
+            {selectedBrand !== 'All' && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-[#FAF9F6] border border-[#E5E5E1] text-[#1A1A1A] rounded-xs">
+                Brand: {selectedBrand}
+                <button
+                  type="button"
+                  onClick={() => handleSetSelectedBrand('All')}
+                  className="hover:text-rose-600 cursor-pointer"
+                  title="Remove brand filter"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            )}
+
+            {selectedPriority !== 'All' && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-[#FAF9F6] border border-[#E5E5E1] text-[#1A1A1A] rounded-xs">
+                Priority: {selectedPriority}
+                <button
+                  type="button"
+                  onClick={() => handleSetSelectedPriority('All')}
+                  className="hover:text-rose-600 cursor-pointer"
+                  title="Remove priority filter"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            )}
+
+            {searchQuery.trim() !== '' && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-[#FAF9F6] border border-[#E5E5E1] text-[#1A1A1A] rounded-xs">
+                Query: "{searchQuery}"
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  className="hover:text-rose-600 cursor-pointer"
+                  title="Remove search query"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
             )}
           </div>
         )}

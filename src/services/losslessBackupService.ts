@@ -41,20 +41,27 @@ export interface BackupDiffSummary {
   changedItemsCount: number;
   identicalItemsCount: number;
   incomingOutfitsCount: number;
+  currentOutfitsCount: number;
   incomingSalesCount: number;
+  currentSalesCount: number;
+  incomingShoppingCount: number;
+  currentShoppingCount: number;
   incomingWishlistCount: number;
+  valuationDifference: number;
   valuationDifferenceGbp: number;
 }
 
 export interface DatabaseHealthReport {
   score: number; // 0-100
+  healthScore: number;
   totalChecks: number;
   passedChecks: number;
   issues: Array<{
-    severity: 'error' | 'warning' | 'info';
+    severity: 'high' | 'medium' | 'low' | 'error' | 'warning' | 'info';
     entityType: 'wardrobe' | 'outfit' | 'sale' | 'shopping' | 'timeline';
     entityId: string;
     message: string;
+    description: string;
   }>;
   summary: string;
 }
@@ -101,6 +108,15 @@ export function createLosslessBackup(data: {
     0
   );
 
+  const allCategories = Array.from(
+    new Set([
+      ...(Array.isArray(categories) ? categories : []),
+      ...items.map((i) => i.category).filter(Boolean),
+      ...shoppingList.map((s) => s.category).filter(Boolean),
+      ...saleItems.map((sl) => sl.category).filter(Boolean),
+    ])
+  );
+
   const cleanData = {
     items: JSON.parse(JSON.stringify(items)),
     outfits: JSON.parse(JSON.stringify(outfits)),
@@ -108,7 +124,7 @@ export function createLosslessBackup(data: {
     saleItems: JSON.parse(JSON.stringify(saleItems)),
     snapshots: JSON.parse(JSON.stringify(snapshots)),
     changeLogs: JSON.parse(JSON.stringify(changeLogs)),
-    categories: categories ? JSON.parse(JSON.stringify(categories)) : undefined,
+    categories: allCategories.length > 0 ? allCategories : undefined,
     monthlyBudget,
   };
 
@@ -155,59 +171,115 @@ export function validateLosslessBackup(jsonContent: string | any): {
     return { valid: false, errors: ['Parsed object is empty or not an object.'], warnings };
   }
 
-  // Support both new humidor format and flat legacy format
-  let standardPayload: LosslessBackupPayload;
+  // Extract collections flexibly from standard, flat, legacy, or wrapped formats
+  let rawItems: any[] | null = null;
+  let rawOutfits: any[] | null = null;
+  let rawShopping: any[] | null = null;
+  let rawSales: any[] | null = null;
+  let rawSnapshots: any[] | null = null;
+  let rawLogs: any[] | null = null;
+  let rawCategories: any[] | null = null;
+  let rawBudget: number | undefined = undefined;
 
-  if (parsed.data && Array.isArray(parsed.data.items)) {
-    // Humidor standard format
-    standardPayload = {
-      formatVersion: parsed.formatVersion || '4.2-humidor-lossless',
-      exportedAt: parsed.exportedAt || new Date().toISOString(),
-      integrityChecksum: parsed.integrityChecksum || calculateChecksum(JSON.stringify(parsed.data)),
-      data: {
-        items: Array.isArray(parsed.data.items) ? parsed.data.items : [],
-        outfits: Array.isArray(parsed.data.outfits) ? parsed.data.outfits : [],
-        shoppingList: Array.isArray(parsed.data.shoppingList) ? parsed.data.shoppingList : [],
-        saleItems: Array.isArray(parsed.data.saleItems) ? parsed.data.saleItems : [],
-        snapshots: Array.isArray(parsed.data.snapshots) ? parsed.data.snapshots : [],
-        changeLogs: Array.isArray(parsed.data.changeLogs) ? parsed.data.changeLogs : [],
-        categories: parsed.data.categories,
-        monthlyBudget: parsed.data.monthlyBudget,
-      },
-      metadata: parsed.metadata,
-    };
-  } else if (Array.isArray(parsed.items) || Array.isArray(parsed.wardrobeItems)) {
-    // Legacy export conversion
-    const items = Array.isArray(parsed.items)
-      ? parsed.items
-      : Array.isArray(parsed.wardrobeItems)
-      ? parsed.wardrobeItems
-      : [];
-    const outfits = Array.isArray(parsed.outfits) ? parsed.outfits : [];
-    const shoppingList = Array.isArray(parsed.shoppingList) ? parsed.shoppingList : [];
-    const saleItems = Array.isArray(parsed.saleItems) ? parsed.saleItems : [];
-    const snapshots = Array.isArray(parsed.snapshots) ? parsed.snapshots : [];
-    const changeLogs = Array.isArray(parsed.changeLogs) ? parsed.changeLogs : [];
+  let isHumidorFormat = false;
 
-    const cleanData = {
-      items,
-      outfits,
-      shoppingList,
-      saleItems,
-      snapshots,
-      changeLogs,
-      categories: parsed.categories,
-      monthlyBudget: parsed.monthlyBudget,
-    };
-
-    standardPayload = {
-      formatVersion: 'legacy-migrated',
-      exportedAt: parsed.exportedAt || new Date().toISOString(),
-      integrityChecksum: calculateChecksum(JSON.stringify(cleanData)),
-      data: cleanData,
-    };
-    warnings.push('Legacy archive format detected. Converted to Humidor Lossless schema on import.');
+  if (Array.isArray(parsed)) {
+    rawItems = parsed;
+    warnings.push('Array format detected. Populating as wardrobe catalog.');
   } else {
+    const container = parsed.data && typeof parsed.data === 'object' ? parsed.data : parsed;
+    isHumidorFormat = Boolean(parsed.data && typeof parsed.data === 'object');
+
+    // Items
+    if (Array.isArray(container.items)) rawItems = container.items;
+    else if (Array.isArray(container.wardrobeItems)) rawItems = container.wardrobeItems;
+    else if (Array.isArray(container.wardrobe)) rawItems = container.wardrobe;
+    else if (Array.isArray(container.garments)) rawItems = container.garments;
+    else if (Array.isArray(container.closet)) rawItems = container.closet;
+    else if (Array.isArray(parsed.items)) rawItems = parsed.items;
+    else if (Array.isArray(parsed.wardrobeItems)) rawItems = parsed.wardrobeItems;
+
+    // Outfits
+    if (Array.isArray(container.outfits)) rawOutfits = container.outfits;
+    else if (Array.isArray(container.looks)) rawOutfits = container.looks;
+    else if (Array.isArray(container.lookbooks)) rawOutfits = container.lookbooks;
+    else if (Array.isArray(parsed.outfits)) rawOutfits = parsed.outfits;
+    else if (Array.isArray(parsed.looks)) rawOutfits = parsed.looks;
+
+    // Shopping
+    if (Array.isArray(container.shoppingList)) rawShopping = container.shoppingList;
+    else if (Array.isArray(container.shopping)) rawShopping = container.shopping;
+    else if (Array.isArray(container.wishlist)) rawShopping = container.wishlist;
+    else if (Array.isArray(container.wishlistItems)) rawShopping = container.wishlistItems;
+    else if (Array.isArray(parsed.shoppingList)) rawShopping = parsed.shoppingList;
+    else if (Array.isArray(parsed.wishlist)) rawShopping = parsed.wishlist;
+
+    // Sales
+    if (Array.isArray(container.saleItems)) rawSales = container.saleItems;
+    else if (Array.isArray(container.sales)) rawSales = container.sales;
+    else if (Array.isArray(container.resale)) rawSales = container.resale;
+    else if (Array.isArray(container.resaleItems)) rawSales = container.resaleItems;
+    else if (Array.isArray(container.listings)) rawSales = container.listings;
+    else if (Array.isArray(parsed.saleItems)) rawSales = parsed.saleItems;
+    else if (Array.isArray(parsed.sales)) rawSales = parsed.sales;
+
+    // Snapshots
+    if (Array.isArray(container.snapshots)) rawSnapshots = container.snapshots;
+    else if (Array.isArray(container.checkpoints)) rawSnapshots = container.checkpoints;
+    else if (Array.isArray(parsed.snapshots)) rawSnapshots = parsed.snapshots;
+
+    // ChangeLogs
+    if (Array.isArray(container.changeLogs)) rawLogs = container.changeLogs;
+    else if (Array.isArray(container.logs)) rawLogs = container.logs;
+    else if (Array.isArray(parsed.changeLogs)) rawLogs = parsed.changeLogs;
+
+    // Categories
+    if (Array.isArray(container.categories)) rawCategories = container.categories;
+    else if (Array.isArray(parsed.categories)) rawCategories = parsed.categories;
+
+    // Budget
+    if (typeof container.monthlyBudget === 'number') rawBudget = container.monthlyBudget;
+    else if (typeof parsed.monthlyBudget === 'number') rawBudget = parsed.monthlyBudget;
+  }
+
+  const items = Array.isArray(rawItems) ? rawItems : [];
+  const outfits = Array.isArray(rawOutfits) ? rawOutfits : [];
+  const shoppingList = Array.isArray(rawShopping) ? rawShopping : [];
+  const saleItems = Array.isArray(rawSales) ? rawSales : [];
+  const snapshots = Array.isArray(rawSnapshots) ? rawSnapshots : [];
+  const changeLogs = Array.isArray(rawLogs) ? rawLogs : [];
+  // Ensure all categories are discovered and preserved
+  const discoveredCatSet = new Set<string>();
+  if (Array.isArray(rawCategories)) {
+    rawCategories.forEach((c) => {
+      if (typeof c === 'string' && c.trim()) discoveredCatSet.add(c.trim());
+    });
+  }
+  items.forEach((it) => {
+    if (it && typeof it.category === 'string' && it.category.trim()) {
+      discoveredCatSet.add(it.category.trim());
+    }
+  });
+  shoppingList.forEach((sh) => {
+    if (sh && typeof sh.category === 'string' && sh.category.trim()) {
+      discoveredCatSet.add(sh.category.trim());
+    }
+  });
+  saleItems.forEach((sl) => {
+    if (sl && typeof sl.category === 'string' && sl.category.trim()) {
+      discoveredCatSet.add(sl.category.trim());
+    }
+  });
+  const categories = discoveredCatSet.size > 0 ? Array.from(discoveredCatSet) : undefined;
+  const monthlyBudget = typeof rawBudget === 'number' ? rawBudget : undefined;
+
+  if (
+    items.length === 0 &&
+    outfits.length === 0 &&
+    shoppingList.length === 0 &&
+    saleItems.length === 0 &&
+    snapshots.length === 0
+  ) {
     return {
       valid: false,
       errors: ['No wardrobe garments, outfits, shopping, or resale collections found in file.'],
@@ -215,9 +287,33 @@ export function validateLosslessBackup(jsonContent: string | any): {
     };
   }
 
+  const cleanData = {
+    items,
+    outfits,
+    shoppingList,
+    saleItems,
+    snapshots,
+    changeLogs,
+    categories,
+    monthlyBudget,
+  };
+
+  const standardPayload: LosslessBackupPayload = {
+    formatVersion: isHumidorFormat ? parsed.formatVersion || '4.2-humidor-lossless' : 'legacy-migrated',
+    exportedAt: parsed.exportedAt || new Date().toISOString(),
+    integrityChecksum: parsed.integrityChecksum || calculateChecksum(JSON.stringify(cleanData)),
+    data: cleanData,
+    metadata: parsed.metadata,
+  };
+
+  if (!isHumidorFormat) {
+    warnings.push('Standard/Legacy archive format detected. Converted to Humidor Lossless schema.');
+  }
+
   // Check checksum if present
   if (parsed.integrityChecksum) {
-    const expected = calculateChecksum(JSON.stringify(standardPayload.data));
+    const rawDataStr = isHumidorFormat && parsed.data ? JSON.stringify(parsed.data) : JSON.stringify(standardPayload.data);
+    const expected = calculateChecksum(rawDataStr);
     if (parsed.integrityChecksum !== expected) {
       warnings.push('Checksum variance detected. File may have been manually edited outside the app.');
     }
@@ -261,6 +357,7 @@ export function compareLosslessBackups(
 
   const currentVal = currentItems.reduce((acc, i) => acc + (Number(i.purchasePrice) || 0), 0);
   const incomingVal = incomingItems.reduce((acc, i) => acc + (Number(i.purchasePrice) || 0), 0);
+  const valDiff = Math.round((incomingVal - currentVal) * 100) / 100;
 
   return {
     incomingItemsCount: incomingItems.length,
@@ -269,9 +366,14 @@ export function compareLosslessBackups(
     changedItemsCount,
     identicalItemsCount,
     incomingOutfitsCount: (incoming.data.outfits || []).length,
+    currentOutfitsCount: (current.data.outfits || []).length,
     incomingSalesCount: (incoming.data.saleItems || []).length,
+    currentSalesCount: (current.data.saleItems || []).length,
+    incomingShoppingCount: (incoming.data.shoppingList || []).length,
+    currentShoppingCount: (current.data.shoppingList || []).length,
     incomingWishlistCount: (incoming.data.shoppingList || []).length,
-    valuationDifferenceGbp: Math.round((incomingVal - currentVal) * 100) / 100,
+    valuationDifference: valDiff,
+    valuationDifferenceGbp: valDiff,
   };
 }
 
@@ -418,22 +520,26 @@ export function runDatabaseHealthCheck(data: LosslessBackupPayload['data']): Dat
   for (const item of data.items || []) {
     totalChecks += 2;
     if (!item.name || !item.name.trim()) {
+      const msg = `Garment ${item.id} is missing a product name.`;
       issues.push({
-        severity: 'error',
+        severity: 'high',
         entityType: 'wardrobe',
         entityId: item.id,
-        message: `Garment ${item.id} is missing a product name.`,
+        message: msg,
+        description: msg,
       });
     } else {
       passedChecks++;
     }
 
     if (item.purchasePrice < 0 || isNaN(item.purchasePrice)) {
+      const msg = `Garment "${item.name}" has an invalid price value (£${item.purchasePrice}).`;
       issues.push({
-        severity: 'warning',
+        severity: 'medium',
         entityType: 'wardrobe',
         entityId: item.id,
-        message: `Garment "${item.name}" has an invalid price value (£${item.purchasePrice}).`,
+        message: msg,
+        description: msg,
       });
     } else {
       passedChecks++;
@@ -444,12 +550,15 @@ export function runDatabaseHealthCheck(data: LosslessBackupPayload['data']): Dat
   for (const outfit of data.outfits || []) {
     totalChecks++;
     const missingIds = (outfit.itemIds || []).filter((id) => !itemIds.has(id));
+    const outfitName = outfit.title || (outfit as any).name || 'Lookbook Outfit';
     if (missingIds.length > 0) {
+      const msg = `Lookbook outfit "${outfitName}" references ${missingIds.length} deleted wardrobe item(s).`;
       issues.push({
-        severity: 'warning',
+        severity: 'medium',
         entityType: 'outfit',
         entityId: outfit.id,
-        message: `Lookbook outfit "${outfit.name}" references ${missingIds.length} deleted wardrobe item(s).`,
+        message: msg,
+        description: msg,
       });
     } else {
       passedChecks++;
@@ -460,11 +569,13 @@ export function runDatabaseHealthCheck(data: LosslessBackupPayload['data']): Dat
   for (const sale of data.saleItems || []) {
     totalChecks++;
     if (sale.listingPrice < 0) {
+      const msg = `Listing "${sale.name}" has negative listing price (£${sale.listingPrice}).`;
       issues.push({
-        severity: 'warning',
+        severity: 'medium',
         entityType: 'sale',
         entityId: sale.id,
-        message: `Listing "${sale.name}" has negative listing price (£${sale.listingPrice}).`,
+        message: msg,
+        description: msg,
       });
     } else {
       passedChecks++;
@@ -475,6 +586,7 @@ export function runDatabaseHealthCheck(data: LosslessBackupPayload['data']): Dat
 
   return {
     score,
+    healthScore: score,
     totalChecks,
     passedChecks,
     issues,

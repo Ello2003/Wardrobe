@@ -288,6 +288,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    const inputEl = e.target;
     const reader = new FileReader();
     reader.onload = (event) => {
       const content = event.target?.result as string;
@@ -295,6 +296,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
         const res = importDataJSON(content);
         setImportStatus(res);
       }
+      inputEl.value = '';
     };
     reader.readAsText(file);
   };

@@ -31,12 +31,14 @@ export const SaleFormModal: React.FC<SaleFormModalProps> = ({
   onClose,
   saleItemToEdit,
 }) => {
-  const { categories = [], addSaleItem, updateSaleItem } = useWardrobe();
+  const { categories = [], addSaleItem, updateSaleItem, addCategory } = useWardrobe();
   const safeCategories = Array.isArray(categories) && categories.length > 0 ? categories : ['Tops', 'Knitwear', 'Trousers', 'Outerwear', 'Footwear', 'Accessories', 'Suits & Tailoring'];
 
   const [name, setName] = useState('');
   const [brand, setBrand] = useState('');
   const [category, setCategory] = useState<Category>((safeCategories[0] as Category) || 'Tops');
+  const [isAddingCategory, setIsAddingCategory] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState('');
   const [size, setSize] = useState('');
   const [color, setColor] = useState('');
   const [condition, setCondition] = useState<Condition>('Excellent');
@@ -233,23 +235,85 @@ export const SaleFormModal: React.FC<SaleFormModalProps> = ({
           {/* Row 2: Category, Condition, Size */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
-              <label className="text-[11px] font-mono text-[#5A5A55] block mb-1 font-semibold">
-                Category *
-              </label>
-              <select
-                value={category}
-                onChange={(e) => setCategory(e.target.value as Category)}
-                className="w-full px-2.5 py-1.5 bg-white border border-[#E5E5E1] rounded-md text-xs text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none"
-              >
-                {category && !safeCategories.includes(category) && (
-                  <option value={category}>{category}</option>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-[11px] font-mono text-[#5A5A55] font-semibold">
+                  Category *
+                </label>
+                {!isAddingCategory ? (
+                  <button
+                    type="button"
+                    onClick={() => setIsAddingCategory(true)}
+                    className="text-[10px] font-mono text-[#8C7355] hover:text-[#1A1A1A] hover:underline cursor-pointer"
+                  >
+                    + New Category
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setIsAddingCategory(false)}
+                    className="text-[10px] font-mono text-[#767670] hover:text-[#1A1A1A] cursor-pointer"
+                  >
+                    Cancel
+                  </button>
                 )}
-                {safeCategories.map((c) => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
-                ))}
-              </select>
+              </div>
+
+              {isAddingCategory ? (
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="text"
+                    value={newCategoryName}
+                    onChange={(e) => setNewCategoryName(e.target.value)}
+                    placeholder="Category name..."
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        const clean = newCategoryName.trim();
+                        if (clean) {
+                          addCategory(clean);
+                          setCategory(clean as Category);
+                          setNewCategoryName('');
+                          setIsAddingCategory(false);
+                        }
+                      }
+                      if (e.key === 'Escape') setIsAddingCategory(false);
+                    }}
+                    autoFocus
+                    className="flex-1 px-2.5 py-1.5 bg-white border border-[#8C7355] rounded-md text-xs text-[#1A1A1A] focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const clean = newCategoryName.trim();
+                      if (clean) {
+                        addCategory(clean);
+                        setCategory(clean as Category);
+                        setNewCategoryName('');
+                        setIsAddingCategory(false);
+                      }
+                    }}
+                    disabled={!newCategoryName.trim()}
+                    className="px-2.5 py-1.5 bg-[#8C7355] text-white text-xs font-mono rounded-md disabled:opacity-50 cursor-pointer"
+                  >
+                    Save
+                  </button>
+                </div>
+              ) : (
+                <select
+                  value={category}
+                  onChange={(e) => setCategory(e.target.value as Category)}
+                  className="w-full px-2.5 py-1.5 bg-white border border-[#E5E5E1] rounded-md text-xs text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none"
+                >
+                  {category && !safeCategories.includes(category) && (
+                    <option value={category}>{category}</option>
+                  )}
+                  {safeCategories.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+              )}
             </div>
 
             <div>

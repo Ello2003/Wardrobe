@@ -3,11 +3,22 @@ import path from 'path';
 import dotenv from 'dotenv';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, Type } from '@google/genai';
+import { extractAllGarmentAttributes } from './src/utils/garmentAttributeExtractor';
 
 dotenv.config();
 
 const app = express();
 const PORT = 3000;
+
+app.use((req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(204);
+  }
+  next();
+});
 
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
@@ -1703,11 +1714,17 @@ app.post('/api/gemini/extract-from-vinted-file', async (req, res) => {
               }
               if (itemPrice <= 0) itemPrice = 15; // default fallback
 
-              const brand = extractBrand(itemTitle);
-              const category = extractCategory(itemTitle);
-              const size = extractSize(itemTitle);
-              const color = extractColor(itemTitle);
-              const material = extractMaterial(itemTitle);
+              const category = extractCategory(itemTitle + ' ' + cell) || 'Outerwear';
+              const rawAttrs = extractAllGarmentAttributes({
+                title: itemTitle,
+                description: `${liContent} ${cell}`,
+                seller,
+              });
+
+              const finalBrand = (rawAttrs.brand && rawAttrs.brand !== 'Unbranded') ? rawAttrs.brand : 'Pre-Loved Brand';
+              const finalColor = rawAttrs.color || 'Neutral';
+              const finalMaterial = rawAttrs.material || 'Natural Fiber / Blend';
+              const finalSize = rawAttrs.size || '';
 
               const assignedImg = vintedImages[parsedItems.length] || '';
 
@@ -1717,12 +1734,12 @@ app.post('/api/gemini/extract-from-vinted-file', async (req, res) => {
 
               parsedItems.push({
                 name: itemTitle,
-                brand,
+                brand: finalBrand,
                 category,
                 purchasePrice: itemPrice,
-                color,
-                material,
-                size,
+                color: finalColor,
+                material: finalMaterial,
+                size: finalSize,
                 season: ['Autumn', 'Winter', 'Spring'],
                 condition: 'Vintage / Well-Loved',
                 imageUrl: assignedImg,
@@ -1776,11 +1793,11 @@ app.post('/api/gemini/extract-from-vinted-file', async (req, res) => {
                   }
                 }
 
-                let brand = 'Pre-Loved / Vintage';
+                let initialBrand = '';
                 if (p.brand) {
-                  brand = typeof p.brand === 'string' ? p.brand : p.brand.name || 'Pre-Loved / Vintage';
+                  initialBrand = typeof p.brand === 'string' ? p.brand : p.brand.name || '';
                 } else {
-                  brand = extractBrand(title);
+                  initialBrand = extractBrand(title);
                 }
 
                 let img = '';
@@ -1797,14 +1814,23 @@ app.post('/api/gemini/extract-from-vinted-file', async (req, res) => {
                 const color = extractColor(title + ' ' + (p.description || ''));
                 const material = extractMaterial(title + ' ' + (p.description || ''));
 
-                parsedItems.push({
-                  name: title,
-                  brand,
-                  category: cat,
-                  purchasePrice: price,
+                const attrs = extractAllGarmentAttributes({
+                  title,
+                  description: p.description || '',
+                  brand: initialBrand,
                   color,
                   material,
                   size,
+                });
+
+                parsedItems.push({
+                  name: title,
+                  brand: (attrs.brand && attrs.brand !== 'Unbranded') ? attrs.brand : (initialBrand || 'Pre-Loved / Vintage'),
+                  category: cat,
+                  purchasePrice: price,
+                  color: attrs.color || color,
+                  material: attrs.material || material,
+                  size: attrs.size || size,
                   season: ['Autumn', 'Winter', 'Spring'],
                   condition: 'Excellent',
                   imageUrl: img,
@@ -1853,20 +1879,29 @@ app.post('/api/gemini/extract-from-vinted-file', async (req, res) => {
             const ogImgMatch = html.match(/<meta[^>]*property=["']og:image["'][^>]*content=["']([^"']+)["']/i);
             const img = ogImgMatch ? ogImgMatch[1] : (vintedImages[0] || '');
 
-            const brand = extractBrand(rawTitle + ' ' + html.slice(0, 3000));
+            const rawBrand = extractBrand(rawTitle + ' ' + html.slice(0, 3000));
             const cat = extractCategory(rawTitle);
-            const size = extractSize(rawTitle + ' ' + html.slice(0, 3000));
-            const color = extractColor(rawTitle + ' ' + html.slice(0, 3000));
-            const material = extractMaterial(rawTitle + ' ' + html.slice(0, 3000));
+            const rawSize = extractSize(rawTitle + ' ' + html.slice(0, 3000));
+            const rawColor = extractColor(rawTitle + ' ' + html.slice(0, 3000));
+            const rawMaterial = extractMaterial(rawTitle + ' ' + html.slice(0, 3000));
+
+            const attrs = extractAllGarmentAttributes({
+              title: rawTitle,
+              description: html.slice(0, 3000),
+              brand: rawBrand,
+              color: rawColor,
+              material: rawMaterial,
+              size: rawSize,
+            });
 
             parsedItems.push({
               name: rawTitle,
-              brand,
+              brand: (attrs.brand && attrs.brand !== 'Unbranded') ? attrs.brand : (rawBrand || 'Pre-Loved / Vintage'),
               category: cat,
               purchasePrice: price,
-              color,
-              material,
-              size,
+              color: attrs.color || rawColor,
+              material: attrs.material || rawMaterial,
+              size: attrs.size || rawSize,
               season: ['Autumn', 'Winter', 'Spring'],
               condition: 'Excellent',
               imageUrl: img,
@@ -2310,7 +2345,9 @@ app.post('/api/vinted-proxy/scrape-account', async (req, res) => {
     } = req.body;
 
     const rawInput = String(accountUrlOrUsername || '').trim();
-    if (!rawInput && !rawHtml) {
+    const cleanEndpoint = workerEndpoint ? String(workerEndpoint).trim().replace(/\/$/, '') : '';
+
+    if (!rawInput && !rawHtml && !cleanEndpoint && !accessToken && !cookie) {
       return res.status(400).json({ error: 'Please provide a Vinted account URL, username, or paste page HTML.' });
     }
 
@@ -2331,7 +2368,7 @@ app.post('/api/vinted-proxy/scrape-account', async (req, res) => {
       username = memberIdMatch[2] || '';
     } else if (/^[0-9]+$/.test(rawInput)) {
       memberId = rawInput;
-    } else {
+    } else if (rawInput) {
       username = rawInput.replace(/^@/, '').replace(/https?:\/\/[^/]+\//, '').replace(/^member\//, '');
     }
 
@@ -2341,13 +2378,10 @@ app.post('/api/vinted-proxy/scrape-account', async (req, res) => {
       username: username || 'Vinted User',
       profileUrl: memberId
         ? `https://www.vinted.${effectiveDomain}/member/${memberId}${username ? `-${username}` : ''}`
-        : rawInput.startsWith('http') ? rawInput : `https://www.vinted.${effectiveDomain}/member/${username}`,
+        : rawInput.startsWith('http') ? rawInput : (username ? `https://www.vinted.${effectiveDomain}/member/${username}` : ''),
     };
 
     let itemsFromApi: any[] = [];
-
-    // 1. Try Cloudflare Worker proxy if configured
-    const cleanEndpoint = workerEndpoint ? String(workerEndpoint).trim().replace(/\/$/, '') : '';
 
     const fetchViaWorkerProxy = async (vintedUrl: string, asJson: boolean = false): Promise<any> => {
       if (!cleanEndpoint) return null;
@@ -2373,10 +2407,26 @@ app.post('/api/vinted-proxy/scrape-account', async (req, res) => {
       }
     };
 
-    // 1a. If member ID is not known yet, try resolving current authenticated user via Worker session
-    if (!memberId && cleanEndpoint && (accessToken || cookie)) {
+    // 1a. If member ID is not known yet, try resolving current authenticated user via Worker session or direct session
+    if (!memberId && (cleanEndpoint || accessToken || cookie)) {
       try {
-        const curUser = await fetchViaWorkerProxy(`https://www.vinted.${effectiveDomain}/api/v2/users/current`, true);
+        let curUser: any = null;
+        if (cleanEndpoint) {
+          curUser = await fetchViaWorkerProxy(`https://www.vinted.${effectiveDomain}/api/v2/users/current`, true);
+        }
+        if (!curUser && (accessToken || cookie)) {
+          const curRes = await fetch(`https://www.vinted.${effectiveDomain}/api/v2/users/current`, {
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+              Accept: 'application/json, text/plain, */*',
+              ...(cookie ? { Cookie: cookie } : {}),
+              ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+            },
+            signal: AbortSignal.timeout(6000),
+          });
+          if (curRes.ok) curUser = await curRes.json();
+        }
+
         if (curUser?.user?.id) {
           memberId = String(curUser.user.id);
           username = curUser.user.login || curUser.user.username || username;
@@ -2391,7 +2441,7 @@ app.post('/api/vinted-proxy/scrape-account', async (req, res) => {
           };
         }
       } catch (e: any) {
-        console.warn('Could not query current user via worker session:', e?.message);
+        console.warn('Could not query current user via session:', e?.message);
       }
     }
 
@@ -2449,6 +2499,10 @@ app.post('/api/vinted-proxy/scrape-account', async (req, res) => {
           console.warn('Worker scrape-account endpoint note:', wErr?.message);
         }
       }
+    }
+
+    if (!rawInput && !rawHtml && !memberId && itemsFromApi.length === 0) {
+      return res.status(400).json({ error: 'Please provide a Vinted account URL, username, or paste page HTML.' });
     }
 
     // 2. If member ID exists, attempt Vinted API fetch (via Cloudflare Worker proxy first, then direct fallback)
@@ -2533,9 +2587,55 @@ app.post('/api/vinted-proxy/scrape-account', async (req, res) => {
           });
           if (pageRes.ok) {
             pageHtml = await pageRes.text();
+            if (pageRes.url) {
+              const urlMemberMatch = pageRes.url.match(/\/member\/([0-9]+)/);
+              if (urlMemberMatch && !memberId) memberId = urlMemberMatch[1];
+            }
           }
         } catch (fetchErr: any) {
           console.warn('Web page direct fetch note:', fetchErr?.message);
+        }
+      }
+    }
+
+    // If pageHtml was obtained, extract memberId if still unknown and try API
+    if (pageHtml && !memberId) {
+      const canonicalMatch = pageHtml.match(/<link[^>]*rel=["']canonical["'][^>]*href=["'][^"']*\/member\/([0-9]+)/i) ||
+        pageHtml.match(/\/member\/([0-9]+)(?:-[a-zA-Z0-9_.-]+)?/i) ||
+        pageHtml.match(/"user"\s*:\s*\{\s*"id"\s*:\s*([0-9]+)/i) ||
+        pageHtml.match(/data-user-id=["']([0-9]+)["']/i);
+      if (canonicalMatch) {
+        memberId = canonicalMatch[1];
+        userMetadata.id = memberId;
+      }
+    }
+
+    // If memberId is now known and itemsFromApi is empty, try API query
+    if (memberId && itemsFromApi.length === 0) {
+      const apiUrl = `https://www.vinted.${effectiveDomain}/api/v2/users/${memberId}/items?page=1&per_page=100&order=relevance`;
+      if (cleanEndpoint) {
+        const workerApiData = await fetchViaWorkerProxy(apiUrl, true);
+        if (workerApiData && Array.isArray(workerApiData.items) && workerApiData.items.length > 0) {
+          itemsFromApi = workerApiData.items;
+        }
+      }
+      if (itemsFromApi.length === 0) {
+        try {
+          const apiHeaders: Record<string, string> = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+            Accept: 'application/json, text/plain, */*',
+            ...(cookie ? { Cookie: cookie } : {}),
+            ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+          };
+          const apiRes = await fetch(apiUrl, { headers: apiHeaders, signal: AbortSignal.timeout(6000) });
+          if (apiRes.ok) {
+            const apiData = await apiRes.json();
+            if (apiData && Array.isArray(apiData.items) && apiData.items.length > 0) {
+              itemsFromApi = apiData.items;
+            }
+          }
+        } catch (e: any) {
+          console.warn('API fetch with extracted memberId note:', e?.message);
         }
       }
     }
@@ -2561,7 +2661,20 @@ app.post('/api/vinted-proxy/scrape-account', async (req, res) => {
           : imgUrl ? [imgUrl] : [];
 
         const cat = item.category?.title || item.category || 'Tops';
-        const brand = item.brand_title || item.brand?.title || item.brand || 'Vinted';
+        const rawBrand = item.brand_title || item.brand?.title || item.brand || '';
+        const rawColor = item.color || item.colour || item.color_title || '';
+        const rawSize = item.size_title || item.size || '';
+        const rawSeller = userMetadata.username || item.user?.login || item.user?.username || item.seller;
+
+        const attrs = extractAllGarmentAttributes({
+          title: itemTitle,
+          description: item.description || '',
+          brand: rawBrand,
+          color: rawColor,
+          material: item.material || item.fabric || '',
+          size: rawSize,
+          seller: rawSeller,
+        });
 
         const tags = ['vinted'];
         if (isItemSold) {
@@ -2575,19 +2688,20 @@ app.post('/api/vinted-proxy/scrape-account', async (req, res) => {
         scrapedListings.push({
           id: itemId,
           title: itemTitle,
-          brand,
+          brand: attrs.brand || 'Unbranded',
           category: cat,
-          size: item.size_title || item.size || '',
+          size: attrs.size || rawSize,
           price: itemPrice,
           currency: item.currency || 'GBP',
-          color: item.color || '',
+          color: attrs.color || rawColor,
+          material: attrs.material || '',
           condition: item.status_description || item.condition || 'Good',
           status: itemStatus,
           url: item.url ? (item.url.startsWith('http') ? item.url : `https://www.vinted.${effectiveDomain}${item.url}`) : `https://www.vinted.${effectiveDomain}/items/${itemId}`,
           imageUrl: imgUrl,
           allImages: allImgs,
           description: item.description || '',
-          seller: userMetadata.username,
+          seller: attrs.seller || rawSeller,
           tags,
         });
       }
@@ -2635,22 +2749,38 @@ app.post('/api/vinted-proxy/scrape-account', async (req, res) => {
                 tags.push('Listed', 'listed', 'active-listing');
               }
 
+              const itemBrandRaw = item.brand_title || item.brand?.title || item.brand || '';
+              const itemColorRaw = item.color || item.colour || item.color_title || '';
+              const itemSizeRaw = item.size_title || item.size || '';
+              const itemMaterialRaw = item.material || item.fabric || '';
+
+              const attrs = extractAllGarmentAttributes({
+                title: item.title || 'Vinted Listing',
+                description: item.description || '',
+                brand: itemBrandRaw,
+                color: itemColorRaw,
+                material: itemMaterialRaw,
+                size: itemSizeRaw,
+                seller: userMetadata.username,
+              });
+
               scrapedListings.push({
                 id: String(item.id || `vinted-acc-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`),
                 title: item.title || 'Vinted Listing',
-                brand: item.brand_title || 'Vinted',
+                brand: attrs.brand || 'Unbranded',
                 category: item.category?.title || 'Tops',
-                size: item.size_title || '',
+                size: attrs.size || itemSizeRaw,
                 price: itemPrice,
                 currency: item.currency || 'GBP',
-                color: item.color || '',
+                color: attrs.color || itemColorRaw,
+                material: attrs.material || itemMaterialRaw,
                 condition: item.status_description || 'Good',
                 status: itemStatus,
                 url: item.url ? (item.url.startsWith('http') ? item.url : `https://www.vinted.${effectiveDomain}${item.url}`) : `https://www.vinted.${effectiveDomain}/items/${item.id}`,
                 imageUrl: imgUrl,
                 allImages: allImgs,
                 description: item.description || '',
-                seller: userMetadata.username,
+                seller: attrs.seller || userMetadata.username,
                 tags,
               });
             }
@@ -2676,6 +2806,15 @@ app.post('/api/vinted-proxy/scrape-account', async (req, res) => {
           const titleMatch = cardHtml.match(/title=["']([^"']+)["']/i) || cardHtml.match(/alt=["']([^"']+)["']/i);
           const title = titleMatch ? titleMatch[1].trim() : 'Vinted Item';
 
+          // Extract brand and size from HTML tags
+          const brandMatch = cardHtml.match(/(?:item-box-brand|brand|brand-title|subtitle|web_ui__ItemBox__brand)[^>]*>([^<]+)<\//i) ||
+            cardHtml.match(/data-testid=["'](?:item-brand|description-subtitle)["'][^>]*>([^<]+)<\//i);
+          const rawBrand = brandMatch ? brandMatch[1].trim() : '';
+
+          const sizeMatch = cardHtml.match(/(?:item-box-size|size|size-title|web_ui__ItemBox__size)[^>]*>([^<]+)<\//i) ||
+            cardHtml.match(/data-testid=["'](?:item-size|description-title)["'][^>]*>([^<]+)<\//i);
+          const rawSize = sizeMatch ? sizeMatch[1].trim() : '';
+
           // Extract price
           const priceMatch = cardHtml.match(/(?:£|€|\$)\s*([0-9]+(?:[.,][0-9]{2})?)/) || cardHtml.match(/([0-9]+(?:[.,][0-9]{2})?)\s*(?:£|€|\$)/);
           const price = priceMatch ? parseFloat(priceMatch[1].replace(',', '.')) : 0;
@@ -2698,22 +2837,30 @@ app.post('/api/vinted-proxy/scrape-account', async (req, res) => {
             tags.push('Listed', 'listed', 'active-listing');
           }
 
+          const htmlAttrs = extractAllGarmentAttributes({
+            title,
+            brand: rawBrand,
+            size: rawSize,
+            seller: userMetadata.username,
+          });
+
           scrapedListings.push({
             id: String(scrapedListings.length + 1),
             title,
-            brand: 'Vinted',
+            brand: htmlAttrs.brand || 'Unbranded',
             category: 'Tops',
-            size: '',
+            size: htmlAttrs.size || '',
             price,
             currency: 'GBP',
-            color: '',
+            color: htmlAttrs.color || '',
+            material: htmlAttrs.material || '',
             condition: 'Good',
             status: itemStatus,
             url: `https://www.vinted.${effectiveDomain}${itemPath}`,
             imageUrl: imgUrl,
             allImages: imgUrl ? [imgUrl] : [],
             description: '',
-            seller: userMetadata.username,
+            seller: htmlAttrs.seller || userMetadata.username,
             tags,
           });
         }
@@ -2736,10 +2883,12 @@ ${cleanText}
 
 For each item return:
 - title
-- price (number)
-- brand
-- category
-- size
+- price (number in GBP)
+- brand (e.g. Barbour, Zara, COS, Levi's - do NOT use "Vinted")
+- category (e.g. Outerwear, Tops, Knitwear, Trousers, Shoes, Accessories)
+- color (e.g. Black, Navy, Olive, Grey, Brown)
+- material (e.g. 100% Wool, Cotton, Leather, Silk, Denim, Cashmere)
+- size (e.g. S, M, L, XL, UK 10, W32 L32)
 - status ("Listed" or "Sold")
 - tags (must include 'vinted' and 'Listed' or 'Sold')`;
 
@@ -2762,6 +2911,8 @@ For each item return:
                       price: { type: Type.NUMBER },
                       brand: { type: Type.STRING },
                       category: { type: Type.STRING },
+                      color: { type: Type.STRING },
+                      material: { type: Type.STRING },
                       size: { type: Type.STRING },
                       status: { type: Type.STRING },
                       tags: { type: Type.ARRAY, items: { type: Type.STRING } },
@@ -2776,7 +2927,7 @@ For each item return:
             const response = await generateContentWithFallback(
               ai,
               prompt,
-              'You extract Vinted closet listings. Always include tags: Listed, Sold, Vinted.',
+              'You extract Vinted closet listings with accurate brand, color, material, and size attributes. Never default brand to Vinted.',
               schema
             );
 
@@ -2786,28 +2937,37 @@ For each item return:
                 const isSold = String(it.status).toLowerCase().includes('sold');
                 const itStatus = isSold ? 'Sold' : 'Listed';
                 const tags = ['vinted', itStatus, itStatus.toLowerCase()];
+                const attrs = extractAllGarmentAttributes({
+                  title: it.title,
+                  brand: it.brand,
+                  color: it.color,
+                  material: it.material,
+                  size: it.size,
+                  seller: userMetadata.username,
+                });
                 scrapedListings.push({
                   id: `vinted-acc-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
                   title: it.title,
-                  brand: it.brand || 'Vinted',
+                  brand: attrs.brand || 'Unbranded',
                   category: it.category || 'Tops',
-                  size: it.size || '',
+                  size: attrs.size || it.size || '',
                   price: it.price || 0,
                   currency: 'GBP',
-                  color: '',
+                  color: attrs.color || it.color || '',
+                  material: attrs.material || it.material || '',
                   condition: 'Good',
                   status: itStatus,
                   url: userMetadata.profileUrl,
                   imageUrl: '',
                   allImages: [],
                   description: '',
-                  seller: userMetadata.username,
+                  seller: attrs.seller || userMetadata.username,
                   tags,
                 });
               }
             }
           } catch (aiErr) {
-            console.warn('Gemini account scrape fallback error:', aiErr);
+            console.warn('Gemini account HTML fallback error:', aiErr);
           }
         }
       }

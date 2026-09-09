@@ -34,12 +34,58 @@ export interface AppReleaseIteration {
 
 export const APP_ITERATIONS_LOG: AppReleaseIteration[] = [
   {
+    version: 'v4.3',
+    releaseDate: 'September 2026',
+    title: 'Sales Pipeline & Status Filters, Tag Taxonomy Suite & GitHub Image Stripping',
+    summary:
+      'Introduces a comprehensive Sales & Resale Pipeline Bar with real-time status and shipping stage filters, an inline and bulk Tag Taxonomy Manager with multi-select deletion, robust category backup and import validation, and GitHub sync payload image stripping to prevent 1MB limit sync errors.',
+    isLatest: true,
+    tags: ['PIPELINE FILTER', 'TAG MANAGEMENT', 'CATEGORY RECOVERY', 'GITHUB SYNC FIX', 'IMAGE STRIPPER'],
+    changes: {
+      features: [
+        'Sales & Resale Pipeline Bar: Interactive workflow stages (Draft, Listed, Reserved, Awaiting Dispatch, In Transit, Completed, Cancelled) with live inventory counts and pipeline valuations.',
+        'Unified Tag Manager: Dedicated modal and inline tag manager with search, multi-selection checkboxes, Select All, and instant bulk deletion across wardrobe garments, resale listings, and wishlist items.',
+        'Inline Tag Removal: One-click "×" deletion on individual tags on cards and database table rows.',
+        'Quick Category Creator: In-form category creation allowing immediate entry and assignment of custom categories during item, resale, and wishlist creation.',
+        'GitHub Sync Image Stripper: Configurable toggle to strip high-resolution embedded base64 images before pushing to GitHub, guaranteeing payloads stay within GitHub API 1MB limit while safely preserving photos on local restore.',
+      ],
+      fixes: [
+        'Resolved GitHub Sync runtime error "Can\'t find variable: stripEmbeddedImages" by defining and exporting the stripping utility in githubSyncService.',
+        'Fixed Category backup and input loss: Ensured all unique categories across garments, resale listings, and shopping lists are comprehensively exported and restored without dropping custom classifications.',
+        'Fixed category dropdown input limitations across ItemFormModal, SaleFormModal, and ShoppingFormModal by enabling direct custom category entry.',
+        'Fixed image restore on backups: Gracefully preserves local high-res photos when importing backups containing stripped images, with custom local cache fallback indicators.',
+      ],
+      improvements: [
+        'Added live stage valuation counters to the Sales & Resale interface for instantaneous pipeline forecasting.',
+        'Enhanced Version History with detailed diff documentation for version v4.3.',
+        'Optimized bulk operations in WardrobeContext with transactional undo snapshots.',
+      ],
+      schemas: [
+        'Extended GithubSyncConfig with stripImages boolean toggle.',
+        'Updated LosslessBackupPayload and importDataJSON to guarantee full category persistence across merge and overwrite operations.',
+      ],
+    },
+    affectedModules: [
+      'SellingView',
+      'ManageTagsModal',
+      'WardrobeContext',
+      'losslessBackupService',
+      'githubSyncService',
+      'GithubSyncPanel',
+      'ItemFormModal',
+      'SaleFormModal',
+      'ShoppingFormModal',
+      'GarmentImage',
+      'VersionIterationsLog',
+    ],
+  },
+  {
     version: 'v4.2',
     releaseDate: 'September 2026',
     title: 'Lossless Humidor Suite, GitHub Auto-Sync & Vinted Active Scraper',
     summary:
       'Introduces enterprise-grade lossless database backup with SHA-256 checksums, automatic GitHub cloud repository synchronization, point-in-time closet rewinds, and authenticated active listings extraction.',
-    isLatest: true,
+    isLatest: false,
     tags: ['LOSSLESS BACKUP', 'GITHUB SYNC', 'REWIND ENGINE', 'VINTED ACTIVE'],
     changes: {
       features: [

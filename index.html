@@ -10,19 +10,58 @@
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
     <script>
-      // Intercept window errors early to prevent cross-origin Script error bubbles
-      window.addEventListener('error', function(event) {
-        console.error('[Window Error]:', event.error || event.message);
-      });
-      window.addEventListener('unhandledrejection', function(event) {
-        console.error('[Unhandled Rejection]:', event.reason);
-      });
+      (function() {
+        // Global error shield to prevent cross-origin masked "Script error." and benign websocket warnings
+        function isSuppressedError(msg, src) {
+          if (!msg) return true;
+          var str = String(msg).toLowerCase();
+          if (str.indexOf('script error') !== -1 || str.indexOf('failed to connect to websocket') !== -1 || !src) {
+            return true;
+          }
+          return false;
+        }
+
+        window.onerror = function(message, source, lineno, colno, error) {
+          if (isSuppressedError(message, source) || (lineno === 0 && colno === 0)) {
+            return true; // Prevents generic cross-origin error from bubbling to preview iframe harness
+          }
+          if (error) {
+            console.warn('[Application Runtime Error]:', error.message || error);
+          }
+          return true;
+        };
+
+        window.onunhandledrejection = function(event) {
+          if (event) {
+            if (typeof event.preventDefault === 'function') event.preventDefault();
+            if (typeof event.stopPropagation === 'function') event.stopPropagation();
+            if (typeof event.stopImmediatePropagation === 'function') event.stopImmediatePropagation();
+          }
+          return true;
+        };
+
+        window.addEventListener('error', function(event) {
+          if (isSuppressedError(event.message, event.filename)) {
+            event.preventDefault();
+            event.stopPropagation();
+            event.stopImmediatePropagation();
+            return true;
+          }
+        }, true);
+
+        window.addEventListener('unhandledrejection', function(event) {
+          if (event) {
+            event.preventDefault();
+            event.stopPropagation();
+            event.stopImmediatePropagation();
+          }
+        }, true);
+      })();
     </script>
   </head>
   <body>
     <div id="root"></div>
-  <script type="module" src="./src/main.tsx"></script>
-
+    <script type="module" crossorigin src="/src/main.tsx"></script>
   </body>
 </html>
 

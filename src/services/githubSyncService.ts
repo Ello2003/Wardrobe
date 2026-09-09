@@ -9,6 +9,7 @@ export interface GithubSyncConfig {
   branch: string; // e.g. "main"
   filePath: string; // e.g. "closet-backup.json"
   autoSync: boolean;
+  stripImages?: boolean; // Strips large embedded data URI photos to fit under GitHub 1MB API limit
   lastSyncTime: string | null;
   lastSyncStatus: 'idle' | 'syncing' | 'success' | 'error';
   lastSyncMessage: string | null;
@@ -21,11 +22,36 @@ export const DEFAULT_GITHUB_SYNC_CONFIG: GithubSyncConfig = {
   branch: 'main',
   filePath: 'wardrobe-database-backup.json',
   autoSync: false,
+  stripImages: true,
   lastSyncTime: null,
   lastSyncStatus: 'idle',
   lastSyncMessage: null,
   lastCommitSha: null,
 };
+
+/**
+ * Recursively strips oversized base64 data URIs so the JSON payload fits within GitHub's API payload limit (<1MB).
+ * External URLs (e.g. https://...) are preserved untouched.
+ */
+export function stripEmbeddedImages<T>(value: T): T {
+  if (typeof value === 'string') {
+    if (value.startsWith('data:image/') || (value.length > 500 && value.includes(';base64,'))) {
+      return '[image omitted from GitHub sync]' as unknown as T;
+    }
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => stripEmbeddedImages(item)) as unknown as T;
+  }
+  if (value && typeof value === 'object') {
+    const result: Record<string, any> = {};
+    for (const [key, val] of Object.entries(value as Record<string, any>)) {
+      result[key] = stripEmbeddedImages(val);
+    }
+    return result as T;
+  }
+  return value;
+}
 
 const STORAGE_KEY = 'wardrobe_github_sync_config_v1';
 
@@ -181,27 +207,9 @@ export async function pushDatabaseToGithub(
       currentSha = fileMeta.sha;
     }
 
-    function stripEmbeddedImages<T>(value: T): T {
-  if (typeof value === 'string') {
-    if (value.startsWith('data:image/')) {
-      return '[image omitted from GitHub sync]' as unknown as T;
-    }
-    return value;
-  }
-  if (Array.isArray(value)) {
-    return value.map((item) => stripEmbeddedImages(item)) as unknown as T;
-  }
-  if (value && typeof value === 'object') {
-    const result: Record<string, any> = {};
-    for (const [key, val] of Object.entries(value as Record<string, any>)) {
-      result[key] = stripEmbeddedImages(val);
-    }
-    return result as T;
-  }
-  return value;
-}
-    // 2. Prepare JSON string and Base64 encoding
-    const sanitizedPayload = stripEmbeddedImages(databasePayload);
+    // 2. Prepare JSON string and Base64 encoding (strip oversized embedded base64 photos if enabled)
+    const shouldStrip = config.stripImages !== false;
+    const sanitizedPayload = shouldStrip ? stripEmbeddedImages(databasePayload) : databasePayload;
     const jsonString = JSON.stringify(sanitizedPayload, null, 2);
     // Use UTF-8 safe base64 encoding
     const base64Content = btoa(

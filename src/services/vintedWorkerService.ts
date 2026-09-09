@@ -9,7 +9,17 @@ export interface VintedOrder {
   transactionStatus?: string;
   date?: string;
   image?: string;
-  type?: 'sold' | 'purchased' | 'all';
+  type?: 'sold' | 'purchased' | 'all' | 'active';
+  seller?: string;
+  brand?: string;
+  color?: string;
+  colour?: string;
+  material?: string;
+  fabric?: string;
+  size?: string;
+  description?: string;
+  user?: { login?: string; username?: string };
+  seller_username?: string;
 }
 
 export interface VintedExtractedItem {
@@ -18,13 +28,18 @@ export interface VintedExtractedItem {
   brand?: string;
   price: string | number;
   condition?: string;
+  color?: string;
   colour?: string;
+  material?: string;
+  fabric?: string;
+  size?: string;
   description?: string;
   seller?: string;
   image?: string;
   source?: string;
   tags?: string[];
   status?: string;
+  notes?: string;
 }
 
 export interface VintedAccountListing {
@@ -36,6 +51,7 @@ export interface VintedAccountListing {
   size?: string;
   category?: string;
   color?: string;
+  material?: string;
   condition?: string;
   url: string;
   imageUrl?: string;
@@ -248,7 +264,12 @@ export const fetchAllVintedOrders = async (
               image: l.imageUrl,
               date: new Date().toISOString(),
               seller: accountRes.user?.username || auth.username || 'me',
-              currency: 'GBP',
+              currency: l.currency || 'GBP',
+              brand: l.brand,
+              color: l.color,
+              material: l.material,
+              size: l.size,
+              description: l.description,
             });
           });
         }
