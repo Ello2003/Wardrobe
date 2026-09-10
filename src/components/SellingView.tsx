@@ -39,6 +39,7 @@ import {
   Link2,
   ChevronDown,
   ChevronUp,
+  Ban,
 } from 'lucide-react';
 import {
   SaleItem,
@@ -63,6 +64,82 @@ import {
   SellingDisplaySettings,
   DEFAULT_SELLING_DISPLAY_SETTINGS,
 } from './SellingDisplaySettingsModal';
+
+export type SalesPipelineStage =
+  | 'All'
+  | 'Draft'
+  | 'Listed'
+  | 'Reserved'
+  | 'Awaiting Dispatch'
+  | 'In Transit'
+  | 'Completed'
+  | 'Cancelled';
+
+export const getSaleItemPipelineStage = (item: SaleItem): SalesPipelineStage => {
+  const status = item.status;
+  const shipping = item.shippingStatus;
+  const tags = (item.tags || []).map((t) => t.toLowerCase());
+  const notes = (item.notes || '').toLowerCase();
+
+  // Cancelled check
+  if (
+    status === 'Delisted' ||
+    tags.includes('cancelled') ||
+    tags.includes('canceled') ||
+    notes.includes('cancelled') ||
+    notes.includes('order cancelled')
+  ) {
+    return 'Cancelled';
+  }
+
+  // Completed check
+  if (
+    status === 'Completed' ||
+    shipping === 'Delivered' ||
+    tags.includes('completed') ||
+    tags.includes('delivered')
+  ) {
+    return 'Completed';
+  }
+
+  // In Transit check
+  if (
+    status === 'Shipped' ||
+    shipping === 'In Transit' ||
+    shipping === 'Shipped' ||
+    tags.includes('in transit') ||
+    tags.includes('shipped')
+  ) {
+    return 'In Transit';
+  }
+
+  // Awaiting Dispatch check
+  if (
+    shipping === 'To Pack' ||
+    tags.includes('awaiting dispatch') ||
+    tags.includes('to pack') ||
+    status === 'Sold'
+  ) {
+    return 'Awaiting Dispatch';
+  }
+
+  // Reserved check
+  if (status === 'Reserved' || tags.includes('reserved')) {
+    return 'Reserved';
+  }
+
+  // Listed check
+  if (status === 'Listed' || tags.includes('listed')) {
+    return 'Listed';
+  }
+
+  // Draft check
+  if (status === 'Draft' || tags.includes('draft')) {
+    return 'Draft';
+  }
+
+  return 'Draft';
+};
 
 export const SellingView: React.FC = () => {
   const {
@@ -120,6 +197,62 @@ export const SellingView: React.FC = () => {
       window.removeEventListener('custom_display_settings_updated', handleSync);
     };
   }, []);
+
+  // Resale Pipeline Stage Filter State
+  const [salesPipelineStage, setSalesPipelineStage] = useState<SalesPipelineStage>(() => {
+    try {
+      const saved = localStorage.getItem('sales_resale_pipeline_stage');
+      if (
+        saved &&
+        [
+          'All',
+          'Draft',
+          'Listed',
+          'Reserved',
+          'Awaiting Dispatch',
+          'In Transit',
+          'Completed',
+          'Cancelled',
+        ].includes(saved)
+      ) {
+        return saved as SalesPipelineStage;
+      }
+    } catch {}
+    return 'All';
+  });
+
+  const handleSetSalesPipelineStage = (stage: SalesPipelineStage) => {
+    setSalesPipelineStage(stage);
+    try {
+      localStorage.setItem('sales_resale_pipeline_stage', stage);
+    } catch {}
+  };
+
+  // Pipeline Statistics & Valuations for the Workflow Bar
+  const pipelineStats = useMemo(() => {
+    const stats: Record<SalesPipelineStage, { count: number; valueGbp: number }> = {
+      All: { count: saleItems.length, valueGbp: 0 },
+      Draft: { count: 0, valueGbp: 0 },
+      Listed: { count: 0, valueGbp: 0 },
+      Reserved: { count: 0, valueGbp: 0 },
+      'Awaiting Dispatch': { count: 0, valueGbp: 0 },
+      'In Transit': { count: 0, valueGbp: 0 },
+      Completed: { count: 0, valueGbp: 0 },
+      Cancelled: { count: 0, valueGbp: 0 },
+    };
+
+    saleItems.forEach((item) => {
+      const stage = getSaleItemPipelineStage(item);
+      const val = item.soldPrice ?? item.listingPrice ?? item.originalPricePaid ?? 0;
+      stats.All.valueGbp += val;
+      if (stats[stage]) {
+        stats[stage].count += 1;
+        stats[stage].valueGbp += val;
+      }
+    });
+
+    return stats;
+  }, [saleItems]);
 
   // Filters & View State
   const [selectedStatusTab, setSelectedStatusTab] = useState<string>('All');
@@ -253,6 +386,12 @@ export const SellingView: React.FC = () => {
   // Filtered & Sorted Sale Items
   const filteredSales = useMemo(() => {
     const matched = saleItems.filter((item) => {
+      // Pipeline Stage filter
+      if (salesPipelineStage !== 'All') {
+        const stage = getSaleItemPipelineStage(item);
+        if (stage !== salesPipelineStage) return false;
+      }
+
       // Status tab filter
       if (selectedStatusTab === 'Active') {
         if (item.status !== 'Listed' && item.status !== 'Reserved') return false;
@@ -328,10 +467,11 @@ export const SellingView: React.FC = () => {
       if (sortBy === 'price_asc') return priceA - priceB;
       return 0;
     });
-  }, [saleItems, selectedStatusTab, selectedPlatform, selectedBrand, selectedCategory, selectedTag, searchQuery, sortBy]);
+  }, [saleItems, salesPipelineStage, selectedStatusTab, selectedPlatform, selectedBrand, selectedCategory, selectedTag, searchQuery, sortBy]);
 
   // Check if any filters are active
   const hasActiveFilters =
+    salesPipelineStage !== 'All' ||
     selectedStatusTab !== 'All' ||
     selectedBrand !== 'All' ||
     selectedPlatform !== 'All' ||
@@ -340,6 +480,7 @@ export const SellingView: React.FC = () => {
     searchQuery.trim() !== '';
 
   const handleResetAllFilters = () => {
+    handleSetSalesPipelineStage('All');
     setSelectedStatusTab('All');
     setSelectedBrand('All');
     setSelectedPlatform('All');
@@ -519,6 +660,155 @@ export const SellingView: React.FC = () => {
               <span>Add Listing</span>
             </button>
           </div>
+        </div>
+      </div>
+
+      {/* Interactive Sales & Resale Pipeline Stage Bar */}
+      <div className="bg-[#F8F7F4] border border-[#E5E5E1] p-3 shadow-xs space-y-2.5">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <Layers className="w-3.5 h-3.5 text-[#8C7355]" />
+            <span className="text-xs font-mono font-bold text-[#1A1A1A] uppercase tracking-wider">
+              Resale Pipeline Workflow
+            </span>
+            <span className="text-[11px] font-mono text-[#767670]">
+              ({saleItems.length} items total • {formatCurrency(pipelineStats.All.valueGbp)} inventory valuation)
+            </span>
+          </div>
+
+          {salesPipelineStage !== 'All' && (
+            <button
+              type="button"
+              onClick={() => handleSetSalesPipelineStage('All')}
+              className="text-[11px] font-mono text-[#8C7355] hover:text-[#1A1A1A] hover:underline cursor-pointer flex items-center gap-1"
+            >
+              <X className="w-3 h-3" />
+              Reset stage filter ({salesPipelineStage})
+            </button>
+          )}
+        </div>
+
+        {/* Workflow Stage Buttons */}
+        <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-1">
+          {/* All */}
+          <button
+            type="button"
+            onClick={() => handleSetSalesPipelineStage('All')}
+            className={`px-3 py-1.5 text-xs font-mono transition-all cursor-pointer border flex items-center gap-1.5 whitespace-nowrap ${
+              salesPipelineStage === 'All'
+                ? 'bg-[#1A1A1A] text-white border-[#1A1A1A] shadow-xs font-bold'
+                : 'bg-white text-[#4A4A45] border-[#D5D5D0] hover:border-[#8C7355]'
+            }`}
+          >
+            <Layers className="w-3 h-3" />
+            <span>All</span>
+            <span className="opacity-75">({pipelineStats.All.count})</span>
+          </button>
+
+          {/* Draft */}
+          <button
+            type="button"
+            onClick={() => handleSetSalesPipelineStage('Draft')}
+            className={`px-3 py-1.5 text-xs font-mono transition-all cursor-pointer border flex items-center gap-1.5 whitespace-nowrap ${
+              salesPipelineStage === 'Draft'
+                ? 'bg-[#4A4A45] text-white border-[#4A4A45] shadow-xs font-bold'
+                : 'bg-white text-[#4A4A45] border-[#D5D5D0] hover:border-[#8C7355]'
+            }`}
+          >
+            <Clock className="w-3 h-3 text-amber-500" />
+            <span>Draft</span>
+            <span className="opacity-75">({pipelineStats.Draft.count})</span>
+          </button>
+
+          {/* Listed */}
+          <button
+            type="button"
+            onClick={() => handleSetSalesPipelineStage('Listed')}
+            className={`px-3 py-1.5 text-xs font-mono transition-all cursor-pointer border flex items-center gap-1.5 whitespace-nowrap ${
+              salesPipelineStage === 'Listed'
+                ? 'bg-[#8C7355] text-white border-[#8C7355] shadow-xs font-bold'
+                : 'bg-white text-[#4A4A45] border-[#D5D5D0] hover:border-[#8C7355]'
+            }`}
+          >
+            <Tag className="w-3 h-3 text-amber-200" />
+            <span>Listed</span>
+            <span className="opacity-75">({pipelineStats.Listed.count})</span>
+          </button>
+
+          {/* Reserved */}
+          <button
+            type="button"
+            onClick={() => handleSetSalesPipelineStage('Reserved')}
+            className={`px-3 py-1.5 text-xs font-mono transition-all cursor-pointer border flex items-center gap-1.5 whitespace-nowrap ${
+              salesPipelineStage === 'Reserved'
+                ? 'bg-indigo-800 text-white border-indigo-800 shadow-xs font-bold'
+                : 'bg-white text-[#4A4A45] border-[#D5D5D0] hover:border-indigo-700 hover:text-indigo-800'
+            }`}
+          >
+            <Package className="w-3 h-3 text-indigo-300" />
+            <span>Reserved</span>
+            <span className="opacity-75">({pipelineStats.Reserved.count})</span>
+          </button>
+
+          {/* Awaiting Dispatch */}
+          <button
+            type="button"
+            onClick={() => handleSetSalesPipelineStage('Awaiting Dispatch')}
+            className={`px-3 py-1.5 text-xs font-mono transition-all cursor-pointer border flex items-center gap-1.5 whitespace-nowrap ${
+              salesPipelineStage === 'Awaiting Dispatch'
+                ? 'bg-amber-800 text-white border-amber-800 shadow-xs font-bold'
+                : 'bg-white text-[#4A4A45] border-[#D5D5D0] hover:border-amber-700 hover:text-amber-800'
+            }`}
+          >
+            <CheckSquare className="w-3 h-3 text-amber-300" />
+            <span>Awaiting Dispatch</span>
+            <span className="opacity-75">({pipelineStats['Awaiting Dispatch'].count})</span>
+          </button>
+
+          {/* In Transit */}
+          <button
+            type="button"
+            onClick={() => handleSetSalesPipelineStage('In Transit')}
+            className={`px-3 py-1.5 text-xs font-mono transition-all cursor-pointer border flex items-center gap-1.5 whitespace-nowrap ${
+              salesPipelineStage === 'In Transit'
+                ? 'bg-blue-800 text-white border-blue-800 shadow-xs font-bold'
+                : 'bg-white text-[#4A4A45] border-[#D5D5D0] hover:border-blue-700 hover:text-blue-800'
+            }`}
+          >
+            <Truck className="w-3 h-3 text-blue-300" />
+            <span>In Transit</span>
+            <span className="opacity-75">({pipelineStats['In Transit'].count})</span>
+          </button>
+
+          {/* Completed */}
+          <button
+            type="button"
+            onClick={() => handleSetSalesPipelineStage('Completed')}
+            className={`px-3 py-1.5 text-xs font-mono transition-all cursor-pointer border flex items-center gap-1.5 whitespace-nowrap ${
+              salesPipelineStage === 'Completed'
+                ? 'bg-emerald-800 text-white border-emerald-800 shadow-xs font-bold'
+                : 'bg-white text-[#4A4A45] border-[#D5D5D0] hover:border-emerald-700 hover:text-emerald-800'
+            }`}
+          >
+            <CheckCircle className="w-3 h-3 text-emerald-300" />
+            <span>Completed</span>
+            <span className="opacity-75">({pipelineStats.Completed.count})</span>
+          </button>
+
+          {/* Cancelled */}
+          <button
+            type="button"
+            onClick={() => handleSetSalesPipelineStage('Cancelled')}
+            className={`px-3 py-1.5 text-xs font-mono transition-all cursor-pointer border flex items-center gap-1.5 whitespace-nowrap ${
+              salesPipelineStage === 'Cancelled'
+                ? 'bg-rose-800 text-white border-rose-800 shadow-xs font-bold'
+                : 'bg-white text-[#4A4A45] border-[#D5D5D0] hover:border-rose-700 hover:text-rose-800'
+            }`}
+          >
+            <Ban className="w-3 h-3 text-rose-300" />
+            <span>Cancelled</span>
+            <span className="opacity-75">({pipelineStats.Cancelled.count})</span>
+          </button>
         </div>
       </div>
 
@@ -837,6 +1127,20 @@ export const SellingView: React.FC = () => {
               </span>
             )}
 
+            {salesPipelineStage !== 'All' && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-[#FAF9F6] border border-[#8C7355] text-[#8C7355] font-semibold rounded-xs">
+                Stage: {salesPipelineStage}
+                <button
+                  type="button"
+                  onClick={() => handleSetSalesPipelineStage('All')}
+                  className="hover:text-rose-600 cursor-pointer ml-0.5"
+                  title="Remove stage filter"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            )}
+
             {selectedBrand !== 'All' && (
               <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-[#FAF9F6] border border-[#E5E5E1] text-[#1A1A1A] rounded-xs">
                 Brand: {selectedBrand}
@@ -958,21 +1262,32 @@ export const SellingView: React.FC = () => {
                       </span>
                     </div>
 
-                    {/* Bottom Right: Status Badge */}
-                    <div className="absolute bottom-2 right-2 z-10">
-                      <span
-                        className={`text-[10px] font-mono px-2 py-0.5 bg-white/95 border shadow-xs font-semibold uppercase tracking-wider ${
-                          item.status === 'Listed'
-                            ? 'text-emerald-700 border-emerald-300'
-                            : item.status === 'Sold' || item.status === 'Completed'
-                            ? 'text-blue-700 border-blue-300'
-                            : item.status === 'Reserved'
-                            ? 'text-amber-700 border-amber-300'
-                            : 'text-[#767670] border-[#D5D5D0]'
-                        }`}
-                      >
-                        {item.status}
-                      </span>
+                    {/* Bottom Right: Pipeline Stage Badge */}
+                    <div className="absolute bottom-2 right-2 z-10 flex items-center gap-1">
+                      {(() => {
+                        const stage = getSaleItemPipelineStage(item);
+                        return (
+                          <span
+                            className={`text-[10px] font-mono px-2 py-0.5 bg-white/95 border shadow-xs font-semibold uppercase tracking-wider ${
+                              stage === 'Listed'
+                                ? 'text-emerald-700 border-emerald-300'
+                                : stage === 'Completed'
+                                ? 'text-teal-700 border-teal-300'
+                                : stage === 'In Transit'
+                                ? 'text-blue-700 border-blue-300'
+                                : stage === 'Awaiting Dispatch'
+                                ? 'text-amber-700 border-amber-300'
+                                : stage === 'Reserved'
+                                ? 'text-indigo-700 border-indigo-300'
+                                : stage === 'Cancelled'
+                                ? 'text-rose-700 border-rose-300'
+                                : 'text-[#767670] border-[#D5D5D0]'
+                            }`}
+                          >
+                            {stage}
+                          </span>
+                        );
+                      })()}
                     </div>
                   </div>
 

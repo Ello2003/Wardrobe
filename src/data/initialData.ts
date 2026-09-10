@@ -658,13 +658,6 @@ export const INITIAL_VERSION_LOGS: VersionChangeLog[] = [
       financialImpact: 695,
       newValue: 'To Buy'
     },
-    snapshotData: {
-      items: INITIAL_WARDROBE_ITEMS,
-      outfits: INITIAL_LOOKBOOK_OUTFITS,
-      shoppingList: INITIAL_SHOPPING_LIST,
-      saleItems: INITIAL_SALE_ITEMS,
-      monthlyBudget: 350,
-    },
     author: 'Graeme'
   },
   {
@@ -681,13 +674,6 @@ export const INITIAL_VERSION_LOGS: VersionChangeLog[] = [
       field: 'wearCount',
       oldValue: 47,
       newValue: 48
-    },
-    snapshotData: {
-      items: INITIAL_WARDROBE_ITEMS,
-      outfits: INITIAL_LOOKBOOK_OUTFITS,
-      shoppingList: INITIAL_SHOPPING_LIST,
-      saleItems: INITIAL_SALE_ITEMS,
-      monthlyBudget: 350,
     },
     author: 'Graeme'
   },
@@ -706,13 +692,6 @@ export const INITIAL_VERSION_LOGS: VersionChangeLog[] = [
       oldValue: 144,
       newValue: 145
     },
-    snapshotData: {
-      items: INITIAL_WARDROBE_ITEMS,
-      outfits: INITIAL_LOOKBOOK_OUTFITS,
-      shoppingList: INITIAL_SHOPPING_LIST,
-      saleItems: INITIAL_SALE_ITEMS,
-      monthlyBudget: 350,
-    },
     author: 'Graeme'
   },
   {
@@ -729,13 +708,6 @@ export const INITIAL_VERSION_LOGS: VersionChangeLog[] = [
       field: 'wearCount',
       oldValue: 109,
       newValue: 110
-    },
-    snapshotData: {
-      items: INITIAL_WARDROBE_ITEMS,
-      outfits: INITIAL_LOOKBOOK_OUTFITS,
-      shoppingList: INITIAL_SHOPPING_LIST,
-      saleItems: INITIAL_SALE_ITEMS,
-      monthlyBudget: 350,
     },
     author: 'Graeme'
   },

@@ -42,6 +42,13 @@ import {
   determineLifecycleTags,
   isCancelledStatus,
 } from '../utils/tagUtils';
+import {
+  saveLogsSafely,
+  saveSnapshotsSafely,
+  saveEntitySafely,
+  sanitizeStorageOnStartup,
+  stripLargeDataURIs,
+} from '../services/storageQuotaService';
 
 // Global counter and entropy to ensure collision-free IDs even inside tight synchronous loops (e.g. bulk moves)
 let globalIdCounter = 0;
@@ -519,22 +526,44 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [changeLogs, setChangeLogs] = useState<VersionChangeLog[]>(() => {
     try {
       const saved = localStorage.getItem(`${STORAGE_KEY}_logs`);
-      const parsed = saved ? JSON.parse(saved) : null;
-      return Array.isArray(parsed) ? parsed : INITIAL_VERSION_LOGS;
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed;
+        }
+      }
     } catch {
-      return INITIAL_VERSION_LOGS;
+      // Fallback to initial logs
     }
+    return INITIAL_VERSION_LOGS;
   });
 
   const [snapshots, setSnapshots] = useState<WardrobeSnapshot[]>(() => {
     try {
       const saved = localStorage.getItem(`${STORAGE_KEY}_snapshots`);
-      const parsed = saved ? JSON.parse(saved) : null;
-      return Array.isArray(parsed) ? parsed : INITIAL_SNAPSHOTS;
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed;
+        }
+      }
     } catch {
-      return INITIAL_SNAPSHOTS;
+      // Fallback to initial snapshots
     }
+    return INITIAL_SNAPSHOTS;
   });
+
+  // Non-blocking storage quota sanitization after component mount
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      try {
+        sanitizeStorageOnStartup(STORAGE_KEY);
+      } catch (err) {
+        console.warn('[StorageSanitization] Non-fatal startup warning:', err);
+      }
+    }, 100);
+    return () => clearTimeout(timer);
+  }, []);
 
   const [settings, setSettings] = useState<AppSettings>(() => {
     try {
@@ -704,69 +733,37 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return true;
   }, [undoStack]);
 
-  // Persist state to localStorage on changes
+  // Persist state to localStorage on changes using quota-resilient storage handlers
   useEffect(() => {
-    try {
-      localStorage.setItem(`${STORAGE_KEY}_items`, JSON.stringify(items));
-    } catch (e) {
-      console.error('Failed to save items', e);
-    }
+    saveEntitySafely(`${STORAGE_KEY}_items`, items, STORAGE_KEY);
   }, [items]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(`${STORAGE_KEY}_outfits`, JSON.stringify(outfits));
-    } catch (e) {
-      console.error('Failed to save outfits', e);
-    }
+    saveEntitySafely(`${STORAGE_KEY}_outfits`, outfits, STORAGE_KEY);
   }, [outfits]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(`${STORAGE_KEY}_shopping`, JSON.stringify(shoppingList));
-    } catch (e) {
-      console.error('Failed to save shopping', e);
-    }
+    saveEntitySafely(`${STORAGE_KEY}_shopping`, shoppingList, STORAGE_KEY);
   }, [shoppingList]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(`${STORAGE_KEY}_sales`, JSON.stringify(saleItems));
-    } catch (e) {
-      console.error('Failed to save sales', e);
-    }
+    saveEntitySafely(`${STORAGE_KEY}_sales`, saleItems, STORAGE_KEY);
   }, [saleItems]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(`${STORAGE_KEY}_logs`, JSON.stringify(changeLogs));
-    } catch (e) {
-      console.error('Failed to save logs', e);
-    }
+    saveLogsSafely(changeLogs, STORAGE_KEY);
   }, [changeLogs]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(`${STORAGE_KEY}_snapshots`, JSON.stringify(snapshots));
-    } catch (e) {
-      console.error('Failed to save snapshots', e);
-    }
+    saveSnapshotsSafely(snapshots, STORAGE_KEY);
   }, [snapshots]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(`${STORAGE_KEY}_categories`, JSON.stringify(categories));
-    } catch (e) {
-      console.error('Failed to save categories', e);
-    }
+    saveEntitySafely(`${STORAGE_KEY}_categories`, categories, STORAGE_KEY);
   }, [categories]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(`${STORAGE_KEY}_budget`, JSON.stringify(monthlyBudget));
-    } catch (e) {
-      console.error('Failed to save budget', e);
-    }
+    saveEntitySafely(`${STORAGE_KEY}_budget`, monthlyBudget, STORAGE_KEY);
   }, [monthlyBudget]);
 
   // Synchronized state references for consistent access across callbacks and auto-save
@@ -822,14 +819,16 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       details?: VersionChangeLog['details'],
       customSnapshotData?: VersionChangeLog['snapshotData']
     ) => {
-      // Capture live closet snapshot data for instant rollback
-      const liveSnapshot: VersionChangeLog['snapshotData'] = customSnapshotData || {
-        items: JSON.parse(JSON.stringify(itemsRef.current)),
-        outfits: JSON.parse(JSON.stringify(outfitsRef.current)),
-        shoppingList: JSON.parse(JSON.stringify(shoppingListRef.current)),
-        saleItems: JSON.parse(JSON.stringify(saleItemsRef.current)),
-        monthlyBudget: monthlyBudgetRef.current,
-      };
+      // Capture live closet snapshot data for instant rollback (sanitized of bulky base64 data URIs)
+      const liveSnapshot: VersionChangeLog['snapshotData'] = customSnapshotData
+        ? stripLargeDataURIs(customSnapshotData)
+        : {
+            items: stripLargeDataURIs(JSON.parse(JSON.stringify(itemsRef.current))),
+            outfits: JSON.parse(JSON.stringify(outfitsRef.current)),
+            shoppingList: stripLargeDataURIs(JSON.parse(JSON.stringify(shoppingListRef.current))),
+            saleItems: stripLargeDataURIs(JSON.parse(JSON.stringify(saleItemsRef.current))),
+            monthlyBudget: monthlyBudgetRef.current,
+          };
 
       setChangeLogs((prev) => {
         const nextVersion = prev.length > 0 ? prev[0].versionNumber + 1 : 1;
@@ -846,14 +845,16 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           snapshotData: liveSnapshot,
           author: 'Graeme (User)',
         };
-        // To preserve local storage space, keep full snapshotData on latest 35 logs, strip older
-        return [newLog, ...prev].map((l, index) => {
-          if (index > 35 && l.snapshotData) {
-            const { snapshotData, ...rest } = l;
-            return rest;
-          }
-          return l;
-        });
+        // To preserve local storage space, keep full snapshotData on latest 8 logs, strip older
+        return [newLog, ...prev]
+          .map((l, index) => {
+            if (index > 8 && l.snapshotData) {
+              const { snapshotData, ...rest } = l;
+              return rest;
+            }
+            return l;
+          })
+          .slice(0, 50);
       });
     },
     []
@@ -893,17 +894,17 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         saleItemCount: curSales.length,
         isAuto,
         data: {
-          items: JSON.parse(JSON.stringify(curItems)),
+          items: stripLargeDataURIs(JSON.parse(JSON.stringify(curItems))),
           outfits: JSON.parse(JSON.stringify(curOutfits)),
-          shoppingList: JSON.parse(JSON.stringify(curShopping)),
-          saleItems: JSON.parse(JSON.stringify(curSales)),
+          shoppingList: stripLargeDataURIs(JSON.parse(JSON.stringify(curShopping))),
+          saleItems: stripLargeDataURIs(JSON.parse(JSON.stringify(curSales))),
           monthlyBudget: curBudget,
         },
       };
 
       setSnapshots((prev) => {
         const next = [newSnapshot, ...prev];
-        const maxAuto = settings.maxAutoSnapshots || 20;
+        const maxAuto = Math.min(settings.maxAutoSnapshots || 5, 5);
         let autoCount = 0;
         return next.filter((snap) => {
           if (!snap.isAuto) return true;
@@ -3305,10 +3306,38 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       // Before restoring, capture undo state so rollback can be undone
       captureUndoState(`Restored snapshot "${snap.name}"`);
 
-      setItems(snap.data.items || []);
+      const curItemsMap = new Map(itemsRef.current.map((i) => [i.id, i]));
+      const restoredItems = (snap.data.items || []).map((item) => {
+        const live = curItemsMap.get(item.id);
+        if (
+          (!item.imageUrl || item.imageUrl.startsWith('[image omitted') || item.imageUrl.trim() === '') &&
+          live &&
+          live.imageUrl &&
+          !live.imageUrl.startsWith('[image omitted')
+        ) {
+          return { ...item, imageUrl: live.imageUrl };
+        }
+        return item;
+      });
+
+      const curSalesMap = new Map(saleItemsRef.current.map((s) => [s.id, s]));
+      const restoredSales = (snap.data.saleItems || []).map((sale) => {
+        const live = curSalesMap.get(sale.id);
+        if (
+          (!sale.imageUrl || sale.imageUrl.startsWith('[image omitted') || sale.imageUrl.trim() === '') &&
+          live &&
+          live.imageUrl &&
+          !live.imageUrl.startsWith('[image omitted')
+        ) {
+          return { ...sale, imageUrl: live.imageUrl };
+        }
+        return sale;
+      });
+
+      setItems(restoredItems);
       setOutfits(snap.data.outfits || []);
       setShoppingList(snap.data.shoppingList || []);
-      if (snap.data.saleItems && Array.isArray(snap.data.saleItems)) setSaleItems(snap.data.saleItems);
+      if (snap.data.saleItems && Array.isArray(snap.data.saleItems)) setSaleItems(restoredSales);
       if (typeof snap.data.monthlyBudget === 'number') setMonthlyBudget(snap.data.monthlyBudget);
 
       recordChange(
@@ -3602,10 +3631,36 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         true
       );
 
-      const restoredItems = targetSnapshotData.items || [];
+      const curItemsMap = new Map(itemsRef.current.map((i) => [i.id, i]));
+      const restoredItems = (targetSnapshotData.items || []).map((item) => {
+        const live = curItemsMap.get(item.id);
+        if (
+          (!item.imageUrl || item.imageUrl.startsWith('[image omitted') || item.imageUrl.trim() === '') &&
+          live &&
+          live.imageUrl &&
+          !live.imageUrl.startsWith('[image omitted')
+        ) {
+          return { ...item, imageUrl: live.imageUrl };
+        }
+        return item;
+      });
+
+      const curSalesMap = new Map(saleItemsRef.current.map((s) => [s.id, s]));
+      const restoredSales = (targetSnapshotData.saleItems || []).map((sale) => {
+        const live = curSalesMap.get(sale.id);
+        if (
+          (!sale.imageUrl || sale.imageUrl.startsWith('[image omitted') || sale.imageUrl.trim() === '') &&
+          live &&
+          live.imageUrl &&
+          !live.imageUrl.startsWith('[image omitted')
+        ) {
+          return { ...sale, imageUrl: live.imageUrl };
+        }
+        return sale;
+      });
+
       const restoredOutfits = targetSnapshotData.outfits || [];
       const restoredShopping = targetSnapshotData.shoppingList || [];
-      const restoredSales = targetSnapshotData.saleItems || [];
       const restoredBudget = typeof targetSnapshotData.monthlyBudget === 'number' ? targetSnapshotData.monthlyBudget : 350;
 
       // Update refs synchronously
@@ -4314,11 +4369,7 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
         const resolvedCategories = Array.from(extractedCategories);
         setCategories(resolvedCategories);
-        try {
-          localStorage.setItem(`${STORAGE_KEY}_categories`, JSON.stringify(resolvedCategories));
-        } catch (e) {
-          console.error('Failed to persist categories to localStorage', e);
-        }
+        saveEntitySafely(`${STORAGE_KEY}_categories`, resolvedCategories, STORAGE_KEY);
 
         if (mode === 'merge') {
           // Merge items

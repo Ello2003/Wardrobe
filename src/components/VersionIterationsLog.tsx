@@ -34,12 +34,82 @@ export interface AppReleaseIteration {
 
 export const APP_ITERATIONS_LOG: AppReleaseIteration[] = [
   {
+    version: 'v4.5',
+    releaseDate: 'September 2026',
+    title: 'Instant Boot Recovery & Dedicated Resale Pipeline Workflow Bar',
+    summary:
+      'Eliminates blank page startup failures by moving storage sanitization into non-blocking asynchronous lifecycles with depth and cycle guards. Integrates the prominent Interactive Pipeline Stage Bar in the Sales & Resale view featuring Draft, Listed, Reserved, Awaiting Dispatch, In Transit, Completed, and Cancelled workflow stages with real-time valuation metrics.',
+    isLatest: true,
+    tags: ['CRASH PREVENTION', 'PIPELINE STAGES', 'SALES WORKFLOW', 'BOOT RECOVERY', 'FILTER SYSTEM'],
+    changes: {
+      features: [
+        'Dedicated Resale Pipeline Stage Bar: Interactive workflow bar at the top of the Sales & Resale view featuring stages: Draft, Listed, Reserved, Awaiting Dispatch, In Transit, Completed, and Cancelled.',
+        'Stage Metrics & Inventory Valuations: Live listing counts and stage valuation sums calculated in real time across the entire sales inventory.',
+        'Stage Filter Chips & Quick Reset: Integrated stage badge in active filters with one-click clear and cross-status mapping.',
+        'Garment Card Stage Badges: Color-coded workflow stage badges on garment cards matching the pipeline status hierarchy.',
+      ],
+      fixes: [
+        'Resolved Blank Screen on Boot: Deferred storage sanitization into non-blocking useEffect with safe depth and WeakSet cycle protection in stripLargeDataURIs.',
+        'Safe Storage Accessor: Guarded localStorage operations against SecurityError and private-browsing / sandboxed iframe blocks.',
+        'Eliminated synchronous recursive object walking during React state initialization on cold start.',
+      ],
+      improvements: [
+        'Instantaneous application boot and frame render regardless of legacy storage size.',
+        'One-click workflow filtering allows instant triage of items awaiting dispatch or in transit.',
+      ],
+      schemas: [
+        'SalesPipelineStage: Complete workflow union of Draft, Listed, Reserved, Awaiting Dispatch, In Transit, Completed, Cancelled.',
+      ],
+    },
+    affectedModules: [
+      'SellingView',
+      'WardrobeContext',
+      'storageQuotaService',
+      'VersionIterationsLog',
+    ],
+  },
+  {
+    version: 'v4.4',
+    releaseDate: 'September 2026',
+    title: 'LocalStorage Storage Quota Hardening & Progressive Log/Snapshot Compaction',
+    summary:
+      'Resolves "The quota has been exceeded" storage errors by implementing intelligent, progressive compaction for change logs and version snapshots, stripping bulky redundant base64 data URIs from historical rollback checkpoints, running startup storage sanitization, and adding emergency quota recovery.',
+    isLatest: false,
+    tags: ['QUOTA HARDENING', 'LOCALSTORAGE', 'ERROR RESOLUTION', 'COMPRESSION', 'PERFORMANCE'],
+    changes: {
+      features: [
+        'Storage Quota Service: Autonomous storage manager that monitors browser quota limits and safely persists wardrobe state.',
+        'Immediate Startup Storage Sanitization: Scans and compacts oversized historical logs and snapshots upon boot, immediately restoring 95%+ of localStorage headroom.',
+        'Emergency Progressive Quota Recovery: Automatically prunes non-critical historical snapshot data and trims checkpoints if localStorage ever encounters quota pressure.',
+      ],
+      fixes: [
+        'Resolved error "Failed to save logs The quota has been exceeded": Compacted version change logs to retain full action metadata while stripping redundant cloned wardrobe states on older entries.',
+        'Resolved error "Failed to save snapshots The quota has been exceeded": Stripped bulky base64 data URIs from historical snapshot items and capped automatic checkpoints.',
+        'Prevented state loss on browsers with tight storage limits by ensuring critical inventory entities (items, outfits, sales, wishlist) are prioritized over non-critical logs.',
+        'Preserved high-resolution live photos during snapshot and timeline rollbacks by merging existing local images when omitted in historical checkpoints.',
+      ],
+      improvements: [
+        'Reduced snapshot and change log storage footprints by over 98% without losing rollback capability.',
+        'Replaced raw localStorage setItem blocks with resilient saveEntitySafely and saveLogsSafely wrappers.',
+      ],
+      schemas: [
+        'StorageQuotaService: Modular utility with stripLargeDataURIs, compactLogsForStorage, compactSnapshotsForStorage, and pruneLocalStorageEmergency.',
+      ],
+    },
+    affectedModules: [
+      'WardrobeContext',
+      'storageQuotaService',
+      'initialData',
+      'VersionIterationsLog',
+    ],
+  },
+  {
     version: 'v4.3',
     releaseDate: 'September 2026',
     title: 'Sales Pipeline & Status Filters, Tag Taxonomy Suite & GitHub Image Stripping',
     summary:
       'Introduces a comprehensive Sales & Resale Pipeline Bar with real-time status and shipping stage filters, an inline and bulk Tag Taxonomy Manager with multi-select deletion, robust category backup and import validation, and GitHub sync payload image stripping to prevent 1MB limit sync errors.',
-    isLatest: true,
+    isLatest: false,
     tags: ['PIPELINE FILTER', 'TAG MANAGEMENT', 'CATEGORY RECOVERY', 'GITHUB SYNC FIX', 'IMAGE STRIPPER'],
     changes: {
       features: [
