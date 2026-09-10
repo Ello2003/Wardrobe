@@ -3,55 +3,22 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Wardrobe &amp; Style Studio</title>
-    <meta name="description" content="Track fabric compositions, cost-per-wear economics, care guides, and styling combinations in GBP (£)." />
-    <meta property="og:title" content="Wardrobe &amp; Style Studio" />
-    <meta property="og:description" content="Track fabric compositions, cost-per-wear economics, care guides, and styling combinations in GBP (£)." />
+    <meta name="description" content="Wardrobe & Style Studio — manage your wardrobe, lookbook, shopping, selling and style analytics." />
+    <meta property="og:title" content="Wardrobe & Style Studio" />
+    <meta property="og:description" content="Manage your wardrobe, lookbook, shopping, selling and style analytics." />
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
-    <script>
-      (function() {
-        // Suppress benign websocket warnings in AI Studio preview sandbox
-        function isSuppressedError(msg) {
-          if (!msg) return false;
-          var str = String(msg).toLowerCase();
-          return str.indexOf('failed to connect to websocket') !== -1;
-        }
-
-        window.onerror = function(message, source, lineno, colno, error) {
-          if (isSuppressedError(message)) {
-            return true;
-          }
-          if (error) {
-            console.error('[Application Runtime Error]:', error.message || error, error.stack);
-          }
-          return false;
-        };
-
-        window.addEventListener('error', function(event) {
-          if (isSuppressedError(event.message)) {
-            event.preventDefault();
-            event.stopPropagation();
-            event.stopImmediatePropagation();
-            return true;
-          }
-        }, true);
-      })();
-    </script>
+    <title>Wardrobe & Style Studio</title>
   </head>
   <body>
     <div id="root">
-      <div style="min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; background-color: #F8F7F4; font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; color: #1A1A1A;">
-        <div style="width: 2.25rem; height: 2.25rem; border: 3px solid #E5E5E1; border-top-color: #8C7355; border-radius: 50%; animation: studio-spin 0.8s linear infinite; margin-bottom: 0.875rem;"></div>
-        <div style="font-size: 0.875rem; font-weight: 600; letter-spacing: 0.05em; color: #8C7355; text-transform: uppercase;">Wardrobe &amp; Style Studio</div>
-        <div style="font-size: 0.75rem; color: #767670; margin-top: 0.25rem;">Loading dashboard &amp; inventory...</div>
-        <style>
-          @keyframes studio-spin { to { transform: rotate(360deg); } }
-        </style>
+      <div style="min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#F8F7F4;font-family:ui-sans-serif,system-ui,sans-serif;color:#1A1A1A" role="status" aria-live="polite">
+        <div style="width:2.25rem;height:2.25rem;border:3px solid #E5E5E1;border-top-color:#8C7355;border-radius:50%;animation:studio-spin .8s linear infinite;margin-bottom:.875rem"></div>
+        <div style="font-size:.875rem;font-weight:600;letter-spacing:.05em;color:#8C7355;text-transform:uppercase">Wardrobe &amp; Style Studio</div>
+        <div style="font-size:.75rem;color:#767670;margin-top:.25rem">Loading studio…</div>
       </div>
     </div>
-    <script type="module" crossorigin src="/src/main.tsx"></script>
+    <style>@keyframes studio-spin{to{transform:rotate(360deg)}}</style>
+    <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
-
-
