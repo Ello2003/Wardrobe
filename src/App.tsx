@@ -1,5 +1,4 @@
-
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { WardrobeProvider, useWardrobe } from './context/WardrobeContext';
 import { Navigation } from './components/Navigation';
 import { DashboardView } from './components/DashboardView';
@@ -32,72 +31,73 @@ const MainAppContent: React.FC = () => {
     dismissUndoToast,
   } = useWardrobe();
 
-  useEffect(() => {
-    document.title = 'Wardrobe & Style Studio';
-  }, []);
-
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      const activeElement = document.activeElement as HTMLElement | null;
-      const activeTag = activeElement?.tagName.toLowerCase();
-
-      if (
-        activeTag === 'input' ||
-        activeTag === 'textarea' ||
-        activeElement?.isContentEditable
-      ) {
-        return;
-      }
-
-      if (
-        (e.ctrlKey || e.metaKey) &&
-        e.key.toLowerCase() === 'z' &&
-        !e.shiftKey &&
-        canUndo
-      ) {
-        e.preventDefault();
-        undoLastAction();
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [canUndo, undoLastAction]);
-
-  const [selectedDetailItem, setSelectedDetailItem] =
-    useState<WardrobeItem | null>(null);
-
+  const [selectedDetailItem, setSelectedDetailItem] = useState<WardrobeItem | null>(null);
   const [isItemFormOpen, setIsItemFormOpen] = useState(false);
-  const [editingItem, setEditingItem] =
-    useState<WardrobeItem | null>(null);
-
+  const [editingItem, setEditingItem] = useState<WardrobeItem | null>(null);
   const [isOutfitFormOpen, setIsOutfitFormOpen] = useState(false);
-  const [editingOutfit, setEditingOutfit] =
-    useState<LookbookOutfit | null>(null);
-
+  const [editingOutfit, setEditingOutfit] = useState<LookbookOutfit | null>(null);
   const [isShoppingFormOpen, setIsShoppingFormOpen] = useState(false);
-  const [editingShoppingItem, setEditingShoppingItem] =
-    useState<ShoppingItem | null>(null);
-
+  const [editingShoppingItem, setEditingShoppingItem] = useState<ShoppingItem | null>(null);
   const [isSnapshotModalOpen, setIsSnapshotModalOpen] = useState(false);
   const [isAIStylistOpen, setIsAIStylistOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isDuplicateMergeOpen, setIsDuplicateMergeOpen] = useState(false);
 
+  useEffect(() => {
+    document.title = 'Wardrobe & Style Studio';
+  }, []);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const activeElement = document.activeElement as HTMLElement | null;
+      const activeTag = activeElement?.tagName.toLowerCase();
+      if (activeTag === 'input' || activeTag === 'textarea' || activeElement?.isContentEditable) return;
+
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z' && !event.shiftKey && canUndo) {
+        event.preventDefault();
+        undoLastAction();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [canUndo, undoLastAction]);
+
+  const openItemForm = useCallback((item: WardrobeItem | null = null) => {
+    setEditingItem(item);
+    setIsItemFormOpen(true);
+  }, []);
+
+  const openOutfitForm = useCallback((outfit: LookbookOutfit | null = null) => {
+    setEditingOutfit(outfit);
+    setIsOutfitFormOpen(true);
+  }, []);
+
+  const openShoppingItemForm = useCallback((item: ShoppingItem | null = null) => {
+    setEditingShoppingItem(item);
+    setIsShoppingFormOpen(true);
+  }, []);
+
+  const closeItemForm = useCallback(() => {
+    setIsItemFormOpen(false);
+    setEditingItem(null);
+  }, []);
+
+  const closeOutfitForm = useCallback(() => {
+    setIsOutfitFormOpen(false);
+    setEditingOutfit(null);
+  }, []);
+
+  const closeShoppingItemForm = useCallback(() => {
+    setIsShoppingFormOpen(false);
+    setEditingShoppingItem(null);
+  }, []);
+
   return (
     <div className="min-h-screen bg-[#F8F7F4] text-[#1A1A1A] flex flex-col font-sans selection:bg-[#8C7355] selection:text-white">
       <Navigation
-        onOpenAddItem={() => {
-          setEditingItem(null);
-          setIsItemFormOpen(true);
-        }}
-        onOpenCreateLook={() => {
-          setEditingOutfit(null);
-          setIsOutfitFormOpen(true);
-        }}
+        onOpenAddItem={() => openItemForm()}
+        onOpenCreateLook={() => openOutfitForm()}
         onOpenAIStylist={() => setIsAIStylistOpen(true)}
         onOpenCreateSnapshot={() => setIsSnapshotModalOpen(true)}
         onOpenSettings={() => setIsSettingsOpen(true)}
@@ -107,189 +107,99 @@ const MainAppContent: React.FC = () => {
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
         {activeTab === 'dashboard' && (
           <DashboardView
-            onOpenAddItem={() => {
-              setEditingItem(null);
-              setIsItemFormOpen(true);
-            }}
-            onOpenCreateLook={() => {
-              setEditingOutfit(null);
-              setIsOutfitFormOpen(true);
-            }}
+            onOpenAddItem={() => openItemForm()}
+            onOpenCreateLook={() => openOutfitForm()}
             onOpenAIStylist={() => setIsAIStylistOpen(true)}
-            onSelectItem={(item) => setSelectedDetailItem(item)}
+            onSelectItem={setSelectedDetailItem}
           />
         )}
 
         {activeTab === 'wardrobe' && (
           <WardrobeView
-            onOpenAddItem={() => {
-              setEditingItem(null);
-              setIsItemFormOpen(true);
-            }}
-            onSelectItem={(item) => setSelectedDetailItem(item)}
-            onEditItem={(item) => {
-              setEditingItem(item);
-              setIsItemFormOpen(true);
-            }}
+            onOpenAddItem={() => openItemForm()}
+            onSelectItem={setSelectedDetailItem}
+            onEditItem={openItemForm}
           />
         )}
 
         {activeTab === 'lookbook' && (
           <LookbookView
-            onOpenCreateLook={() => {
-              setEditingOutfit(null);
-              setIsOutfitFormOpen(true);
-            }}
-            onEditLook={(outfit) => {
-              setEditingOutfit(outfit);
-              setIsOutfitFormOpen(true);
-            }}
-            onSelectItem={(item) => setSelectedDetailItem(item)}
+            onOpenCreateLook={() => openOutfitForm()}
+            onEditLook={openOutfitForm}
+            onSelectItem={setSelectedDetailItem}
           />
         )}
 
         {activeTab === 'shopping' && (
           <ShoppingView
-            onOpenAddShoppingItem={() => {
-              setEditingShoppingItem(null);
-              setIsShoppingFormOpen(true);
-            }}
-            onEditShoppingItem={(item) => {
-              setEditingShoppingItem(item);
-              setIsShoppingFormOpen(true);
-            }}
+            onOpenAddShoppingItem={() => openShoppingItemForm()}
+            onEditShoppingItem={openShoppingItemForm}
           />
         )}
 
         {activeTab === 'selling' && <SellingView />}
 
-        {activeTab === 'analytics' && (
-          <AnalyticsChartsView
-            onOpenAddItem={() => {
-              setEditingItem(null);
-              setIsItemFormOpen(true);
-            }}
-          />
-        )}
+        {activeTab === 'analytics' && <AnalyticsChartsView onOpenAddItem={() => openItemForm()} />}
 
-        {activeTab === 'trends' && (
-          <TrendResearchView
-            onOpenAIStylist={() => setIsAIStylistOpen(true)}
-          />
-        )}
+        {activeTab === 'trends' && <TrendResearchView onOpenAIStylist={() => setIsAIStylistOpen(true)} />}
 
         {(activeTab === 'tools' || activeTab === 'history') && (
           <ToolsView
             onOpenCreateSnapshot={() => setIsSnapshotModalOpen(true)}
-            defaultSubTab={
-              activeTab === 'history' ? 'audit' : 'duplicates'
-            }
+            defaultSubTab={activeTab === 'history' ? 'audit' : 'duplicates'}
           />
         )}
       </main>
 
-      <ErrorBoundary
-        isModal
-        onClose={() => setSelectedDetailItem(null)}
-      >
+      <ErrorBoundary isModal onClose={() => setSelectedDetailItem(null)}>
         <ItemDetailModal
           item={selectedDetailItem}
           onClose={() => setSelectedDetailItem(null)}
-          onEdit={(item) => {
-            setEditingItem(item);
-            setIsItemFormOpen(true);
-          }}
+          onEdit={openItemForm}
         />
       </ErrorBoundary>
 
       <ErrorBoundary
         isModal
         fallbackTitle="Could not display wardrobe editor"
-        onClose={() => {
-          setIsItemFormOpen(false);
-          setEditingItem(null);
-        }}
+        onClose={closeItemForm}
       >
-        <ItemFormModal
-          isOpen={isItemFormOpen}
-          onClose={() => {
-            setIsItemFormOpen(false);
-            setEditingItem(null);
-          }}
-          initialItem={editingItem}
-        />
+        <ItemFormModal isOpen={isItemFormOpen} onClose={closeItemForm} initialItem={editingItem} />
       </ErrorBoundary>
 
       <ErrorBoundary
         isModal
         fallbackTitle="Could not display lookbook outfit editor"
-        onClose={() => {
-          setIsOutfitFormOpen(false);
-          setEditingOutfit(null);
-        }}
+        onClose={closeOutfitForm}
       >
-        <OutfitFormModal
-          isOpen={isOutfitFormOpen}
-          onClose={() => {
-            setIsOutfitFormOpen(false);
-            setEditingOutfit(null);
-          }}
-          initialOutfit={editingOutfit}
-        />
+        <OutfitFormModal isOpen={isOutfitFormOpen} onClose={closeOutfitForm} initialOutfit={editingOutfit} />
       </ErrorBoundary>
 
       <ErrorBoundary
         isModal
-        fallbackTitle="Could not display purchases editor"
-        onClose={() => {
-          setIsShoppingFormOpen(false);
-          setEditingShoppingItem(null);
-        }}
+        fallbackTitle="Could not display shopping item editor"
+        onClose={closeShoppingItemForm}
       >
         <ShoppingFormModal
           isOpen={isShoppingFormOpen}
-          onClose={() => {
-            setIsShoppingFormOpen(false);
-            setEditingShoppingItem(null);
-          }}
-          initialItem={editingShoppingItem}
+          onClose={closeShoppingItemForm}
+          initialShoppingItem={editingShoppingItem}
         />
       </ErrorBoundary>
 
-      <ErrorBoundary
-        isModal
-        onClose={() => setIsSnapshotModalOpen(false)}
-      >
-        <CreateSnapshotModal
-          isOpen={isSnapshotModalOpen}
-          onClose={() => setIsSnapshotModalOpen(false)}
-        />
+      <ErrorBoundary isModal onClose={() => setIsSnapshotModalOpen(false)}>
+        <CreateSnapshotModal isOpen={isSnapshotModalOpen} onClose={() => setIsSnapshotModalOpen(false)} />
       </ErrorBoundary>
 
-      <ErrorBoundary
-        isModal
-        onClose={() => setIsAIStylistOpen(false)}
-      >
-        <AIStylistModal
-          isOpen={isAIStylistOpen}
-          onClose={() => setIsAIStylistOpen(false)}
-        />
+      <ErrorBoundary isModal onClose={() => setIsAIStylistOpen(false)}>
+        <AIStylistModal isOpen={isAIStylistOpen} onClose={() => setIsAIStylistOpen(false)} />
       </ErrorBoundary>
 
-      <ErrorBoundary
-        isModal
-        onClose={() => setIsSettingsOpen(false)}
-      >
-        <SettingsModal
-          isOpen={isSettingsOpen}
-          onClose={() => setIsSettingsOpen(false)}
-        />
+      <ErrorBoundary isModal onClose={() => setIsSettingsOpen(false)}>
+        <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
       </ErrorBoundary>
 
-      <ErrorBoundary
-        isModal
-        onClose={() => setIsDuplicateMergeOpen(false)}
-      >
+      <ErrorBoundary isModal onClose={() => setIsDuplicateMergeOpen(false)}>
         <DuplicateMergeModal
           isOpen={isDuplicateMergeOpen}
           onClose={() => setIsDuplicateMergeOpen(false)}
@@ -299,22 +209,12 @@ const MainAppContent: React.FC = () => {
 
       {undoToast && (
         <div className="fixed bottom-4 right-4 bg-zinc-900 text-white px-4 py-3 rounded-lg shadow-xl flex items-center gap-3 animate-fade-in z-50 text-sm">
-          <span>
-            {undoToast.message || undoToast.actionTitle}
-          </span>
-
-          <button
-            onClick={undoLastAction}
-            className="flex items-center gap-1 text-amber-400 hover:text-amber-300 font-medium transition cursor-pointer"
-          >
+          <span>{undoToast.message || undoToast.actionTitle}</span>
+          <button type="button" onClick={undoLastAction} className="flex items-center gap-1 text-amber-400 hover:text-amber-300 font-medium transition cursor-pointer">
             <Undo2 className="w-4 h-4" />
             Undo
           </button>
-
-          <button
-            onClick={dismissUndoToast}
-            className="text-zinc-400 hover:text-white transition cursor-pointer"
-          >
+          <button type="button" onClick={dismissUndoToast} aria-label="Dismiss undo notification" className="text-zinc-400 hover:text-white transition cursor-pointer">
             <X className="w-4 h-4" />
           </button>
         </div>
@@ -322,11 +222,7 @@ const MainAppContent: React.FC = () => {
 
       <footer className="border-t border-zinc-200 bg-white py-4 text-center text-xs text-zinc-500">
         <div className="max-w-7xl mx-auto px-4 flex justify-between items-center">
-          <div>
-            &copy; {new Date().getFullYear()} Wardrobe System.
-            All rights reserved.
-          </div>
-
+          <div>&copy; {new Date().getFullYear()} Wardrobe &amp; Style Studio. All rights reserved.</div>
           {currentVersion && (
             <div className="flex items-center gap-1 text-zinc-400">
               <History className="w-3 h-3" />
@@ -347,9 +243,8 @@ export default function App() {
         try {
           localStorage.clear();
         } catch {
-          // Ignore localStorage errors
+          // Ignore localStorage errors.
         }
-
         window.location.reload();
       }}
     >
