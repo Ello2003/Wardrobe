@@ -48,6 +48,8 @@ import {
 import {
   determineLifecycleTags,
   isCancelledStatus,
+  normalizeTags,
+  canonicalizeTag,
 } from '../utils/tagUtils';
 import {
   saveLogsSafely,
@@ -163,6 +165,8 @@ interface WardrobeContextType {
   renameTagGlobally: (oldTag: string, newTag: string) => void;
   deleteTagGlobally: (tag: string) => void;
   deleteMultipleTagsGlobally: (tags: string[]) => void;
+  mergeTagsGlobally: (sourceTags: string[], targetTag: string) => void;
+  consolidateAllDuplicateTags: () => { mergedCount: number };
   renameBrandGlobally: (oldBrand: string, newBrand: string) => void;
 
   // Category Actions
@@ -458,6 +462,17 @@ export const normalizeShoppingItem = (item: ShoppingItem): ShoppingItem => {
   };
 };
 
+// Utility to normalize tags and reconcile conflicting lifecycle markers
+const cleanInitialGarmentTags = (rawTags?: string[], status?: string): string[] => {
+  let tags = normalizeTags(rawTags || []);
+  if (status === 'Purchased') {
+    tags = tags.filter((t) => t !== 'Cancelled');
+  } else if (status === 'Sold') {
+    tags = tags.filter((t) => t !== 'Cancelled' && t !== 'Listed');
+  }
+  return tags;
+};
+
 const WardrobeContext = createContext<WardrobeContextType | undefined>(undefined);
 
 export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -470,6 +485,7 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const normalized = uniqueRaw.map((item) => ({
         ...item,
         category: normalizeCategoryName(item.category) as Category,
+        tags: cleanInitialGarmentTags(item.tags),
       }));
       const { consolidated, mergedCount } = consolidateWardrobeDuplicates(normalized);
       if (mergedCount > 0) {
@@ -488,6 +504,7 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const normalized = uniqueRaw.map((item) => ({
         ...item,
         category: normalizeCategoryName(item.category) as Category,
+        tags: cleanInitialGarmentTags(item.tags),
       }));
       const { consolidated } = consolidateWardrobeDuplicates(normalized);
       return consolidated;
@@ -498,9 +515,15 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     try {
       const saved = localStorage.getItem(`${STORAGE_KEY}_outfits`);
       const raw: LookbookOutfit[] = saved ? JSON.parse(saved) : INITIAL_LOOKBOOK_OUTFITS;
-      return ensureUniqueIds(raw, 'look');
+      return ensureUniqueIds(raw, 'look').map((o) => ({
+        ...o,
+        tags: normalizeTags(o.tags),
+      }));
     } catch {
-      return ensureUniqueIds(INITIAL_LOOKBOOK_OUTFITS, 'look');
+      return ensureUniqueIds(INITIAL_LOOKBOOK_OUTFITS, 'look').map((o) => ({
+        ...o,
+        tags: normalizeTags(o.tags),
+      }));
     }
   });
 
@@ -514,6 +537,7 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         return {
           ...norm,
           category: normalizeCategoryName(norm.category) as Category,
+          tags: cleanInitialGarmentTags(norm.tags, norm.status),
         };
       });
       const { consolidated } = consolidateShoppingDuplicates(normalized);
@@ -525,6 +549,7 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         return {
           ...norm,
           category: normalizeCategoryName(norm.category) as Category,
+          tags: cleanInitialGarmentTags(norm.tags, norm.status),
         };
       });
       const { consolidated } = consolidateShoppingDuplicates(normalized);
@@ -540,6 +565,7 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const normalized = uniqueRaw.map((item) => ({
         ...item,
         category: normalizeCategoryName(item.category) as Category,
+        tags: cleanInitialGarmentTags(item.tags, item.status),
       }));
       const { consolidated } = consolidateSaleDuplicates(normalized);
       return consolidated;
@@ -548,6 +574,7 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const normalized = uniqueRaw.map((item) => ({
         ...item,
         category: normalizeCategoryName(item.category) as Category,
+        tags: cleanInitialGarmentTags(item.tags, item.status),
       }));
       const { consolidated } = consolidateSaleDuplicates(normalized);
       return consolidated;
@@ -3171,41 +3198,46 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const renameTagGlobally = useCallback(
     (oldTag: string, newTag: string) => {
       if (!oldTag || !newTag || oldTag === newTag) return;
-      captureUndoState(`Renamed tag "${oldTag}" to "${newTag}"`);
+      const canonicalNewTag = canonicalizeTag(newTag);
+      if (!canonicalNewTag) return;
+      captureUndoState(`Renamed tag "${oldTag}" to "${canonicalNewTag}"`);
 
       setItems((prev) =>
         prev.map((i) => ({
           ...i,
-          tags: (i.tags || []).map((t) => (t === oldTag ? newTag : t)),
+          tags: normalizeTags((i.tags || []).map((t) => (t.toLowerCase() === oldTag.toLowerCase() ? canonicalNewTag : t))),
         }))
       );
       setShoppingList((prev) =>
         prev.map((s) => ({
           ...s,
-          tags: (s.tags || []).map((t) => (t === oldTag ? newTag : t)),
+          tags: normalizeTags((s.tags || []).map((t) => (t.toLowerCase() === oldTag.toLowerCase() ? canonicalNewTag : t))),
         }))
       );
       setSaleItems((prev) =>
         prev.map((s) => ({
           ...s,
-          tags: (s.tags || []).map((t) => (t === oldTag ? newTag : t)),
+          tags: normalizeTags((s.tags || []).map((t) => (t.toLowerCase() === oldTag.toLowerCase() ? canonicalNewTag : t))),
         }))
       );
       setOutfits((prev) =>
         prev.map((o) => ({
           ...o,
-          tags: (o.tags || []).map((t) => (t === oldTag ? newTag : t)),
+          tags: normalizeTags((o.tags || []).map((t) => (t.toLowerCase() === oldTag.toLowerCase() ? canonicalNewTag : t))),
         }))
       );
       updateSettings({
-        customTags: (settings.customTags || []).map((t) => (t === oldTag ? newTag : t)),
+        customTags: normalizeTags([
+          ...(settings.customTags || []).map((t) => (t.toLowerCase() === oldTag.toLowerCase() ? canonicalNewTag : t)),
+          canonicalNewTag,
+        ]),
       });
 
       recordChange(
         'CATEGORY_UPDATED',
         'system',
-        `Tag: ${oldTag} -> ${newTag}`,
-        `Renamed tag "${oldTag}" to "${newTag}" across all garments, shopping items, and looks.`
+        `Tag: ${oldTag} -> ${canonicalNewTag}`,
+        `Renamed tag "${oldTag}" to "${canonicalNewTag}" across all garments, shopping items, and looks.`
       );
     },
     [captureUndoState, updateSettings, settings.customTags, recordChange]
@@ -3216,33 +3248,34 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     (tagToDelete: string) => {
       if (!tagToDelete) return;
       captureUndoState(`Removed tag "${tagToDelete}"`);
+      const targetLower = tagToDelete.trim().toLowerCase();
 
       setItems((prev) =>
         prev.map((i) => ({
           ...i,
-          tags: (i.tags || []).filter((t) => t !== tagToDelete),
+          tags: (i.tags || []).filter((t) => t.trim().toLowerCase() !== targetLower),
         }))
       );
       setShoppingList((prev) =>
         prev.map((s) => ({
           ...s,
-          tags: (s.tags || []).filter((t) => t !== tagToDelete),
+          tags: (s.tags || []).filter((t) => t.trim().toLowerCase() !== targetLower),
         }))
       );
       setSaleItems((prev) =>
         prev.map((s) => ({
           ...s,
-          tags: (s.tags || []).filter((t) => t !== tagToDelete),
+          tags: (s.tags || []).filter((t) => t.trim().toLowerCase() !== targetLower),
         }))
       );
       setOutfits((prev) =>
         prev.map((o) => ({
           ...o,
-          tags: (o.tags || []).filter((t) => t !== tagToDelete),
+          tags: (o.tags || []).filter((t) => t.trim().toLowerCase() !== targetLower),
         }))
       );
       updateSettings({
-        customTags: (settings.customTags || []).filter((t) => t !== tagToDelete),
+        customTags: (settings.customTags || []).filter((t) => t.trim().toLowerCase() !== targetLower),
       });
 
       recordChange(
@@ -3301,6 +3334,83 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     },
     [captureUndoState, updateSettings, settings.customTags, recordChange]
   );
+
+  // GLOBAL TAXONOMY: Merge Multiple Tags Globally (e.g. merge 'example sold' and 'sold' -> 'Sold')
+  const mergeTagsGlobally = useCallback(
+    (sourceTags: string[], targetTag: string) => {
+      const canonicalTarget = canonicalizeTag(targetTag);
+      if (!canonicalTarget || !sourceTags || sourceTags.length === 0) return;
+      const lowerSources = new Set(sourceTags.map((s) => s.trim().toLowerCase()));
+
+      captureUndoState(`Merged tags [${sourceTags.join(', ')}] into "${canonicalTarget}"`);
+
+      const updateTagList = (tags?: string[]) => {
+        if (!Array.isArray(tags)) return [];
+        const mapped = tags.map((t) => (lowerSources.has(t.trim().toLowerCase()) ? canonicalTarget : t));
+        return normalizeTags(mapped);
+      };
+
+      setItems((prev) => prev.map((i) => ({ ...i, tags: updateTagList(i.tags) })));
+      setShoppingList((prev) => prev.map((s) => ({ ...s, tags: updateTagList(s.tags) })));
+      setSaleItems((prev) => prev.map((s) => ({ ...s, tags: updateTagList(s.tags) })));
+      setOutfits((prev) => prev.map((o) => ({ ...o, tags: updateTagList(o.tags) })));
+
+      updateSettings({
+        customTags: normalizeTags([
+          ...(settings.customTags || []).map((t) =>
+            lowerSources.has(t.trim().toLowerCase()) ? canonicalTarget : t
+          ),
+          canonicalTarget,
+        ]),
+      });
+
+      recordChange(
+        'CATEGORY_UPDATED',
+        'system',
+        `Merged Tags -> ${canonicalTarget}`,
+        `Merged tags [${sourceTags.join(', ')}] into single standardized tag "${canonicalTarget}".`
+      );
+    },
+    [captureUndoState, updateSettings, settings.customTags, recordChange]
+  );
+
+  // GLOBAL TAXONOMY: Consolidate All Duplicate & Case-variant Tags Globally
+  const consolidateAllDuplicateTags = useCallback(() => {
+    captureUndoState('Standardized tag taxonomy and casing');
+    let totalMerged = 0;
+
+    const sweepTagList = (tags?: string[], status?: string) => {
+      if (!Array.isArray(tags)) return [];
+      const normalized = normalizeTags(tags);
+      let filtered = normalized;
+      if (status === 'Purchased') {
+        filtered = filtered.filter((t) => t !== 'Cancelled');
+      } else if (status === 'Sold') {
+        filtered = filtered.filter((t) => t !== 'Cancelled' && t !== 'Listed');
+      }
+      if (filtered.length !== tags.length) {
+        totalMerged += tags.length - filtered.length;
+      }
+      return filtered;
+    };
+
+    setItems((prev) => prev.map((i) => ({ ...i, tags: sweepTagList(i.tags) })));
+    setShoppingList((prev) => prev.map((s) => ({ ...s, tags: sweepTagList(s.tags, s.status) })));
+    setSaleItems((prev) => prev.map((s) => ({ ...s, tags: sweepTagList(s.tags, s.status) })));
+    setOutfits((prev) => prev.map((o) => ({ ...o, tags: sweepTagList(o.tags) })));
+    updateSettings({
+      customTags: normalizeTags(settings.customTags || []),
+    });
+
+    recordChange(
+      'CATEGORY_UPDATED',
+      'system',
+      'Taxonomy Standardized',
+      'Consolidated duplicate casing tags across all garments and records.'
+    );
+
+    return { mergedCount: totalMerged };
+  }, [captureUndoState, updateSettings, settings.customTags, recordChange]);
 
   // GLOBAL TAXONOMY: Rename Brand Globally
   const renameBrandGlobally = useCallback(
@@ -5143,6 +5253,8 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       renameTagGlobally,
       deleteTagGlobally,
       deleteMultipleTagsGlobally,
+      mergeTagsGlobally,
+      consolidateAllDuplicateTags,
       renameBrandGlobally,
       addCategory,
       updateCategory,
@@ -5239,6 +5351,8 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       renameTagGlobally,
       deleteTagGlobally,
       deleteMultipleTagsGlobally,
+      mergeTagsGlobally,
+      consolidateAllDuplicateTags,
       renameBrandGlobally,
       addCategory,
       updateCategory,

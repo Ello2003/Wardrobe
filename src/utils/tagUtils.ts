@@ -9,6 +9,84 @@ export type LifecycleStatus = 'Bought' | 'Sold' | 'Listed' | 'Cancelled';
 
 export const LIFECYCLE_TAGS: readonly LifecycleStatus[] = ['Bought', 'Sold', 'Listed', 'Cancelled'] as const;
 
+/**
+ * Canonical dictionary for known platform, lifecycle, and common system tags.
+ * Ensures consistent TitleCase / standard capitalization across the entire app.
+ */
+export const CANONICAL_TAG_MAP: Record<string, string> = {
+  sold: 'Sold',
+  bought: 'Bought',
+  purchased: 'Bought',
+  purchase: 'Bought',
+  listed: 'Listed',
+  cancelled: 'Cancelled',
+  canceled: 'Cancelled',
+  sale: 'Sale',
+  vinted: 'Vinted',
+  ebay: 'eBay',
+  'account-sync': 'Account-Sync',
+  'second-hand': 'Second-Hand',
+  'wardrobe resale': 'Wardrobe Resale',
+  wardrobe: 'Wardrobe',
+  wishlist: 'Wishlist',
+  researching: 'Researching',
+  closet: 'Closet',
+};
+
+/**
+ * Returns a canonical, properly capitalized version of a tag.
+ * E.g., 'sold' -> 'Sold', 'Sold' -> 'Sold', 'vinted' -> 'Vinted', 'vintage' -> 'Vintage'.
+ */
+export function canonicalizeTag(rawTag: string): string {
+  if (!rawTag || typeof rawTag !== 'string') return '';
+  const trimmed = rawTag.trim().replace(/^#/, '');
+  if (!trimmed) return '';
+
+  const lower = trimmed.toLowerCase();
+  if (CANONICAL_TAG_MAP[lower]) {
+    return CANONICAL_TAG_MAP[lower];
+  }
+
+  // If all lowercase, convert to Title Case words
+  if (/^[a-z0-9-]+$/.test(trimmed)) {
+    return trimmed
+      .split(/([\s-_]+)/)
+      .map((part) => {
+        if (/[\s-_]+/.test(part)) return part;
+        return part.charAt(0).toUpperCase() + part.slice(1);
+      })
+      .join('');
+  }
+
+  // Already has casing (e.g. "Smart Casual", "100% Wool"): capitalize first letter if needed
+  return trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
+}
+
+/**
+ * Normalizes an array of tags:
+ * - Maps each tag to its canonical TitleCase equivalent
+ * - Merges and deduplicates case-insensitive variants (e.g. 'sold' and 'Sold' -> ['Sold'])
+ * - Strips empty or whitespace-only tags
+ */
+export function normalizeTags(tags?: (string | null | undefined)[]): string[] {
+  if (!Array.isArray(tags)) return [];
+  const seenLower = new Set<string>();
+  const result: string[] = [];
+
+  for (const t of tags) {
+    if (!t || typeof t !== 'string') continue;
+    const canonical = canonicalizeTag(t);
+    if (!canonical) continue;
+    const lower = canonical.toLowerCase();
+    if (!seenLower.has(lower)) {
+      seenLower.add(lower);
+      result.push(canonical);
+    }
+  }
+
+  return result;
+}
+
 export interface DetermineLifecycleTagsParams {
   destination?: 'wardrobe' | 'shopping' | 'selling';
   transactionType?: string; // 'Purchase' | 'Sale' | etc.
@@ -37,7 +115,8 @@ export function isCancelledStatus(status?: string, notes?: string): boolean {
 
 /**
  * Determines appropriate lifecycle status tags (Bought, Sold, Listed, Cancelled)
- * alongside domain tags (e.g. vinted, second-hand, imported).
+ * alongside domain tags (e.g. Vinted, Second-Hand).
+ * Strictly produces unified, canonical TitleCase tags without lowercase duplicates.
  */
 export function determineLifecycleTags(params: DetermineLifecycleTagsParams): string[] {
   const {
@@ -52,10 +131,11 @@ export function determineLifecycleTags(params: DetermineLifecycleTagsParams): st
 
   const tagSet = new Set<string>();
 
-  // Add existing tags, keeping user custom tags intact
+  // Add existing tags, canonicalizing each
   for (const t of existingTags) {
     if (t && typeof t === 'string') {
-      tagSet.add(t.trim());
+      const canonical = canonicalizeTag(t);
+      if (canonical) tagSet.add(canonical);
     }
   }
 
@@ -66,51 +146,54 @@ export function determineLifecycleTags(params: DetermineLifecycleTagsParams): st
 
   if (isCancelled) {
     tagSet.add('Cancelled');
-    tagSet.add('cancelled');
-  }
+    // Remove conflicting active states if cancelled
+    tagSet.delete('Sold');
+    tagSet.delete('Bought');
+    tagSet.delete('Listed');
+  } else {
+    // 2. SOLD CHECK
+    const isSold =
+      sellingStatus === 'Sold' ||
+      (destination === 'selling' && orderStatus.toLowerCase().includes('sold')) ||
+      (transactionType.toLowerCase() === 'sale') ||
+      (shoppingStatus as string) === 'Sold';
 
-  // 2. SOLD CHECK
-  const isSold =
-    sellingStatus === 'Sold' ||
-    (destination === 'selling' && orderStatus.toLowerCase().includes('sold')) ||
-    (transactionType.toLowerCase() === 'sale' && !isCancelled) ||
-    (shoppingStatus as string) === 'Sold';
+    if (isSold) {
+      tagSet.add('Sold');
+      tagSet.delete('Listed');
+      tagSet.delete('Cancelled');
+    }
 
-  if (isSold) {
-    tagSet.add('Sold');
-    tagSet.add('sold');
-  }
+    // 3. LISTED CHECK
+    const isListed =
+      sellingStatus === 'Listed' ||
+      (destination === 'selling' && sellingStatus !== 'Sold') ||
+      params.sourceType === 'account-scrape' ||
+      (isVinted && destination === 'selling');
 
-  // 3. LISTED CHECK
-  const isListed =
-    sellingStatus === 'Listed' ||
-    (destination === 'selling' && sellingStatus !== 'Sold' && !isCancelled) ||
-    params.sourceType === 'account-scrape' ||
-    (isVinted && destination === 'selling');
+    if (isListed && !isSold) {
+      tagSet.add('Listed');
+      tagSet.delete('Cancelled');
+    }
 
-  if (isListed && !isSold) {
-    tagSet.add('Listed');
-    tagSet.add('listed');
-  }
+    // 4. BOUGHT / PURCHASED CHECK
+    const isBought =
+      destination === 'wardrobe' ||
+      shoppingStatus === 'Purchased' ||
+      (transactionType.toLowerCase() === 'purchase');
 
-  // 4. BOUGHT / PURCHASED CHECK
-  const isBought =
-    destination === 'wardrobe' ||
-    shoppingStatus === 'Purchased' ||
-    (transactionType.toLowerCase() === 'purchase' && !isCancelled);
-
-  if (isBought) {
-    tagSet.add('Bought');
-    tagSet.add('bought');
-    tagSet.add('purchased');
+    if (isBought && !isSold) {
+      tagSet.add('Bought');
+      tagSet.delete('Cancelled');
+    }
   }
 
   // 5. PLATFORM TAGS
   if (isVinted) {
-    tagSet.add('vinted');
+    tagSet.add('Vinted');
   }
 
-  return Array.from(tagSet);
+  return normalizeTags(Array.from(tagSet));
 }
 
 /**

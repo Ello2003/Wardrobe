@@ -1,7 +1,6 @@
 import express from 'express';
 import path from 'path';
 import dotenv from 'dotenv';
-import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, Type } from '@google/genai';
 import { extractAllGarmentAttributes } from './src/utils/garmentAttributeExtractor';
 
@@ -3528,12 +3527,13 @@ app.post('/api/ebay/scrape-seller', async (req, res) => {
 // Vite & Static Asset Handling
 async function startServer() {
   if (process.env.NODE_ENV !== 'production') {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
     });
     // Redirect /Wardrobe or /Wardrobe/ requests to / in dev if visited
-    app.get(['/Wardrobe', '/Wardrobe/*'], (req, res, next) => {
+    app.get(['/Wardrobe', '/Wardrobe/*'], (req, res) => {
       const target = req.url.replace(/^\/Wardrobe/, '') || '/';
       res.redirect(target);
     });

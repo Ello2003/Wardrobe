@@ -523,6 +523,15 @@ export const SellingView: React.FC = () => {
     filteredSales.length > 0 &&
     filteredSales.every((it) => selectedSaleIds.has(it.id));
 
+  const areSomeSelected =
+    filteredSales.some((it) => selectedSaleIds.has(it.id)) && !areAllSelected;
+
+  const selectedTotalListingPrice = useMemo(() => {
+    return saleItems
+      .filter((i) => selectedSaleIds.has(i.id))
+      .reduce((sum, i) => sum + (i.listingPrice || 0), 0);
+  }, [saleItems, selectedSaleIds]);
+
   const handleToggleSelectAll = () => {
     if (areAllSelected) {
       setSelectedSaleIds(new Set());
@@ -1048,49 +1057,6 @@ export const SellingView: React.FC = () => {
                 <option value="price_asc">Lowest Price</option>
               </select>
             </div>
-
-            {selectedSaleIds.size > 0 && (
-              <div className="flex items-center gap-2 bg-[#1A1A1A] text-white px-3 py-1 text-xs font-mono">
-                <span className="font-medium">{selectedSaleIds.size} selected</span>
-                <span className="text-zinc-600">|</span>
-                <button
-                  onClick={() => setIsBulkEditOpen(true)}
-                  className="text-zinc-200 hover:text-white font-medium cursor-pointer"
-                >
-                  Bulk Edit
-                </button>
-                <span className="text-zinc-600">|</span>
-                <button
-                  onClick={handleBulkMoveToWardrobe}
-                  className="text-zinc-200 hover:text-white font-medium cursor-pointer"
-                  title="Move selected items back to wardrobe"
-                >
-                  To Wardrobe
-                </button>
-                <span className="text-zinc-600">|</span>
-                <button
-                  onClick={handleBulkMoveToShopping}
-                  className="text-zinc-200 hover:text-white font-medium cursor-pointer"
-                  title="Move selected items to wishlist"
-                >
-                  To Wishlist
-                </button>
-                <span className="text-zinc-600">|</span>
-                <button
-                  onClick={handleBulkDelete}
-                  className="text-rose-400 hover:text-rose-300 font-medium cursor-pointer"
-                >
-                  Delete
-                </button>
-                <button
-                  onClick={() => setSelectedSaleIds(new Set())}
-                  className="p-0.5 text-zinc-400 hover:text-white cursor-pointer ml-1"
-                  title="Clear selection"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            )}
           </div>
         )}
 
@@ -1207,6 +1173,89 @@ export const SellingView: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* Bulk Selection Action Bar */}
+      {selectedSaleIds.size > 0 && (
+        <div className="bg-[#1A1A1A] text-white p-3 border border-[#333] shadow-md flex flex-wrap items-center justify-between gap-3 animate-fadeIn">
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleToggleSelectAll}
+                className={`w-4 h-4 border flex items-center justify-center cursor-pointer transition-colors ${
+                  areAllSelected
+                    ? 'bg-[#8C7355] border-[#8C7355] text-white'
+                    : areSomeSelected
+                    ? 'bg-[#8C7355]/30 border-[#8C7355] text-[#8C7355]'
+                    : 'border-[#666] bg-[#2A2A2A] hover:border-[#8C7355]'
+                }`}
+                title={areAllSelected ? 'Deselect all visible items' : 'Select all visible items'}
+                aria-label={areAllSelected ? 'Deselect all visible items' : 'Select all visible items'}
+              >
+                {areAllSelected && <Check className="w-3 h-3 stroke-[3] text-white" />}
+                {!areAllSelected && areSomeSelected && (
+                  <span className="w-2 h-0.5 bg-[#8C7355] block" />
+                )}
+              </button>
+              <span className="font-mono text-xs font-semibold">
+                {selectedSaleIds.size} of {saleItems.length} listings selected
+                {filteredSales.length !== saleItems.length && (
+                  <span className="text-[#A5A59E] font-normal"> ({filteredSales.length} matching filter)</span>
+                )}
+              </span>
+            </div>
+            <span className="text-xs text-[#A5A59E] font-mono hidden sm:inline">
+              (Total Listed: {formatCurrency(selectedTotalListingPrice)})
+            </span>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={handleBulkMoveToWardrobe}
+              className="flex items-center gap-1.5 px-3 py-1 text-xs font-mono font-bold bg-[#8C7355] hover:bg-[#735D43] text-white shadow-xs cursor-pointer transition-colors"
+              title="Move selected items back to Wardrobe Inventory"
+            >
+              <Shirt className="w-3.5 h-3.5" />
+              <span>To Wardrobe ({selectedSaleIds.size})</span>
+            </button>
+            <button
+              type="button"
+              onClick={handleBulkMoveToShopping}
+              className="flex items-center gap-1.5 px-3 py-1 text-xs font-mono font-medium bg-[#3A3A38] hover:bg-[#4A4A48] text-[#E5E5E1] border border-[#555] shadow-xs cursor-pointer transition-colors"
+              title="Move selected items to Wishlist"
+            >
+              <ShoppingBag className="w-3.5 h-3.5" />
+              <span>To Wishlist ({selectedSaleIds.size})</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsBulkEditOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-1 text-xs font-mono font-bold bg-[#8C7355] hover:bg-[#735D43] text-white shadow-xs cursor-pointer transition-colors"
+              title="Bulk edit category, platform, status, tags, and prices for selected listings"
+            >
+              <Sliders className="w-3.5 h-3.5" />
+              <span>Bulk Edit ({selectedSaleIds.size})</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setSelectedSaleIds(new Set())}
+              className="px-3 py-1 text-xs font-mono text-[#D5D5D0] hover:text-white border border-[#444] hover:border-[#666] bg-[#2A2A2A] cursor-pointer transition-colors"
+            >
+              Deselect
+            </button>
+            <button
+              type="button"
+              onClick={handleBulkDelete}
+              className="flex items-center gap-1.5 px-3 py-1 text-xs font-mono font-medium bg-rose-700 hover:bg-rose-800 text-white shadow-xs cursor-pointer transition-colors"
+              title="Delete all selected listings immediately"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Delete ({selectedSaleIds.size})</span>
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Content View: Grid or Database Table */}
       {viewMode === 'grid' ? (

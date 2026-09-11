@@ -159,8 +159,14 @@ export const ShoppingView: React.FC<ShoppingViewProps> = ({
   // Persistent setters
   const handleSetPipelineTab = useCallback((tab: string) => {
     setPipelineTab(tab);
+    if (tab !== 'All') {
+      setSelectedStatus('All');
+    }
     try {
       localStorage.setItem('shopping_pipeline_tab', tab);
+      if (tab !== 'All') {
+        localStorage.setItem('shopping_selected_status', 'All');
+      }
     } catch {}
   }, []);
 
@@ -324,6 +330,64 @@ export const ShoppingView: React.FC<ShoppingViewProps> = ({
       .map(([tag, count]) => ({ tag, count }));
   }, [shoppingList]);
 
+  // Helper to reliably classify pipeline stage
+  const getShoppingPipelineStage = useCallback((it: ShoppingItem): 'Purchased' | 'Sold' | 'Cancelled' | 'Planned' => {
+    const status = it.status;
+    const statusLower = (status || '').toLowerCase();
+    const orderStatusLower = (it.orderStatus || '').toLowerCase();
+    const txTypeLower = (it.transactionType || '').toLowerCase();
+    const tags = Array.isArray(it.tags)
+      ? it.tags.map((t) => (typeof t === 'string' ? t.toLowerCase().replace(/^#/, '') : ''))
+      : [];
+
+    // 1. Explicit Purchased Status takes highest priority
+    if (
+      status === 'Purchased' ||
+      txTypeLower === 'purchase' ||
+      it.actualPricePaid != null ||
+      Boolean(it.purchasedDate)
+    ) {
+      return 'Purchased';
+    }
+
+    // 2. Explicit Sold Status
+    if (
+      status === 'Sold' ||
+      txTypeLower === 'sale' ||
+      tags.includes('sold') ||
+      orderStatusLower.includes('sold')
+    ) {
+      return 'Sold';
+    }
+
+    // 3. Explicit Cancelled / Passed Status
+    if (
+      status === 'Cancelled' ||
+      status === 'Passed' ||
+      orderStatusLower.includes('cancel') ||
+      orderStatusLower.includes('refund') ||
+      orderStatusLower.includes('void') ||
+      tags.includes('cancelled') ||
+      tags.includes('passed')
+    ) {
+      return 'Cancelled';
+    }
+
+    // 4. Secondary heuristics for purchased
+    if (
+      tags.includes('bought') ||
+      tags.includes('purchased') ||
+      orderStatusLower.includes('delivered') ||
+      orderStatusLower.includes('received') ||
+      orderStatusLower.includes('completed')
+    ) {
+      return 'Purchased';
+    }
+
+    // 5. Default Planned / Wishlist
+    return 'Planned';
+  }, []);
+
   // Shopping Pipeline Stats: All, Planned, Purchased, Sold, Cancelled
   const pipelineStats = useMemo(() => {
     let all = shoppingList.length;
@@ -333,88 +397,25 @@ export const ShoppingView: React.FC<ShoppingViewProps> = ({
     let cancelled = 0;
 
     for (const it of shoppingList) {
-      const statusLower = (it.status || '').toLowerCase();
-      const orderStatusLower = (it.orderStatus || '').toLowerCase();
-      const notesLower = (it.notes || '').toLowerCase();
-      const tags = Array.isArray(it.tags) ? it.tags.map((t) => (typeof t === 'string' ? t.toLowerCase() : '')) : [];
-
-      const isSold =
-        statusLower === 'sold' ||
-        tags.includes('sold') ||
-        orderStatusLower.includes('sold') ||
-        notesLower.includes('sold') ||
-        (it.transactionType && it.transactionType.toLowerCase() === 'sale');
-
-      const isCancelled =
-        statusLower === 'cancelled' ||
-        statusLower === 'passed' ||
-        orderStatusLower.includes('cancel') ||
-        orderStatusLower.includes('refund') ||
-        notesLower.includes('cancel') ||
-        tags.includes('cancelled') ||
-        tags.includes('passed');
-
-      const isPurchased =
-        statusLower === 'purchased' ||
-        tags.includes('purchased') ||
-        orderStatusLower.includes('purchase') ||
-        orderStatusLower.includes('delivered') ||
-        orderStatusLower.includes('received') ||
-        (it.transactionType && it.transactionType.toLowerCase() === 'purchase');
-
-      if (isSold) sold++;
-      else if (isCancelled) cancelled++;
-      else if (isPurchased) purchased++;
+      const stage = getShoppingPipelineStage(it);
+      if (stage === 'Purchased') purchased++;
+      else if (stage === 'Sold') sold++;
+      else if (stage === 'Cancelled') cancelled++;
       else planned++;
     }
 
     return { all, planned, purchased, sold, cancelled };
-  }, [shoppingList]);
+  }, [shoppingList, getShoppingPipelineStage]);
 
   const filteredItems = useMemo(() => {
     const matched = shoppingList.filter((item) => {
       // Pipeline status tab filter
       if (pipelineTab !== 'All') {
-        const statusLower = (item.status || '').toLowerCase();
-        const orderStatusLower = (item.orderStatus || '').toLowerCase();
-        const notesLower = (item.notes || '').toLowerCase();
-        const tags = Array.isArray(item.tags)
-          ? item.tags.map((t) => (typeof t === 'string' ? t.toLowerCase() : ''))
-          : [];
-
-        const isSold =
-          statusLower === 'sold' ||
-          tags.includes('sold') ||
-          orderStatusLower.includes('sold') ||
-          notesLower.includes('sold') ||
-          (item.transactionType && item.transactionType.toLowerCase() === 'sale');
-
-        const isCancelled =
-          statusLower === 'cancelled' ||
-          statusLower === 'passed' ||
-          orderStatusLower.includes('cancel') ||
-          orderStatusLower.includes('refund') ||
-          notesLower.includes('cancel') ||
-          tags.includes('cancelled') ||
-          tags.includes('passed');
-
-        const isPurchased =
-          statusLower === 'purchased' ||
-          tags.includes('purchased') ||
-          orderStatusLower.includes('purchase') ||
-          orderStatusLower.includes('delivered') ||
-          orderStatusLower.includes('received') ||
-          (item.transactionType && item.transactionType.toLowerCase() === 'purchase');
-
-        if (pipelineTab === 'Purchased') {
-          if (!isPurchased) return false;
-        } else if (pipelineTab === 'Sold') {
-          if (!isSold) return false;
-        } else if (pipelineTab === 'Cancelled') {
-          if (!isCancelled) return false;
-        } else if (pipelineTab === 'Planned' || pipelineTab === 'Wishlist') {
-          if (isPurchased || isSold || isCancelled) return false;
-        }
+        const stage = getShoppingPipelineStage(item);
+        if (pipelineTab === 'Purchased' && stage !== 'Purchased') return false;
+        if (pipelineTab === 'Sold' && stage !== 'Sold') return false;
+        if (pipelineTab === 'Cancelled' && stage !== 'Cancelled') return false;
+        if ((pipelineTab === 'Planned' || pipelineTab === 'Wishlist') && stage !== 'Planned') return false;
       }
 
       // Tag filter
