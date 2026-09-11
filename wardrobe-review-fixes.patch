@@ -1,0 +1,144 @@
+diff --git a/server.ts b/server.ts
+index d64c0bd..de3b0d5 100644
+--- a/server.ts
++++ b/server.ts
+@@ -3548,7 +3548,7 @@ async function startServer() {
+   }
+ 
+   app.listen(PORT, '0.0.0.0', () => {
+-    console.log(`Wardrobe & Lookbook Studio server running on http://localhost:${PORT}`);
++    console.log(`Wardrobe & Style Studio server running on http://localhost:${PORT}`);
+   });
+ }
+ 
+diff --git a/src/App.tsx b/src/App.tsx
+index 3858b16..5402b57 100644
+--- a/src/App.tsx
++++ b/src/App.tsx
+@@ -238,7 +238,7 @@ const MainAppContent: React.FC = () => {
+ export default function App() {
+   return (
+     <ErrorBoundary
+-      fallbackTitle="Wardrobe & Lookbook Studio Recovery"
++      fallbackTitle="Wardrobe & Style Studio Recovery"
+       onClose={() => {
+         try {
+           localStorage.clear();
+diff --git a/src/components/GithubSyncPanel.tsx b/src/components/GithubSyncPanel.tsx
+index 3268fbe..14240ff 100644
+--- a/src/components/GithubSyncPanel.tsx
++++ b/src/components/GithubSyncPanel.tsx
+@@ -9,6 +9,7 @@ import {
+ } from '../services/githubSyncService';
+ import { useWardrobe } from '../context/WardrobeContext';
+ import { createLosslessBackup, validateLosslessBackup } from '../services/losslessBackupService';
++import { safeConfirm } from '../utils/safeConfirm';
+ import {
+   Github,
+   CheckCircle2,
+@@ -153,7 +154,7 @@ export const GithubSyncPanel: React.FC<GithubSyncPanelProps> = ({ onNotify }) =>
+     }
+ 
+     if (
+-      !window.confirm(
++      !safeConfirm(
+         'Pulling from GitHub will update your closet with the repository backup. A safety rollback snapshot will be automatically created first. Continue?'
+       )
+     ) {
+diff --git a/src/context/WardrobeContext.tsx b/src/context/WardrobeContext.tsx
+index eceb4ae..1aff141 100644
+--- a/src/context/WardrobeContext.tsx
++++ b/src/context/WardrobeContext.tsx
+@@ -3874,7 +3874,14 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
+             : parseFloat(String(order.price || '0').replace(/[^0-9.]/g, '')) || 0;
+         const rawDate = order.date ? String(order.date).slice(0, 10) : now.slice(0, 10);
+         const orderTitle = (order.title || 'Vinted Order').trim();
+-        const inferredCategory = normalizeCategoryName(inferCategoryFromTitle(orderTitle), categories);
++        // Active listings carry real brand/colour/category/size from the account scrape;
++        // sold/purchased orders come from Vinted's private orders API, which doesn't
++        // return that detail, so those fall back to a heuristic title-based guess.
++        const inferredCategory = order.category
++          ? normalizeCategoryName(order.category, categories)
++          : normalizeCategoryName(inferCategoryFromTitle(orderTitle), categories);
++        const inferredBrand = order.brand || 'Vinted';
++        const inferredColor = order.color || order.colour || 'Various';
+ 
+         if (order.type === 'sold' || (order.type as any) === 'active' || order.status === 'Listed') {
+           if (skipDuplicates && orderId && existingSaleOrderIds.has(orderId)) {
+@@ -3898,8 +3905,10 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
+           const saleItem: SaleItem = {
+             id: generateUniqueId('sale'),
+             name: orderTitle,
+-            brand: 'Vinted',
++            brand: inferredBrand,
+             category: inferredCategory,
++            size: order.size || undefined,
++            color: order.color || order.colour || undefined,
+             condition: 'Good',
+             originalPricePaid: 0,
+             listingPrice: orderPrice,
+@@ -3947,7 +3956,7 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
+             const shopItem: ShoppingItem = {
+               id: generateUniqueId('shop'),
+               name: orderTitle,
+-              brand: 'Vinted',
++              brand: inferredBrand,
+               category: inferredCategory,
+               estimatedPrice: orderPrice,
+               actualPricePaid: orderPrice,
+@@ -3986,9 +3995,9 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
+             const wItem: WardrobeItem = {
+               id: generateUniqueId('item'),
+               name: orderTitle,
+-              brand: 'Vinted',
++              brand: inferredBrand,
+               category: inferredCategory,
+-              color: 'Various',
++              color: inferredColor,
+               season: ['All-Season'],
+               purchasePrice: orderPrice,
+               purchaseDate: rawDate,
+@@ -4661,7 +4670,7 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
+     );
+ 
+     const exportPayload = {
+-      app: 'Wardrobe & Lookbook Studio',
++      app: 'Wardrobe & Style Studio',
+       currency: 'GBP (£)',
+       exportedAt: new Date().toISOString(),
+       schemaVersion: '2.4.0',
+diff --git a/src/services/ebayService.ts b/src/services/ebayService.ts
+index e6728e4..00fa85f 100644
+--- a/src/services/ebayService.ts
++++ b/src/services/ebayService.ts
+@@ -547,8 +547,8 @@ export function parseEbayReportFile(
+               purchasePrice: 0,
+               imageUrl: '',
+               targetStoreUrl: simpleMatch[0],
+-              brand: 'eBay',
+-              category: 'Tops',
++              brand: inferEbayBrand(''),
++              category: inferEbayCategory(''),
+               orderDate: new Date().toISOString().slice(0, 10),
+               transactionType: 'Purchase',
+               sourceFile: fileName,
+diff --git a/src/services/vintedWorkerService.ts b/src/services/vintedWorkerService.ts
+index 9e843a2..145576a 100644
+--- a/src/services/vintedWorkerService.ts
++++ b/src/services/vintedWorkerService.ts
+@@ -18,6 +18,7 @@ export interface VintedOrder {
+   material?: string;
+   fabric?: string;
+   size?: string;
++  category?: string;
+   description?: string;
+   user?: { login?: string; username?: string };
+   seller_username?: string;
+@@ -273,6 +274,7 @@ export const fetchAllVintedOrders = async (
+               color: l.color,
+               material: l.material,
+               size: l.size,
++              category: l.category,
+               description: l.description,
+             });
+           });
