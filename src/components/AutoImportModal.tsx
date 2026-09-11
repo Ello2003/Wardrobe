@@ -20,6 +20,7 @@ import {
   LIFECYCLE_TAGS,
 } from '../utils/tagUtils';
 import { extractAllGarmentAttributes } from '../utils/garmentAttributeExtractor';
+import { safeApiFetch } from '../utils/apiHelper';
 import {
   Link2,
   Sparkles,
@@ -395,18 +396,16 @@ export const AutoImportModal: React.FC<AutoImportModalProps> = ({
     setIsLoading(true);
     setError(null);
     try {
-      const res = await fetch('/api/gemini/extract-from-image', {
+      const res = await safeApiFetch('/api/gemini/extract-from-image', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           imageBase64: item.imageUrl,
           mimeType: 'image/jpeg',
         }),
       });
 
-      const data = await res.json();
-      if (data.success && (data.item || (data.items && data.items[0]))) {
-        const parsed = data.item || data.items[0];
+      if (res.success && res.data && (res.data.item || (res.data.items && res.data.items[0]))) {
+        const parsed = res.data.item || res.data.items[0];
         setExtractedItems((prev) => {
           const next = [...prev];
           if (next[idx]) {
@@ -647,17 +646,16 @@ export const AutoImportModal: React.FC<AutoImportModalProps> = ({
         }
       }
 
-      const res = await fetch('/api/gemini/extract-from-url', {
+      const res = await safeApiFetch('/api/gemini/extract-from-url', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url: urlToUse }),
       });
 
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Failed to extract product details from this link.');
+      if (!res.success || !res.data) {
+        throw new Error(res.error || 'Failed to extract product details from this link.');
       }
 
+      const data = res.data;
       const items = Array.isArray(data.items) && data.items.length > 0 ? data.items : data.item ? [data.item] : [];
       if (items.length === 0) {
         throw new Error('No garment items could be parsed from this page.');
@@ -686,20 +684,19 @@ export const AutoImportModal: React.FC<AutoImportModalProps> = ({
     setSaveSuccessMessage(null);
 
     try {
-      const res = await fetch('/api/gemini/extract-from-image', {
+      const res = await safeApiFetch('/api/gemini/extract-from-image', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           imageBase64: base64Img,
           mimeType: mimeType || 'image/jpeg',
         }),
       });
 
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Failed to analyze photo with Vision AI.');
+      if (!res.success || !res.data) {
+        throw new Error(res.error || 'Failed to analyze photo with Vision AI.');
       }
 
+      const data = res.data;
       const items = Array.isArray(data.items) && data.items.length > 0 ? data.items : data.item ? [data.item] : [];
       normalizeExtractedItems(
         items,
@@ -748,17 +745,16 @@ export const AutoImportModal: React.FC<AutoImportModalProps> = ({
     setSaveSuccessMessage(null);
 
     try {
-      const res = await fetch('/api/gemini/extract-from-text', {
+      const res = await safeApiFetch('/api/gemini/extract-from-text', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: textInput.trim() }),
       });
 
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Failed to extract garment details from text.');
+      if (!res.success || !res.data) {
+        throw new Error(res.error || 'Failed to extract garment details from text.');
       }
 
+      const data = res.data;
       const items = Array.isArray(data.items) && data.items.length > 0 ? data.items : data.item ? [data.item] : [];
       normalizeExtractedItems(
         items,
@@ -867,17 +863,16 @@ export const AutoImportModal: React.FC<AutoImportModalProps> = ({
         });
       }
 
-      const res = await fetch('/api/gemini/extract-from-vinted-file', {
+      const res = await safeApiFetch('/api/gemini/extract-from-vinted-file', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ files: payloadFiles }),
       });
 
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Failed to extract items from Vinted data files.');
+      if (!res.success || !res.data) {
+        throw new Error(res.error || 'Failed to extract items from Vinted data files.');
       }
 
+      const data = res.data;
       const items = Array.isArray(data.items) && data.items.length > 0 ? data.items : data.item ? [data.item] : [];
       if (items.length === 0) {
         throw new Error('No garment listings could be identified in the uploaded Vinted data.');

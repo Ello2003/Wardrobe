@@ -25,6 +25,13 @@ import {
   inferCategoryFromTitle,
 } from '../services/vintedWorkerService';
 import {
+  EbayOrder,
+  EbayActiveListing,
+  inferEbayCategory,
+  inferEbayBrand,
+  inferEbaySize,
+} from '../services/ebayService';
+import {
   INITIAL_WARDROBE_ITEMS,
   INITIAL_LOOKBOOK_OUTFITS,
   INITIAL_SHOPPING_LIST,
@@ -92,6 +99,9 @@ interface WardrobeContextType {
   outfits: LookbookOutfit[];
   shoppingList: ShoppingItem[];
   saleItems: SaleItem[];
+  // Canonical aliases for backward-compatible consumption
+  wishlist: ShoppingItem[];
+  sales: SaleItem[];
   changeLogs: VersionChangeLog[];
   snapshots: WardrobeSnapshot[];
   categories: string[];
@@ -328,6 +338,27 @@ interface WardrobeContextType {
   };
   importVintedExtractedListings: (
     items: VintedExtractedItem[],
+    destination?: 'selling' | 'shopping' | 'wardrobe'
+  ) => {
+    importedCount: number;
+    totalVal: number;
+  };
+  syncEbayAccountOrders: (
+    orders: EbayOrder[],
+    options?: {
+      routePurchasedTo?: 'wardrobe' | 'shopping';
+      routeSoldTo?: 'selling';
+      skipDuplicates?: boolean;
+    }
+  ) => {
+    addedPurchased: number;
+    addedSold: number;
+    skippedDuplicates: number;
+    totalPurchasedVal: number;
+    totalSoldVal: number;
+  };
+  importEbayExtractedListings: (
+    items: EbayActiveListing[],
     destination?: 'selling' | 'shopping' | 'wardrobe'
   ) => {
     importedCount: number;
@@ -4232,6 +4263,391 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     [categories, createSnapshot, captureUndoState, recordChange]
   );
 
+  // 18e. SYNC EBAY ACCOUNT ORDERS (Direct history: purchases & sales)
+  const syncEbayAccountOrders = useCallback(
+    (
+      orders: EbayOrder[],
+      options?: {
+        routePurchasedTo?: 'wardrobe' | 'shopping';
+        routeSoldTo?: 'selling';
+        skipDuplicates?: boolean;
+      }
+    ) => {
+      if (!orders || orders.length === 0) {
+        return {
+          addedPurchased: 0,
+          addedSold: 0,
+          skippedDuplicates: 0,
+          totalPurchasedVal: 0,
+          totalSoldVal: 0,
+        };
+      }
+
+      const routePurchasedTo = options?.routePurchasedTo || 'wardrobe';
+      const skipDuplicates = options?.skipDuplicates !== false;
+
+      // Existing order numbers / IDs to prevent duplicate insertion
+      const existingWardrobeOrderIds = new Set(
+        items.map((i) => i.orderNumber).filter(Boolean)
+      );
+      const existingSaleOrderIds = new Set(
+        saleItems.map((s) => s.orderNumber).filter(Boolean)
+      );
+      const existingShoppingOrderIds = new Set(
+        shoppingList.map((s) => s.orderNumber).filter(Boolean)
+      );
+
+      const now = new Date().toISOString();
+      const domain = settings.ebayAuth?.domain || 'co.uk';
+
+      const newWardrobeItems: WardrobeItem[] = [];
+      const newShoppingItems: ShoppingItem[] = [];
+      const newSaleItems: SaleItem[] = [];
+      let skippedDuplicates = 0;
+      let totalPurchasedVal = 0;
+      let totalSoldVal = 0;
+
+      for (const order of orders) {
+        const orderId = order.orderId ? String(order.orderId).trim() : '';
+        const orderPrice =
+          typeof order.price === 'number'
+            ? order.price
+            : parseFloat(String(order.price || '0').replace(/[^0-9.]/g, '')) || 0;
+        const rawDate = order.date ? String(order.date).slice(0, 10) : now.slice(0, 10);
+        const orderTitle = (order.title || 'eBay Order').trim();
+        const inferredCategory = normalizeCategoryName(order.category || inferEbayCategory(orderTitle), categories);
+        const inferredBrand = order.brand || inferEbayBrand(orderTitle);
+        const inferredSize = order.size || inferEbaySize(orderTitle);
+
+        if (order.type === 'sold' || order.type === 'active' || order.status === 'Listed') {
+          if (skipDuplicates && orderId && existingSaleOrderIds.has(orderId)) {
+            skippedDuplicates++;
+            continue;
+          }
+
+          const isActiveListing = order.type === 'active' || order.status === 'Listed';
+          const saleItem: SaleItem = {
+            id: generateUniqueId('sale'),
+            name: orderTitle,
+            brand: inferredBrand,
+            category: inferredCategory,
+            size: inferredSize,
+            condition: (order.condition?.toLowerCase().includes('new') ? 'Pristine / New' : 'Good') as Condition,
+            originalPricePaid: 0,
+            listingPrice: orderPrice,
+            soldPrice: isActiveListing ? undefined : orderPrice,
+            platform: 'eBay',
+            status: isActiveListing ? 'Listed' : 'Sold',
+            shippingStatus: isActiveListing ? 'Not Required' : 'Delivered',
+            platformListingUrl: order.itemUrl || (orderId ? `https://www.ebay.${domain}/itm/${orderId.split('-')[0]}` : ''),
+            imageUrl: order.image || '',
+            description: order.notes || `eBay order #${orderId}`,
+            tags: ['ebay', isActiveListing ? 'active-listing' : 'sold-order', 'order-history'],
+            listedDate: rawDate,
+            soldDate: isActiveListing ? undefined : rawDate,
+            buyerUsername: order.buyer,
+            orderNumber: orderId,
+            createdAt: now,
+            updatedAt: now,
+            notes: order.transactionStatus ? `eBay order #${orderId} · ${order.transactionStatus}` : `eBay order #${orderId}`,
+          };
+
+          newSaleItems.push(saleItem);
+          totalSoldVal += orderPrice;
+          if (orderId) existingSaleOrderIds.add(orderId);
+        } else {
+          // Purchased order -> route to wardrobe or shopping
+          if (routePurchasedTo === 'shopping') {
+            if (skipDuplicates && orderId && existingShoppingOrderIds.has(orderId)) {
+              skippedDuplicates++;
+              continue;
+            }
+
+            const shopItem: ShoppingItem = {
+              id: generateUniqueId('shop'),
+              name: orderTitle,
+              brand: inferredBrand,
+              category: inferredCategory,
+              size: inferredSize,
+              estimatedPrice: orderPrice,
+              actualPricePaid: orderPrice,
+              priority: 'High',
+              status: 'Purchased',
+              season: 'All-Season',
+              matchingWardrobeItemIds: [],
+              imageUrl: order.image || '',
+              reasonOrGap: `Imported from eBay Order History (${rawDate})`,
+              tags: ['ebay', 'order-history', 'purchased'],
+              addedDate: rawDate,
+              purchasedDate: rawDate,
+              seller: order.seller,
+              orderDate: rawDate,
+              orderNumber: orderId,
+              orderValue: orderPrice,
+              retailerName: 'eBay',
+              targetStoreUrl: order.itemUrl || (orderId ? `https://www.ebay.${domain}/itm/${orderId.split('-')[0]}` : ''),
+              createdAt: now,
+              notes: order.transactionStatus ? `eBay order #${orderId} · ${order.transactionStatus}` : `eBay order #${orderId}`,
+            };
+            newShoppingItems.push(shopItem);
+            totalPurchasedVal += orderPrice;
+            if (orderId) existingShoppingOrderIds.add(orderId);
+          } else {
+            // Wardrobe
+            if (skipDuplicates && orderId && existingWardrobeOrderIds.has(orderId)) {
+              skippedDuplicates++;
+              continue;
+            }
+
+            const wItem: WardrobeItem = {
+              id: generateUniqueId('item'),
+              name: orderTitle,
+              brand: inferredBrand,
+              category: inferredCategory,
+              size: inferredSize,
+              color: 'Various',
+              season: ['All-Season'],
+              purchasePrice: orderPrice,
+              purchaseDate: rawDate,
+              wearCount: 0,
+              imageUrl: order.image || '',
+              retailerName: 'eBay',
+              orderNumber: orderId,
+              targetStoreUrl: order.itemUrl || (orderId ? `https://www.ebay.${domain}/itm/${orderId.split('-')[0]}` : ''),
+              condition: (order.condition?.toLowerCase().includes('new') ? 'Pristine / New' : 'Good') as Condition,
+              isFavorite: false,
+              isArchived: false,
+              tags: ['ebay', 'pre-owned', 'order-history'],
+              notes: order.transactionStatus
+                ? `eBay order #${orderId} · ${order.transactionStatus}${order.seller ? ` · Seller: ${order.seller}` : ''}`
+                : `eBay order #${orderId}${order.seller ? ` · Seller: ${order.seller}` : ''}`,
+              createdAt: now,
+              updatedAt: now,
+            };
+            newWardrobeItems.push(wItem);
+            totalPurchasedVal += orderPrice;
+            if (orderId) existingWardrobeOrderIds.add(orderId);
+          }
+        }
+      }
+
+      const totalNewCount = newWardrobeItems.length + newShoppingItems.length + newSaleItems.length;
+      if (totalNewCount === 0) {
+        return {
+          addedPurchased: 0,
+          addedSold: 0,
+          skippedDuplicates,
+          totalPurchasedVal: 0,
+          totalSoldVal: 0,
+        };
+      }
+
+      // Safety snapshot
+      createSnapshot(
+        `[Auto-Snapshot] Pre-eBay Sync Checkpoint`,
+        `Safety rollback point created before syncing ${totalNewCount} orders from eBay account.`
+      );
+
+      captureUndoState(`eBay Sync: ${totalNewCount} orders imported`);
+
+      if (newWardrobeItems.length > 0) {
+        setItems((prev) => [...newWardrobeItems, ...prev]);
+      }
+      if (newShoppingItems.length > 0) {
+        setShoppingList((prev) => [...newShoppingItems, ...prev]);
+      }
+      if (newSaleItems.length > 0) {
+        setSaleItems((prev) => [...newSaleItems, ...prev]);
+      }
+
+      recordChange(
+        'EBAY_SYNC' as any,
+        newWardrobeItems.length > 0 ? 'wardrobe_item' : newSaleItems.length > 0 ? 'sale_item' : 'shopping_item',
+        `eBay Sync (${totalNewCount} Orders)`,
+        `Synchronized ${newWardrobeItems.length + newShoppingItems.length} purchased orders (£${totalPurchasedVal.toFixed(2)}) & ${newSaleItems.length} sold listings (£${totalSoldVal.toFixed(2)}) from eBay account.${skippedDuplicates > 0 ? ` Skipped ${skippedDuplicates} duplicate orders.` : ''}`,
+        undefined,
+        {
+          financialImpact: totalPurchasedVal,
+          newValue: {
+            purchasedCount: newWardrobeItems.length + newShoppingItems.length,
+            soldCount: newSaleItems.length,
+            skippedDuplicates,
+            totalPurchasedVal,
+            totalSoldVal,
+          },
+          deletedEntities: [...newWardrobeItems, ...newShoppingItems, ...newSaleItems],
+        }
+      );
+
+      return {
+        addedPurchased: newWardrobeItems.length + newShoppingItems.length,
+        addedSold: newSaleItems.length,
+        skippedDuplicates,
+        totalPurchasedVal,
+        totalSoldVal,
+      };
+    },
+    [items, saleItems, shoppingList, categories, settings.ebayAuth, createSnapshot, captureUndoState, recordChange]
+  );
+
+  // 18f. IMPORT EBAY EXTRACTED LISTINGS (Active listings)
+  const importEbayExtractedListings = useCallback(
+    (
+      itemsToImport: EbayActiveListing[],
+      destination: 'selling' | 'shopping' | 'wardrobe' = 'selling'
+    ) => {
+      if (!itemsToImport || itemsToImport.length === 0) {
+        return { importedCount: 0, totalVal: 0 };
+      }
+
+      const now = new Date().toISOString();
+      let totalVal = 0;
+
+      // 1. Safety snapshot
+      createSnapshot(
+        `[Auto-Snapshot] Pre-eBay Active Listings Import`,
+        `Safety checkpoint before importing ${itemsToImport.length} active eBay listing(s) to ${destination}.`
+      );
+
+      captureUndoState(`Imported ${itemsToImport.length} eBay active listings`);
+
+      if (destination === 'selling') {
+        const newSales: SaleItem[] = itemsToImport.map((ex) => {
+          const price = typeof ex.price === 'number' ? ex.price : parseFloat(String(ex.price || '0')) || 0;
+          totalVal += price;
+          const cat = normalizeCategoryName(ex.category || inferEbayCategory(ex.title), categories);
+          return {
+            id: generateUniqueId('sale'),
+            name: ex.title || 'eBay Listing',
+            brand: ex.brand || inferEbayBrand(ex.title),
+            category: cat,
+            size: ex.size || inferEbaySize(ex.title),
+            condition: (ex.condition?.toLowerCase().includes('new') ? 'Pristine / New' : 'Good') as Condition,
+            color: ex.color || '',
+            originalPricePaid: 0,
+            listingPrice: price,
+            platform: 'eBay',
+            status: 'Listed',
+            platformListingUrl: ex.url,
+            imageUrl: ex.imageUrl || '',
+            additionalImages: ex.allImages,
+            description: ex.title,
+            tags: ['ebay', 'active-listing', 'resale'],
+            listedDate: now.slice(0, 10),
+            createdAt: now,
+            updatedAt: now,
+            orderNumber: ex.id,
+            notes: ex.seller ? `Seller: ${ex.seller}` : '',
+          };
+        });
+
+        setSaleItems((prev) => [...newSales, ...prev]);
+
+        recordChange(
+          'EBAY_EXTRACT' as any,
+          'sale_item',
+          `${newSales.length} Active eBay Listings`,
+          `Added ${newSales.length} live eBay listings to Resale manager (£${totalVal.toFixed(2)} total listed).`,
+          undefined,
+          {
+            financialImpact: totalVal,
+            newValue: newSales,
+            deletedEntities: newSales,
+          }
+        );
+      } else if (destination === 'shopping') {
+        const newShop: ShoppingItem[] = itemsToImport.map((ex) => {
+          const price = typeof ex.price === 'number' ? ex.price : parseFloat(String(ex.price || '0')) || 0;
+          totalVal += price;
+          const cat = normalizeCategoryName(ex.category || inferEbayCategory(ex.title), categories);
+          return {
+            id: generateUniqueId('shop'),
+            name: ex.title || 'eBay Item',
+            brand: ex.brand || inferEbayBrand(ex.title),
+            category: cat,
+            size: ex.size || inferEbaySize(ex.title),
+            color: ex.color,
+            estimatedPrice: price,
+            priority: 'High',
+            status: 'To Buy',
+            season: 'All-Season',
+            matchingWardrobeItemIds: [],
+            reasonOrGap: ex.seller ? `Seller: ${ex.seller}` : 'Active eBay listing watched',
+            targetStoreUrl: ex.url,
+            imageUrl: ex.imageUrl || '',
+            tags: ['ebay', 'watching', 'resale-watch'],
+            addedDate: now.slice(0, 10),
+            createdAt: now,
+            orderNumber: ex.id,
+          };
+        });
+
+        setShoppingList((prev) => [...newShop, ...prev]);
+
+        recordChange(
+          'EBAY_EXTRACT' as any,
+          'shopping_item',
+          `${newShop.length} eBay Items Watched`,
+          `Added ${newShop.length} active eBay pieces to Wishlist / To Buy (£${totalVal.toFixed(2)} estimated).`,
+          undefined,
+          {
+            financialImpact: totalVal,
+            newValue: newShop,
+            deletedEntities: newShop,
+          }
+        );
+      } else {
+        // Wardrobe
+        const newWardrobe: WardrobeItem[] = itemsToImport.map((ex) => {
+          const price = typeof ex.price === 'number' ? ex.price : parseFloat(String(ex.price || '0')) || 0;
+          totalVal += price;
+          const cat = normalizeCategoryName(ex.category || inferEbayCategory(ex.title), categories);
+          return {
+            id: generateUniqueId('item'),
+            name: ex.title || 'eBay Garment',
+            brand: ex.brand || inferEbayBrand(ex.title),
+            category: cat,
+            size: ex.size || inferEbaySize(ex.title),
+            color: ex.color || 'Various',
+            season: ['All-Season'],
+            purchasePrice: price,
+            purchaseDate: now.slice(0, 10),
+            wearCount: 0,
+            imageUrl: ex.imageUrl || '',
+            retailerName: 'eBay',
+            targetStoreUrl: ex.url,
+            orderNumber: ex.id,
+            condition: (ex.condition?.toLowerCase().includes('new') ? 'Pristine / New' : 'Good') as Condition,
+            isFavorite: false,
+            isArchived: false,
+            tags: ['ebay', 'active-listing', 'pre-owned'],
+            notes: ex.seller ? `Seller: ${ex.seller}` : '',
+            createdAt: now,
+            updatedAt: now,
+          };
+        });
+
+        setItems((prev) => [...newWardrobe, ...prev]);
+
+        recordChange(
+          'EBAY_EXTRACT' as any,
+          'wardrobe_item',
+          `${newWardrobe.length} eBay Garments Added`,
+          `Added ${newWardrobe.length} garments extracted from eBay into wardrobe (£${totalVal.toFixed(2)}).`,
+          undefined,
+          {
+            financialImpact: totalVal,
+            newValue: newWardrobe,
+            deletedEntities: newWardrobe,
+          }
+        );
+      }
+
+      return { importedCount: itemsToImport.length, totalVal };
+    },
+    [categories, createSnapshot, captureUndoState, recordChange]
+  );
+
   // 19. EXPORT DATA JSON BACKUP
   const exportDataJSON = useCallback(() => {
     // Collect all explicit and active categories across all collections
@@ -4693,6 +5109,8 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       outfits,
       shoppingList,
       saleItems,
+      wishlist: shoppingList,
+      sales: saleItems,
       changeLogs,
       snapshots,
       categories,
@@ -4777,6 +5195,8 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       syncVintedOrderStatuses,
       syncVintedAccountOrders,
       importVintedExtractedListings,
+      syncEbayAccountOrders,
+      importEbayExtractedListings,
       updateMonthlyBudget,
       exportDataJSON,
       importDataJSON,
@@ -4871,6 +5291,8 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       syncVintedOrderStatuses,
       syncVintedAccountOrders,
       importVintedExtractedListings,
+      syncEbayAccountOrders,
+      importEbayExtractedListings,
       updateMonthlyBudget,
       exportDataJSON,
       importDataJSON,

@@ -24,7 +24,14 @@ interface NavigationProps {
   onOpenDuplicateMerge: () => void;
 }
 
-const tabs = [
+interface TabItem {
+  id: string;
+  label: string;
+  icon: any;
+  countKey?: 'items' | 'shoppingList' | 'saleItems' | 'outfits';
+}
+
+const tabs: readonly TabItem[] = [
   { id: 'dashboard', label: 'Overview', icon: TrendingUp },
   { id: 'wardrobe', label: 'Wardrobe', icon: Shirt, countKey: 'items' },
   { id: 'shopping', label: 'Shopping', icon: ShoppingBag, countKey: 'shoppingList' },
@@ -33,7 +40,7 @@ const tabs = [
   { id: 'lookbook', label: 'Lookbook', icon: Layers, countKey: 'outfits' },
   { id: 'trends', label: 'Trends', icon: Sparkles },
   { id: 'tools', label: 'Tools', icon: Wrench },
-] as const;
+];
 
 export const Navigation = ({
   onOpenAddItem,

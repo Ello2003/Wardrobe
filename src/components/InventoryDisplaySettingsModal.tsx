@@ -32,6 +32,7 @@ export interface InventoryTableColumnSettings {
   showLocation: boolean;
   showTags: boolean;
   showVintedDetails: boolean;
+  showResaleOption: boolean;
   showActions: boolean;
 }
 
@@ -63,6 +64,7 @@ export interface InventoryDisplaySettings {
   showTags: boolean;
   showLocation: boolean;
   showVintedDetails: boolean;
+  showResaleOption: boolean;
   showQuickActions: boolean;
 
   // Card Density
@@ -91,6 +93,7 @@ export const DEFAULT_INVENTORY_TABLE_SETTINGS: InventoryTableDisplaySettings = {
   showLocation: true,
   showTags: true,
   showVintedDetails: true,
+  showResaleOption: true,
   showActions: true,
 };
 
@@ -111,6 +114,7 @@ export const DEFAULT_INVENTORY_DISPLAY_SETTINGS: InventoryDisplaySettings = {
   showTags: true,
   showLocation: true,
   showVintedDetails: true,
+  showResaleOption: true,
   showQuickActions: true,
 
   density: 'comfortable',
@@ -207,6 +211,7 @@ export const InventoryDisplaySettingsModal: React.FC<InventoryDisplaySettingsMod
         showTags: false,
         showLocation: false,
         showVintedDetails: false,
+        showResaleOption: true,
         showQuickActions: true,
         density: 'compact',
       });
@@ -227,6 +232,7 @@ export const InventoryDisplaySettingsModal: React.FC<InventoryDisplaySettingsMod
         showTags: false,
         showLocation: false,
         showVintedDetails: false,
+        showResaleOption: false,
         showQuickActions: true,
         density: 'comfortable',
       });
@@ -247,6 +253,7 @@ export const InventoryDisplaySettingsModal: React.FC<InventoryDisplaySettingsMod
         showTags: false,
         showLocation: true,
         showVintedDetails: true,
+        showResaleOption: true,
         showQuickActions: true,
         density: 'comfortable',
       });
@@ -306,7 +313,8 @@ export const InventoryDisplaySettingsModal: React.FC<InventoryDisplaySettingsMod
     { key: 'showCondition', label: 'Condition Grade' },
     { key: 'showTags', label: 'Custom Tags' },
     { key: 'showLocation', label: 'Storage Location' },
-    { key: 'showVintedDetails', label: 'Vinted / Second-Hand Details' },
+    { key: 'showVintedDetails', label: 'Vinted Order & Resale Info' },
+    { key: 'showResaleOption', label: 'Resale Quick Option (List for Sale)' },
     { key: 'showQuickActions', label: 'Action Buttons (Wear, Edit, Sell, Delete)' },
   ];
 
@@ -326,7 +334,8 @@ export const InventoryDisplaySettingsModal: React.FC<InventoryDisplaySettingsMod
     { key: 'showColor', label: 'Garment Color', description: 'Color name & preview dot' },
     { key: 'showLocation', label: 'Storage Location', description: 'Wardrobe rack or bin location' },
     { key: 'showTags', label: 'Custom Tags', description: 'Hashtag badges with add/delete' },
-    { key: 'showVintedDetails', label: 'Provenance / Vinted Details', description: 'Order ID or external URL' },
+    { key: 'showVintedDetails', label: 'Vinted Order & Provenance', description: 'Order ID, seller, and listing link' },
+    { key: 'showResaleOption', label: 'Resale Quick Action', description: 'One-click Move to Sales button' },
     { key: 'showActions', label: 'Row Action Buttons', description: 'Wear, Sell, Edit, Delete shortcuts' },
   ];
 
@@ -696,6 +705,7 @@ export const InventoryDisplaySettingsModal: React.FC<InventoryDisplaySettingsMod
                         showLocation: true,
                         showTags: true,
                         showVintedDetails: true,
+                        showResaleOption: true,
                         showActions: true,
                       };
                       onChange({

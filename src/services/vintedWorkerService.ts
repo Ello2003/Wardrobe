@@ -1,4 +1,5 @@
 import { VintedWorkerAuth } from '../types';
+import { safeApiFetch } from '../utils/apiHelper';
 
 export interface VintedOrder {
   orderId: string;
@@ -212,17 +213,20 @@ export const fetchVintedOrderPage = async (
     console.warn('Direct worker fetch encountered issue, attempting server proxy fallback...', directErr);
   }
 
-  // Fallback via local backend server proxy
-  const proxyRes = await fetch('/api/vinted-proxy/orders', {
+  // Fallback via local backend server proxy (or external API if configured)
+  const proxyRes = await safeApiFetch('/api/vinted-proxy/orders', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       workerEndpoint: endpoint,
       ...payload,
     }),
   });
 
-  return await proxyRes.json();
+  if (!proxyRes.success || !proxyRes.data) {
+    throw new Error(proxyRes.error || 'Failed to connect to Vinted sync service.');
+  }
+
+  return proxyRes.data;
 };
 
 // Fetch all orders across pages for purchased, sold, and active closet items
@@ -513,11 +517,10 @@ export const scrapeVintedAccountListings = async (params: {
     }
   }
 
-  // 2. Fetch via Express server proxy endpoint
+  // 2. Fetch via Express server proxy endpoint (or external API if configured)
   if (onProgress) onProgress('Extracting listings & photos from account feed...');
-  const proxyRes = await fetch('/api/vinted-proxy/scrape-account', {
+  const proxyRes = await safeApiFetch('/api/vinted-proxy/scrape-account', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       accountUrlOrUsername: cleanInput,
       domain,
@@ -529,10 +532,9 @@ export const scrapeVintedAccountListings = async (params: {
     }),
   });
 
-  const data = await proxyRes.json();
-  if (!proxyRes.ok || data.error) {
-    throw new Error(data.error || 'Failed to scrape Vinted account listings.');
+  if (!proxyRes.success || !proxyRes.data || proxyRes.data.error) {
+    throw new Error(proxyRes.error || proxyRes.data?.error || 'Failed to scrape Vinted account listings.');
   }
 
-  return data;
+  return proxyRes.data;
 };

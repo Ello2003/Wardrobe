@@ -4,6 +4,7 @@ import { WardrobeItem, Category, Season, Condition } from '../types';
 import { useWardrobe } from '../context/WardrobeContext';
 import { GarmentImage } from './GarmentImage';
 import { isGarmentDuplicate } from './duplicateMerge/duplicateUtils';
+import { safeApiFetch } from '../utils/apiHelper';
 
 interface ItemFormModalProps {
   isOpen: boolean;
@@ -184,17 +185,15 @@ export const ItemFormModal: React.FC<ItemFormModalProps> = ({
       setImageUrl(base64);
 
       try {
-        const res = await fetch('/api/gemini/extract-from-image', {
+        const res = await safeApiFetch('/api/gemini/extract-from-image', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             imageBase64: base64,
             mimeType: file.type,
           }),
         });
-        const data = await res.json();
-        if (data.success && (data.item || (data.items && data.items[0]))) {
-          const item = data.item || data.items[0];
+        if (res.success && res.data && (res.data.item || (res.data.items && res.data.items[0]))) {
+          const item = res.data.item || res.data.items[0];
           if (item.name) setName(item.name);
           if (item.brand) setBrand(item.brand);
           if (item.category && categories.includes(item.category)) setCategory(item.category);
@@ -205,6 +204,8 @@ export const ItemFormModal: React.FC<ItemFormModalProps> = ({
           if (item.season && Array.isArray(item.season)) setSeasons(item.season);
           if (item.tags && Array.isArray(item.tags)) setTagsInput(item.tags.join(', '));
           setExtractSuccess(true);
+        } else if (res.error) {
+          setExtractError(res.error);
         }
       } catch (err: any) {
         console.error('Image auto-extract error:', err);
@@ -222,18 +223,16 @@ export const ItemFormModal: React.FC<ItemFormModalProps> = ({
     setExtractSuccess(false);
 
     try {
-      const res = await fetch('/api/gemini/extract-from-url', {
+      const res = await safeApiFetch('/api/gemini/extract-from-url', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url: importUrl.trim() }),
       });
 
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Failed to extract product details from this link.');
+      if (!res.success || !res.data?.item) {
+        throw new Error(res.error || 'Failed to extract product details from this link.');
       }
 
-      const item = data.item;
+      const item = res.data.item;
       if (item.name) setName(item.name);
       if (item.brand) setBrand(item.brand);
       if (item.category) setCategory(item.category);

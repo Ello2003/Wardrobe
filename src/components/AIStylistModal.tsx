@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { useWardrobe } from '../context/WardrobeContext';
 import { Category } from '../types';
+import { safeApiFetch } from '../utils/apiHelper';
 
 interface AIStylistModalProps {
   isOpen: boolean;
@@ -63,9 +64,8 @@ export const AIStylistModal: React.FC<AIStylistModalProps> = ({ isOpen, onClose 
     setIsGenerating(true);
 
     try {
-      const res = await fetch('/api/gemini/style-assistant', {
+      const res = await safeApiFetch('/api/gemini/style-assistant', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           prompt: textToSend,
           wardrobeItems: items,
@@ -74,11 +74,11 @@ export const AIStylistModal: React.FC<AIStylistModalProps> = ({ isOpen, onClose 
         }),
       });
 
-      if (!res.ok) {
-        throw new Error('AI Assistant service unavailable.');
+      if (!res.success || !res.data) {
+        throw new Error(res.error || 'AI Assistant service unavailable.');
       }
 
-      const data = await res.json();
+      const data = res.data;
       const replyMsg = {
         role: 'assistant' as const,
         text: data.reply || 'Styling analysis complete.',
@@ -90,7 +90,7 @@ export const AIStylistModal: React.FC<AIStylistModalProps> = ({ isOpen, onClose 
         ...prev,
         {
           role: 'assistant',
-          text: 'Notice: Could not contact Gemini AI service. Please ensure the Gemini API key is configured.',
+          text: err?.message || 'Notice: Could not contact Gemini AI service. If hosted statically on GitHub Pages, Gemini requires an external backend.',
           time: 'Error',
         },
       ]);
@@ -105,9 +105,8 @@ export const AIStylistModal: React.FC<AIStylistModalProps> = ({ isOpen, onClose 
     setAddedGapIndex([]);
 
     try {
-      const res = await fetch('/api/gemini/gap-analysis', {
+      const res = await safeApiFetch('/api/gemini/gap-analysis', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           wardrobeItems: items,
           targetStyle: 'Modern British Heritage & Quiet Luxury Capsule',
@@ -115,10 +114,11 @@ export const AIStylistModal: React.FC<AIStylistModalProps> = ({ isOpen, onClose 
         }),
       });
 
-      if (!res.ok) throw new Error('Gap analysis failed.');
+      if (!res.success || !res.data) {
+        throw new Error(res.error || 'Gap analysis failed.');
+      }
 
-      const data = await res.json();
-      setGapAnalysisResult(data);
+      setGapAnalysisResult(res.data);
     } catch (err: any) {
       console.error(err);
     } finally {

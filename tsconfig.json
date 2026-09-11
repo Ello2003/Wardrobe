@@ -6,6 +6,7 @@
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "jsx": "react-jsx",
     "isolatedModules": true,
+    "resolveJsonModule": true,
     "moduleDetection": "force",
     "allowJs": true,
     "allowImportingTsExtensions": true,

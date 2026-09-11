@@ -27,6 +27,7 @@ import { useWardrobe } from '../context/WardrobeContext';
 import { VersionHistoryView } from './VersionHistoryView';
 import { DuplicateMergeModal } from './DuplicateMergeModal';
 import { AutoImportModal } from './AutoImportModal';
+import { EbayImportModal } from './EbayImportModal';
 import {
   buildDuplicateItemRefs,
   computeDuplicateClusters,
@@ -65,6 +66,7 @@ export const ToolsView: React.FC<ToolsViewProps> = ({
 
   // Auto Import Modal State
   const [isAutoImportOpen, setIsAutoImportOpen] = useState(false);
+  const [isEbayImportOpen, setIsEbayImportOpen] = useState(false);
   const [importTab, setImportTab] = useState<'url' | 'photo' | 'text' | 'vinted'>('url');
   const [importDestination, setImportDestination] = useState<
     'wardrobe' | 'shopping' | 'selling'
@@ -656,6 +658,50 @@ export const ToolsView: React.FC<ToolsViewProps> = ({
                 <ArrowRight className="w-3.5 h-3.5 text-[#8C7355]" />
               </button>
             </div>
+
+            {/* Channel 5: eBay Direct Sync & Listings */}
+            <div className="bg-white border border-[#E5E5E1] p-5 flex flex-col justify-between space-y-4 hover:border-[#0064D2] transition-colors md:col-span-2">
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-md bg-[#0064D2]/10 border border-[#0064D2]/30 flex items-center justify-center text-[#0064D2] font-black text-sm">
+                    e<span className="text-[#E53238]">b</span>
+                    <span className="text-[#F5AF02]">a</span>
+                    <span className="text-[#86B817]">y</span>
+                  </div>
+                  <span className="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 bg-[#0064D2]/10 text-[#0064D2] font-bold">
+                    Direct API &amp; Seller Sync
+                  </span>
+                </div>
+                <h3 className="font-serif font-bold text-base text-[#1A1A1A]">
+                  eBay Order History, Purchases &amp; Active Resale Listings
+                </h3>
+                <p className="text-xs text-[#767670] leading-relaxed font-sans">
+                  Directly connect to your eBay account or public seller store. Pull your order history (both purchased garments and sold pieces) or active resale listings with high-resolution imagery, pricing in GBP, brands, and automated deduplication against your active inventory.
+                </p>
+                <div className="flex flex-wrap gap-1 pt-1 text-[10px] font-mono text-[#767670]">
+                  <span className="px-1.5 py-0.5 bg-[#F8F7F4] border border-[#E5E5E1]">Order History</span>
+                  <span className="px-1.5 py-0.5 bg-[#F8F7F4] border border-[#E5E5E1]">Active Listings</span>
+                  <span className="px-1.5 py-0.5 bg-[#F8F7F4] border border-[#E5E5E1]">Purchases &amp; Sales</span>
+                  <span className="px-1.5 py-0.5 bg-[#F8F7F4] border border-[#E5E5E1]">Seller Store Scraper</span>
+                  <span className="px-1.5 py-0.5 bg-[#F8F7F4] border border-[#E5E5E1]">HTML / CSV Reports</span>
+                </div>
+              </div>
+
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-1">
+                <span className="text-[11px] font-mono text-[#767670]">
+                  Routes purchases to <strong>Wardrobe / Wishlist</strong> and active listings to <strong>Resale Studio</strong>.
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setIsEbayImportOpen(true)}
+                  className="w-full sm:w-auto px-5 py-2 bg-[#0064D2] hover:bg-[#0051a8] text-white text-xs font-mono font-bold uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center gap-1.5 shadow-xs"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>Launch eBay Importer</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
@@ -687,6 +733,15 @@ export const ToolsView: React.FC<ToolsViewProps> = ({
           initialTab={importTab}
           defaultDestination={importDestination}
           initialUrl={directUrlInput}
+        />
+      )}
+
+      {/* Embedded eBay Direct Importer Modal */}
+      {isEbayImportOpen && (
+        <EbayImportModal
+          isOpen={isEbayImportOpen}
+          onClose={() => setIsEbayImportOpen(false)}
+          defaultDestination={importDestination}
         />
       )}
     </div>

@@ -59,7 +59,31 @@ export interface AppSettings {
   autoSnapshotIntervalMinutes: number; // e.g. 5, 10, 15, 30, 60 minutes
   maxAutoSnapshots: number; // max auto checkpoints kept (default 20)
   vintedWorkerAuth?: VintedWorkerAuth;
+  ebayAuth?: EbayAuth;
 }
+
+export interface EbayAuth {
+  userToken?: string; // eBay OAuth Bearer / User Token
+  username?: string; // eBay account handle or store ID
+  domain?: string; // e.g. 'co.uk', 'com', 'de', 'fr', 'ca', 'com.au'
+  environment?: 'production' | 'sandbox';
+  appId?: string; // Optional client / application ID
+  certId?: string; // Optional client secret
+  refreshToken?: string;
+  autoRouteOrders?: boolean; // true = purchases -> wardrobe, sold -> resale
+  defaultImportDestination?: 'wardrobe' | 'shopping' | 'selling';
+  isConnected?: boolean;
+  lastSyncTime?: string;
+}
+
+export const DEFAULT_EBAY_AUTH: EbayAuth = {
+  userToken: '',
+  username: '',
+  domain: 'co.uk',
+  environment: 'production',
+  autoRouteOrders: true,
+  defaultImportDestination: 'wardrobe',
+};
 
 export interface VintedWorkerAuth {
   workerEndpoint: string;
@@ -106,6 +130,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   autoSnapshotIntervalMinutes: 10,
   maxAutoSnapshots: 20,
   vintedWorkerAuth: DEFAULT_VINTED_WORKER_AUTH,
+  ebayAuth: DEFAULT_EBAY_AUTH,
 };
 
 export interface BulkEditWardrobePayload {
@@ -180,6 +205,7 @@ export interface WardrobeItem {
   notes?: string;
   vintedUrl?: string;
   retailerName?: string;
+  targetStoreUrl?: string;
   orderNumber?: string;
   // Vinted & Acquisition Metadata
   seller?: string;
@@ -302,6 +328,7 @@ export interface SaleItem {
   soldDate?: string; // YYYY-MM-DD
   buyerUsername?: string;
   orderNumber?: string;
+  externalId?: string;
   trackingNumber?: string;
   courier?: 'Evri' | 'Royal Mail' | 'DPD' | 'InPost' | 'Yodel' | 'Other';
   platformFees?: number; // in £

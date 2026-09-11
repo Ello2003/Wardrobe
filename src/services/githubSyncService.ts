@@ -53,6 +53,46 @@ export function stripEmbeddedImages<T>(value: T): T {
   return value;
 }
 
+/**
+ * Encodes a string to Base64 safely supporting full UTF-8 (emojis, currency signs, diacritics)
+ * without exceeding JavaScript stack limits on large strings.
+ */
+export function safeUtf8ToBase64(str: string): string {
+  try {
+    const encoder = new TextEncoder();
+    const bytes = encoder.encode(str);
+    let binary = '';
+    const len = bytes.byteLength;
+    const chunkSize = 8192;
+    for (let i = 0; i < len; i += chunkSize) {
+      const chunk = bytes.subarray(i, Math.min(i + chunkSize, len));
+      binary += String.fromCharCode.apply(null, Array.from(chunk));
+    }
+    return btoa(binary);
+  } catch {
+    return btoa(unescape(encodeURIComponent(str)));
+  }
+}
+
+/**
+ * Decodes a Base64 string to a UTF-8 string safely handling non-ASCII and large strings.
+ */
+export function safeBase64DecodeUtf8(base64: string): string {
+  const clean = base64.replace(/\s/g, '');
+  if (!clean) return '';
+  try {
+    const binary = atob(clean);
+    const len = binary.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return new TextDecoder('utf-8').decode(bytes);
+  } catch {
+    return decodeURIComponent(escape(atob(clean)));
+  }
+}
+
 const STORAGE_KEY = 'wardrobe_github_sync_config_v1';
 
 export function loadGithubSyncConfig(): GithubSyncConfig {
@@ -211,12 +251,8 @@ export async function pushDatabaseToGithub(
     const shouldStrip = config.stripImages !== false;
     const sanitizedPayload = shouldStrip ? stripEmbeddedImages(databasePayload) : databasePayload;
     const jsonString = JSON.stringify(sanitizedPayload, null, 2);
-    // Use UTF-8 safe base64 encoding
-    const base64Content = btoa(
-      encodeURIComponent(jsonString).replace(/%([0-9A-F]{2})/g, (_, p1) =>
-        String.fromCharCode(parseInt(p1, 16))
-      )
-    );
+    // Use UTF-8 and memory-safe base64 encoding
+    const base64Content = safeUtf8ToBase64(jsonString);
 
     const timestampStr = new Date().toISOString();
     const commitMessage =
@@ -269,7 +305,9 @@ export async function pushDatabaseToGithub(
 }
 
 /**
- * Pulls the latest backup from the configured GitHub repository
+ * Pulls the latest backup from the configured GitHub repository.
+ * Robust against GitHub's 1MB API limit, empty content responses,
+ * and base64 parsing EOF truncations.
  */
 export async function pullDatabaseFromGithub(
   config: GithubSyncConfig
@@ -289,38 +327,142 @@ export async function pullDatabaseFromGithub(
   const cleanBranch = branch.trim() || 'main';
   const cleanPath = filePath.trim().replace(/^\//, '') || 'wardrobe-backup.json';
 
-  try {
-    const getFileUrl = `https://api.github.com/repos/${cleanRepo}/contents/${cleanPath}?ref=${encodeURIComponent(cleanBranch)}`;
-    const res = await fetch(getFileUrl, {
-      headers: {
-        Authorization: `Bearer ${token.trim()}`,
-        Accept: 'application/vnd.github.v3+json',
-      },
-    });
+  const authHeader = `Bearer ${token.trim()}`;
+  const getFileUrl = `https://api.github.com/repos/${cleanRepo}/contents/${cleanPath}?ref=${encodeURIComponent(cleanBranch)}`;
 
-    if (!res.ok) {
-      if (res.status === 404) {
-        return { success: false, message: `Backup file "${cleanPath}" was not found on branch "${cleanBranch}".` };
+  try {
+    let rawJsonText: string | null = null;
+    let fileSha: string | undefined = undefined;
+
+    // Strategy 1: Direct Raw Contents Fetch (application/vnd.github.v3.raw)
+    // This allows downloading raw file contents up to 100MB directly without base64 truncation or 1MB limits.
+    try {
+      const rawRes = await fetch(getFileUrl, {
+        headers: {
+          Authorization: authHeader,
+          Accept: 'application/vnd.github.v3.raw',
+        },
+      });
+
+      if (rawRes.ok) {
+        const text = await rawRes.text();
+        if (text && text.trim().length > 0) {
+          rawJsonText = text;
+          fileSha = rawRes.headers.get('etag')?.replace(/"/g, '') || undefined;
+        }
+      } else if (rawRes.status === 404) {
+        return {
+          success: false,
+          message: `Backup file "${cleanPath}" was not found on branch "${cleanBranch}" of repository "${cleanRepo}".`,
+        };
       }
-      return { success: false, message: `Failed to pull file from GitHub: HTTP ${res.status}` };
+    } catch (rawErr) {
+      console.warn('Direct raw fetch from GitHub contents API encountered an issue, trying metadata API fallback:', rawErr);
     }
 
-    const fileMeta = await res.json();
-    const base64Content = (fileMeta.content || '').replace(/\s/g, '');
+    // Strategy 2: Contents Metadata API + Git Blobs API fallback (handles >1MB files where contents.content is empty)
+    if (!rawJsonText) {
+      const metaRes = await fetch(getFileUrl, {
+        headers: {
+          Authorization: authHeader,
+          Accept: 'application/vnd.github.v3+json',
+        },
+      });
 
-    // Decode UTF-8 Base64
-    const decodedStr = decodeURIComponent(
-      Array.prototype.map
-        .call(atob(base64Content), (c: string) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
-        .join('')
-    );
+      if (!metaRes.ok) {
+        if (metaRes.status === 404) {
+          return {
+            success: false,
+            message: `Backup file "${cleanPath}" was not found on branch "${cleanBranch}" of repository "${cleanRepo}".`,
+          };
+        }
+        return { success: false, message: `Failed to pull file from GitHub: HTTP ${metaRes.status}` };
+      }
 
-    const parsedData = JSON.parse(decodedStr);
+      const fileMeta = await metaRes.json();
+      fileSha = fileMeta.sha;
+
+      // If content is embedded directly in file metadata (< 1MB)
+      if (fileMeta.content && typeof fileMeta.content === 'string' && fileMeta.content.trim().length > 0) {
+        rawJsonText = safeBase64DecodeUtf8(fileMeta.content);
+      }
+      // If content is empty because file >= 1MB, fetch from Git Blobs API (supports up to 100MB)
+      else if (fileMeta.sha) {
+        const blobUrl = `https://api.github.com/repos/${cleanRepo}/git/blobs/${fileMeta.sha}`;
+
+        // Try raw blob first
+        const rawBlobRes = await fetch(blobUrl, {
+          headers: {
+            Authorization: authHeader,
+            Accept: 'application/vnd.github.v3.raw',
+          },
+        });
+
+        if (rawBlobRes.ok) {
+          const blobText = await rawBlobRes.text();
+          if (blobText && blobText.trim().length > 0) {
+            rawJsonText = blobText;
+          }
+        }
+
+        // Try JSON blob (contains base64 content up to 100MB)
+        if (!rawJsonText) {
+          const jsonBlobRes = await fetch(blobUrl, {
+            headers: {
+              Authorization: authHeader,
+              Accept: 'application/vnd.github.v3+json',
+            },
+          });
+          if (jsonBlobRes.ok) {
+            const blobMeta = await jsonBlobRes.json();
+            if (blobMeta.content) {
+              rawJsonText = safeBase64DecodeUtf8(blobMeta.content);
+            }
+          }
+        }
+
+        // Try download_url as third fallback
+        if (!rawJsonText && fileMeta.download_url) {
+          const dlRes = await fetch(fileMeta.download_url, {
+            headers: {
+              Authorization: authHeader,
+            },
+          });
+          if (dlRes.ok) {
+            const dlText = await dlRes.text();
+            if (dlText && dlText.trim().length > 0) {
+              rawJsonText = dlText;
+            }
+          }
+        }
+      }
+    }
+
+    // Explicit check for empty content to prevent "JSON Parse error: Unexpected EOF"
+    if (!rawJsonText || rawJsonText.trim().length === 0) {
+      return {
+        success: false,
+        message: `Backup file "${cleanPath}" exists on GitHub but contains 0 bytes (empty content). Please verify your GitHub repository or commit a fresh sync.`,
+      };
+    }
+
+    // Safely parse JSON with rich diagnostic reporting
+    let parsedData: any;
+    try {
+      parsedData = JSON.parse(rawJsonText);
+    } catch (parseErr: any) {
+      console.error('Failed to parse pulled GitHub JSON:', parseErr, rawJsonText.slice(0, 200));
+      return {
+        success: false,
+        message: `GitHub backup file "${cleanPath}" is incomplete or corrupted: ${parseErr?.message || 'JSON Parse error: Unexpected EOF'}. Ensure the repository file has valid JSON.`,
+      };
+    }
+
     return {
       success: true,
-      message: `Successfully fetched backup from GitHub (${cleanRepo}/${cleanPath}).`,
+      message: `Successfully fetched and decoded backup from GitHub (${cleanRepo}/${cleanPath}).`,
       data: parsedData,
-      sha: fileMeta.sha,
+      sha: fileSha,
     };
   } catch (err: any) {
     console.error('GitHub pull error:', err);

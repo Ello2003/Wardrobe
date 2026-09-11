@@ -74,6 +74,7 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
     moveWardrobeItemToSales,
     moveWardrobeItemToShopping,
     moveMultipleWardrobeItems,
+    formatCurrency,
   } = useWardrobe();
 
   // Load Inventory Display Settings from LocalStorage
@@ -1820,24 +1821,75 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
                       </p>
                     )}
 
-                    {/* Vinted Link / Order Details */}
-                    {displaySettings.showVintedDetails && (item.vintedUrl || item.orderNumber) && (
-                      <div className="text-[10px] font-mono text-[#007782] flex items-center gap-1">
-                        {item.vintedUrl ? (
-                          <a
-                            href={item.vintedUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="hover:underline flex items-center gap-0.5"
-                          >
-                            <ExternalLink className="w-2.5 h-2.5" />
-                            {item.orderNumber ? `Order #${item.orderNumber}` : 'Vinted Listing'}
-                          </a>
-                        ) : (
-                          <span>Ref: #{item.orderNumber}</span>
-                        )}
-                      </div>
-                    )}
+                    {/* Vinted Order & Resale Info (Matching Purchases card view) */}
+                    {(() => {
+                      const isVinted =
+                        Boolean(item.vintedUrl || item.orderNumber || item.seller) ||
+                        item.retailerName === 'Vinted' ||
+                        (item.tags || []).some((t) => t.toLowerCase().includes('vinted'));
+                      if (displaySettings.showVintedDetails === false || !isVinted) return null;
+
+                      return (
+                        <div className="p-2.5 bg-[#007782]/10 border border-[#007782]/30 text-[10px] font-mono space-y-1.5 rounded-xs shadow-2xs mt-1.5">
+                          <div className="flex items-center justify-between text-[#007782] font-semibold">
+                            <span className="flex items-center gap-1.5 font-bold tracking-wide">
+                              <span className="w-2 h-2 rounded-full bg-[#007782]"></span>
+                              Vinted {item.transactionType || 'Order'}
+                            </span>
+                            {item.orderStatus ? (
+                              <span className="text-[9px] font-bold px-1.5 py-0.5 bg-[#007782] text-white rounded-xs uppercase tracking-wider">
+                                {item.orderStatus}
+                              </span>
+                            ) : item.orderNumber ? (
+                              <span className="text-[9px] font-bold px-1.5 py-0.5 bg-[#007782] text-white rounded-xs font-mono">
+                                #{item.orderNumber}
+                              </span>
+                            ) : (
+                              <span className="text-[9px] px-1 py-0.2 bg-[#E0F3F3] text-[#00606A] border border-[#BCE4E6] rounded-xs">
+                                Verified
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center justify-between text-[#2D4F4F] text-[10px]">
+                            {item.seller ? (
+                              <span>
+                                Seller: <strong className="text-[#007782]">@{item.seller.replace(/^@/, '')}</strong>
+                              </span>
+                            ) : (
+                              <span className="text-[#688888]">{item.retailerName || 'Vinted listing'}</span>
+                            )}
+                            {(item.orderValue || item.purchasePrice) ? (
+                              <span>
+                                Total: <strong className="text-[#1A1A1A]">{formatCurrency(item.orderValue || item.purchasePrice)}</strong>
+                              </span>
+                            ) : null}
+                          </div>
+                          {(item.orderDate || item.lastUpdatedDate || item.size) && (
+                            <div className="text-[9px] text-[#557A7A] flex items-center justify-between pt-1 border-t border-[#007782]/15">
+                              <span>{item.orderDate ? `Ordered: ${item.orderDate}` : item.lastUpdatedDate ? `Updated: ${item.lastUpdatedDate}` : ''}</span>
+                              {item.size && <span className="font-semibold text-[#007782]">Size: {item.size}</span>}
+                            </div>
+                          )}
+                          {(item.vintedUrl || item.orderNumber) && (
+                            <div className="pt-1 border-t border-[#007782]/15 flex items-center justify-between text-[9px]">
+                              {item.vintedUrl ? (
+                                <a
+                                  href={item.vintedUrl}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="text-[#007782] hover:underline flex items-center gap-0.5 font-semibold"
+                                >
+                                  <ExternalLink className="w-2.5 h-2.5" />
+                                  {item.orderNumber ? `Order #${item.orderNumber}` : 'View Vinted Listing'}
+                                </a>
+                              ) : (
+                                <span className="text-[#557A7A]">Order Ref: #{item.orderNumber}</span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </div>
 
                   {/* Tags with Quick (x) Deletion & Quick Inline Add */}
@@ -1938,17 +1990,19 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
 
                     {displaySettings.showQuickActions !== false && (
                       <div className="flex items-center gap-1">
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            moveWardrobeItemToSales(item.id);
-                          }}
-                          className="p-1 text-[#007782] hover:text-white border border-[#007782]/30 hover:bg-[#007782] transition-colors cursor-pointer"
-                          title="List garment for Resale / Sales"
-                        >
-                          <Tag className="w-3 h-3" />
-                        </button>
+                        {displaySettings.showResaleOption !== false && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              moveWardrobeItemToSales(item.id);
+                            }}
+                            className="p-1 text-[#007782] hover:text-white border border-[#007782]/30 hover:bg-[#007782] transition-colors cursor-pointer"
+                            title="List garment for Resale / Sales"
+                          >
+                            <Tag className="w-3 h-3" />
+                          </button>
+                        )}
                         <button
                           type="button"
                           onClick={(e) => {

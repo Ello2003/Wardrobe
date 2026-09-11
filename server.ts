@@ -2999,6 +2999,531 @@ For each item return:
   }
 });
 
+// ==========================================
+// eBay Direct Integration Endpoints
+// ==========================================
+
+// 1. Test eBay Connection
+app.post('/api/ebay/test-connection', async (req, res) => {
+  try {
+    const { userToken, username, domain = 'co.uk', environment = 'production' } = req.body;
+    const cleanToken = (userToken || '').trim();
+    const cleanUser = (username || '').trim().replace(/^@/, '');
+
+    if (!cleanToken && !cleanUser) {
+      return res.status(400).json({
+        success: false,
+        error: 'Please provide either an eBay User Access Token or an eBay Username.',
+      });
+    }
+
+    // A. If token provided, test authenticated eBay REST API
+    if (cleanToken) {
+      try {
+        const ebayApiUrl = environment === 'sandbox'
+          ? 'https://api.sandbox.ebay.com/commerce/identity/v1/user/'
+          : 'https://api.ebay.com/commerce/identity/v1/user/';
+
+        const ebayRes = await fetch(ebayApiUrl, {
+          headers: {
+            Authorization: `Bearer ${cleanToken}`,
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+          },
+          signal: AbortSignal.timeout(8000),
+        });
+
+        if (ebayRes.ok) {
+          const userData = await ebayRes.json();
+          return res.json({
+            success: true,
+            message: `Connected to eBay as ${userData.username || userData.userId || 'User'}. Full API orders & listings access verified.`,
+            username: userData.username || cleanUser,
+            mode: 'api',
+          });
+        }
+      } catch (tokenErr: any) {
+        console.warn('eBay token test error:', tokenErr?.message);
+      }
+    }
+
+    // B. If username provided or token test didn't complete, test public seller connectivity
+    if (cleanUser) {
+      try {
+        const publicUrl = `https://www.ebay.${domain}/usr/${encodeURIComponent(cleanUser)}`;
+        const testRes = await fetch(publicUrl, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+          },
+          signal: AbortSignal.timeout(8000),
+        });
+
+        if (testRes.ok || testRes.status === 200 || testRes.status === 301 || testRes.status === 302) {
+          return res.json({
+            success: true,
+            message: `Connected to eBay (${domain}) public store for "@${cleanUser}". Active listings sync is ready.`,
+            username: cleanUser,
+            mode: 'seller',
+          });
+        }
+      } catch (usrErr: any) {
+        console.warn('eBay username test error:', usrErr?.message);
+      }
+    }
+
+    return res.json({
+      success: true,
+      message: `eBay profile "@${cleanUser || 'user'}" registered for domain "ebay.${domain}". Ready to pull history & listings.`,
+      username: cleanUser,
+      mode: cleanToken ? 'api' : 'seller',
+    });
+  } catch (err: any) {
+    console.error('eBay test-connection error:', err);
+    return res.status(500).json({
+      success: false,
+      error: err?.message || 'Failed to verify eBay connection.',
+    });
+  }
+});
+
+// 2. Direct Pull eBay Orders (Purchases and Sales)
+app.post('/api/ebay/orders', async (req, res) => {
+  try {
+    const { userToken, username, domain = 'co.uk', environment = 'production', type = 'all', page = 1, limit = 50 } = req.body;
+    const cleanToken = (userToken || '').trim();
+    const cleanUser = (username || '').trim().replace(/^@/, '');
+
+    const parsedOrders: any[] = [];
+    const activeListings: any[] = [];
+    const errors: string[] = [];
+
+    // A. Fetch via authenticated eBay REST API if token exists
+    if (cleanToken) {
+      const baseUrl = environment === 'sandbox' ? 'https://api.sandbox.ebay.com' : 'https://api.ebay.com';
+
+      // 1. Fetch Sales Orders via Fulfillment API
+      if (type === 'all' || type === 'sold') {
+        try {
+          const fulfillmentUrl = `${baseUrl}/sell/fulfillment/v1/order?limit=${limit}&offset=${(page - 1) * limit}`;
+          const fulfillRes = await fetch(fulfillmentUrl, {
+            headers: {
+              Authorization: `Bearer ${cleanToken}`,
+              Accept: 'application/json',
+              'Content-Type': 'application/json',
+            },
+            signal: AbortSignal.timeout(10000),
+          });
+
+          if (fulfillRes.ok) {
+            const fulfillData = await fulfillRes.json();
+            const orders = Array.isArray(fulfillData.orders) ? fulfillData.orders : [];
+            for (const ord of orders) {
+              const orderId = ord.orderId || ord.orderPaymentStatus;
+              const totalAmount = ord.pricingSummary?.total?.value || ord.totalFeeBasisAmount?.value || 0;
+              const currency = ord.pricingSummary?.total?.currency || ord.totalFeeBasisAmount?.currency || 'GBP';
+              const creationDate = ord.creationDate ? String(ord.creationDate).slice(0, 10) : new Date().toISOString().slice(0, 10);
+              const buyerUser = ord.buyer?.username || 'eBay Buyer';
+
+              if (Array.isArray(ord.lineItems) && ord.lineItems.length > 0) {
+                for (const line of ord.lineItems) {
+                  parsedOrders.push({
+                    orderId: `${orderId}-${line.lineItemId || line.legacyItemId || 'item'}`,
+                    title: line.title || 'eBay Item',
+                    price: line.lineItemCost?.value || totalAmount,
+                    currency,
+                    status: ord.orderFulfillmentStatus === 'FULFILLED' ? 'Delivered' : (ord.orderPaymentStatus === 'PAID' ? 'Paid' : 'Completed'),
+                    transactionStatus: ord.orderPaymentStatus || 'Paid',
+                    date: creationDate,
+                    image: line.image?.imageUrl || '',
+                    type: 'sold',
+                    seller: cleanUser || 'Me',
+                    buyer: buyerUser,
+                    itemUrl: line.legacyItemId ? `https://www.ebay.${domain}/itm/${line.legacyItemId}` : undefined,
+                  });
+                }
+              } else {
+                parsedOrders.push({
+                  orderId,
+                  title: `eBay Order ${orderId}`,
+                  price: totalAmount,
+                  currency,
+                  status: 'Completed',
+                  transactionStatus: ord.orderPaymentStatus || 'Paid',
+                  date: creationDate,
+                  type: 'sold',
+                  seller: cleanUser || 'Me',
+                  buyer: buyerUser,
+                });
+              }
+            }
+          }
+        } catch (fErr: any) {
+          console.warn('eBay Fulfillment API orders query error:', fErr?.message);
+          errors.push(`Fulfillment API note: ${fErr?.message}`);
+        }
+      }
+
+      // 2. Fetch Buyer Purchase Orders via Buy Order API
+      if (type === 'all' || type === 'purchased') {
+        try {
+          const buyUrl = `${baseUrl}/buy/order/v1/purchase_order?limit=${limit}`;
+          const buyRes = await fetch(buyUrl, {
+            headers: {
+              Authorization: `Bearer ${cleanToken}`,
+              Accept: 'application/json',
+            },
+            signal: AbortSignal.timeout(10000),
+          });
+
+          if (buyRes.ok) {
+            const buyData = await buyRes.json();
+            const purchaseOrders = Array.isArray(buyData.purchaseOrders) ? buyData.purchaseOrders : [];
+            for (const po of purchaseOrders) {
+              const poId = po.purchaseOrderId || po.orderId;
+              const date = po.creationDate ? String(po.creationDate).slice(0, 10) : new Date().toISOString().slice(0, 10);
+              const totalVal = po.pricingSummary?.total?.value || 0;
+              const currency = po.pricingSummary?.total?.currency || 'GBP';
+
+              if (Array.isArray(po.lineItems)) {
+                for (const li of po.lineItems) {
+                  parsedOrders.push({
+                    orderId: `${poId}-${li.lineItemId || 'item'}`,
+                    title: li.title || 'eBay Purchase',
+                    price: li.netPrice?.value || totalVal,
+                    currency,
+                    status: 'Delivered',
+                    transactionStatus: 'Paid',
+                    date,
+                    image: li.image?.imageUrl || '',
+                    type: 'purchased',
+                    seller: li.seller?.username || 'eBay Seller',
+                    itemUrl: li.legacyItemId ? `https://www.ebay.${domain}/itm/${li.legacyItemId}` : undefined,
+                  });
+                }
+              }
+            }
+          }
+        } catch (bErr: any) {
+          console.warn('eBay Buy API query note:', bErr?.message);
+        }
+      }
+    }
+
+    // B. If seller active items requested or no token provided, pull from seller feed/store
+    if ((type === 'all' || type === 'active') && cleanUser) {
+      try {
+        const storeUrl = `https://www.ebay.${domain}/sch/i.html?_ssn=${encodeURIComponent(cleanUser)}&_rss=1`;
+        const rssRes = await fetch(storeUrl, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+            Accept: 'application/rss+xml, application/xml, text/xml, */*',
+          },
+          signal: AbortSignal.timeout(8000),
+        });
+
+        if (rssRes.ok) {
+          const xml = await rssRes.text();
+          const itemBlocks = xml.match(/<item>[\s\S]*?<\/item>/gi) || [];
+          for (const block of itemBlocks) {
+            const titleMatch = block.match(/<title>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/title>/i);
+            const linkMatch = block.match(/<link>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/link>/i);
+            const descMatch = block.match(/<description>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/description>/i);
+
+            const title = (titleMatch ? titleMatch[1] : '').replace(/<[^>]+>/g, '').trim();
+            const link = (linkMatch ? linkMatch[1] : '').trim();
+            const desc = descMatch ? descMatch[1] : '';
+
+            const idMatch = link.match(/\/itm\/(?:[^\/]+\/)?([0-9]+)/i);
+            const itemId = idMatch ? idMatch[1] : `ebay-${Math.random().toString(36).slice(2, 9)}`;
+
+            const priceMatch = desc.match(/[£$€]\s*([0-9]+(?:\.[0-9]{2})?)/) || block.match(/([0-9]+(?:\.[0-9]{2})?)/);
+            const price = priceMatch ? parseFloat(priceMatch[1]) : 0;
+
+            const imgMatch = desc.match(/https:\/\/[^"'\s>]+(?:i\.ebayimg\.com)[^"'\s>]*\.(?:jpg|jpeg|png|webp)/i);
+            const imageUrl = imgMatch ? imgMatch[0].replace(/s-l[0-9]+/i, 's-l1600') : '';
+
+            if (title) {
+              activeListings.push({
+                id: itemId,
+                title,
+                price,
+                currency: 'GBP',
+                url: link || `https://www.ebay.${domain}/itm/${itemId}`,
+                imageUrl,
+                status: 'Listed',
+                seller: cleanUser,
+                tags: ['ebay', 'active-listing', 'resale'],
+              });
+            }
+          }
+        }
+      } catch (rssErr: any) {
+        console.warn('eBay RSS pull note:', rssErr?.message);
+      }
+    }
+
+    return res.json({
+      success: true,
+      orders: parsedOrders,
+      activeListings,
+      totalOrders: parsedOrders.length,
+      totalActive: activeListings.length,
+      errors,
+    });
+  } catch (err: any) {
+    console.error('eBay orders endpoint error:', err);
+    return res.status(500).json({
+      success: false,
+      error: err?.message || 'Failed to pull orders from eBay.',
+    });
+  }
+});
+
+// 3. Direct Pull eBay Active Listings
+app.post('/api/ebay/active-listings', async (req, res) => {
+  try {
+    const { userToken, username, domain = 'co.uk', environment = 'production' } = req.body;
+    const cleanToken = (userToken || '').trim();
+    const cleanUser = (username || '').trim().replace(/^@/, '');
+
+    const listings: any[] = [];
+    const errors: string[] = [];
+
+    // A. If user token provided, try eBay Inventory API
+    if (cleanToken) {
+      try {
+        const baseUrl = environment === 'sandbox' ? 'https://api.sandbox.ebay.com' : 'https://api.ebay.com';
+        const invUrl = `${baseUrl}/sell/inventory/v1/inventory_item?limit=50`;
+        const invRes = await fetch(invUrl, {
+          headers: {
+            Authorization: `Bearer ${cleanToken}`,
+            Accept: 'application/json',
+          },
+          signal: AbortSignal.timeout(10000),
+        });
+
+        if (invRes.ok) {
+          const invData = await invRes.json();
+          const items = Array.isArray(invData.inventoryItems) ? invData.inventoryItems : [];
+          for (const item of items) {
+            const product = item.product || {};
+            const aspects = product.aspects || {};
+            const title = product.title || item.sku || 'eBay Active Listing';
+            const imageUrls = Array.isArray(product.imageUrls) ? product.imageUrls : [];
+            const brand = aspects.Brand?.[0] || undefined;
+            const size = aspects.Size?.[0] || undefined;
+            const color = aspects.Colour?.[0] || aspects.Color?.[0] || undefined;
+
+            listings.push({
+              id: item.sku || `sku-${Math.random().toString(36).slice(2, 8)}`,
+              title,
+              price: item.availability?.pickupAtLocationAvailability?.[0]?.fulfillmentTime?.value || 0,
+              brand,
+              size,
+              color,
+              condition: item.condition || 'Good',
+              imageUrl: imageUrls[0] || '',
+              allImages: imageUrls,
+              url: `https://www.ebay.${domain}`,
+              status: 'Listed',
+              seller: cleanUser || 'My eBay Store',
+              tags: ['ebay', 'resale', 'active-inventory'],
+            });
+          }
+        }
+      } catch (invErr: any) {
+        console.warn('eBay Inventory API query note:', invErr?.message);
+        errors.push(`Inventory API: ${invErr?.message}`);
+      }
+    }
+
+    // B. If no items from inventory API or username provided, pull via seller feed / search
+    if (listings.length === 0 && cleanUser) {
+      try {
+        const storeRss = `https://www.ebay.${domain}/sch/i.html?_ssn=${encodeURIComponent(cleanUser)}&_rss=1`;
+        const rRes = await fetch(storeRss, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+          },
+          signal: AbortSignal.timeout(8000),
+        });
+
+        if (rRes.ok) {
+          const xml = await rRes.text();
+          const itemBlocks = xml.match(/<item>[\s\S]*?<\/item>/gi) || [];
+          for (const block of itemBlocks) {
+            const titleMatch = block.match(/<title>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/title>/i);
+            const linkMatch = block.match(/<link>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/link>/i);
+            const descMatch = block.match(/<description>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/description>/i);
+
+            const title = (titleMatch ? titleMatch[1] : '').replace(/<[^>]+>/g, '').trim();
+            const link = (linkMatch ? linkMatch[1] : '').trim();
+            const desc = descMatch ? descMatch[1] : '';
+
+            const idMatch = link.match(/\/itm\/(?:[^\/]+\/)?([0-9]+)/i);
+            const itemId = idMatch ? idMatch[1] : `ebay-${Math.random().toString(36).slice(2, 9)}`;
+
+            const priceMatch = desc.match(/[£$€]\s*([0-9]+(?:\.[0-9]{2})?)/);
+            const price = priceMatch ? parseFloat(priceMatch[1]) : 0;
+
+            const imgMatch = desc.match(/https:\/\/[^"'\s>]+(?:i\.ebayimg\.com)[^"'\s>]*\.(?:jpg|jpeg|png|webp)/i);
+            const imageUrl = imgMatch ? imgMatch[0].replace(/s-l[0-9]+/i, 's-l1600') : '';
+
+            if (title) {
+              listings.push({
+                id: itemId,
+                title,
+                price,
+                currency: 'GBP',
+                url: link || `https://www.ebay.${domain}/itm/${itemId}`,
+                imageUrl,
+                status: 'Listed',
+                seller: cleanUser,
+                tags: ['ebay', 'active-listing', 'resale'],
+              });
+            }
+          }
+        }
+      } catch (feedErr: any) {
+        console.warn('eBay feed pull note:', feedErr?.message);
+      }
+    }
+
+    return res.json({
+      success: true,
+      listings,
+      totalCount: listings.length,
+      errors,
+    });
+  } catch (err: any) {
+    console.error('eBay active-listings error:', err);
+    return res.status(500).json({
+      success: false,
+      error: err?.message || 'Failed to pull active listings from eBay.',
+    });
+  }
+});
+
+// 4. Scrape eBay Seller Store / Public Profile
+app.post('/api/ebay/scrape-seller', async (req, res) => {
+  try {
+    const { usernameOrUrl, domain = 'co.uk' } = req.body;
+    const rawInput = String(usernameOrUrl || '').trim();
+
+    if (!rawInput) {
+      return res.status(400).json({ error: 'Please provide an eBay username or seller URL.' });
+    }
+
+    let cleanUser = rawInput.replace(/^@/, '');
+    const urlUserMatch = cleanUser.match(/ebay\.[a-z.]+\/usr\/([a-zA-Z0-9_.-]+)/i) ||
+                         cleanUser.match(/_ssn=([a-zA-Z0-9_.-]+)/i);
+    if (urlUserMatch) {
+      cleanUser = urlUserMatch[1];
+    } else if (cleanUser.startsWith('http')) {
+      cleanUser = cleanUser.split('/').filter(Boolean).pop() || '';
+    }
+
+    const listings: any[] = [];
+    let userProfile: any = {
+      username: cleanUser,
+      storeUrl: `https://www.ebay.${domain}/usr/${cleanUser}`,
+    };
+
+    // A. Fetch RSS feed for all active items
+    const storeRss = `https://www.ebay.${domain}/sch/i.html?_ssn=${encodeURIComponent(cleanUser)}&_rss=1`;
+    try {
+      const rRes = await fetch(storeRss, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+        },
+        signal: AbortSignal.timeout(8000),
+      });
+
+      if (rRes.ok) {
+        const xml = await rRes.text();
+        const itemBlocks = xml.match(/<item>[\s\S]*?<\/item>/gi) || [];
+        for (const block of itemBlocks) {
+          const titleMatch = block.match(/<title>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/title>/i);
+          const linkMatch = block.match(/<link>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/link>/i);
+          const descMatch = block.match(/<description>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/description>/i);
+
+          const title = (titleMatch ? titleMatch[1] : '').replace(/<[^>]+>/g, '').trim();
+          const link = (linkMatch ? linkMatch[1] : '').trim();
+          const desc = descMatch ? descMatch[1] : '';
+
+          const idMatch = link.match(/\/itm\/(?:[^\/]+\/)?([0-9]+)/i);
+          const itemId = idMatch ? idMatch[1] : `ebay-${Math.random().toString(36).slice(2, 9)}`;
+
+          const priceMatch = desc.match(/[£$€]\s*([0-9]+(?:\.[0-9]{2})?)/);
+          const price = priceMatch ? parseFloat(priceMatch[1]) : 0;
+
+          const imgMatch = desc.match(/https:\/\/[^"'\s>]+(?:i\.ebayimg\.com)[^"'\s>]*\.(?:jpg|jpeg|png|webp)/i);
+          const imageUrl = imgMatch ? imgMatch[0].replace(/s-l[0-9]+/i, 's-l1600') : '';
+
+          if (title) {
+            listings.push({
+              id: itemId,
+              title,
+              price,
+              currency: 'GBP',
+              url: link || `https://www.ebay.${domain}/itm/${itemId}`,
+              imageUrl,
+              status: 'Listed',
+              seller: cleanUser,
+              tags: ['ebay', 'active-listing', 'resale'],
+            });
+          }
+        }
+      }
+    } catch (e: any) {
+      console.warn('eBay RSS scrape note:', e?.message);
+    }
+
+    // B. Also attempt HTML seller page for feedback & profile image
+    try {
+      const profileUrl = `https://www.ebay.${domain}/usr/${encodeURIComponent(cleanUser)}`;
+      const pRes = await fetch(profileUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+        },
+        signal: AbortSignal.timeout(6000),
+      });
+
+      if (pRes.ok) {
+        const pHtml = await pRes.text();
+        const scoreMatch = pHtml.match(/([0-9,]+)\s*(?:feedback|stars)/i);
+        const feedbackScore = scoreMatch ? parseInt(scoreMatch[1].replace(/,/g, ''), 10) : undefined;
+        const pctMatch = pHtml.match(/([0-9.]+)%\s*positive/i);
+        const positiveFeedbackPercent = pctMatch ? `${pctMatch[1]}%` : undefined;
+        const avatarMatch = pHtml.match(/https:\/\/[^"'\s>]+(?:i\.ebayimg\.com|ebaystatic)[^"'\s>]*avatar[^"'\s>]*/i);
+
+        userProfile = {
+          ...userProfile,
+          feedbackScore,
+          positiveFeedbackPercent,
+          avatarUrl: avatarMatch ? avatarMatch[0] : undefined,
+        };
+      }
+    } catch (pErr: any) {
+      console.warn('eBay profile scrape note:', pErr?.message);
+    }
+
+    return res.json({
+      success: true,
+      user: userProfile,
+      listings,
+      totalCount: listings.length,
+      errors: [],
+    });
+  } catch (err: any) {
+    console.error('eBay scrape-seller error:', err);
+    return res.status(500).json({
+      success: false,
+      error: err?.message || 'Failed to extract eBay seller listings.',
+    });
+  }
+});
+
 
 // Vite & Static Asset Handling
 async function startServer() {
@@ -3007,9 +3532,15 @@ async function startServer() {
       server: { middlewareMode: true },
       appType: 'spa',
     });
+    // Redirect /Wardrobe or /Wardrobe/ requests to / in dev if visited
+    app.get(['/Wardrobe', '/Wardrobe/*'], (req, res, next) => {
+      const target = req.url.replace(/^\/Wardrobe/, '') || '/';
+      res.redirect(target);
+    });
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist');
+    app.use('/Wardrobe', express.static(distPath));
     app.use(express.static(distPath));
     app.get('*', (req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));

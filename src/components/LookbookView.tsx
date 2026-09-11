@@ -11,6 +11,7 @@ import {
 import { useWardrobe } from '../context/WardrobeContext';
 import { LookbookOutfit, WardrobeItem } from '../types';
 import { GarmentImage } from './GarmentImage';
+import { safeApiFetch } from '../utils/apiHelper';
 
 interface LookbookViewProps {
   onOpenCreateLook: () => void;
@@ -73,9 +74,8 @@ export const LookbookView: React.FC<LookbookViewProps> = ({
       setIsGeneratingAI(true);
       setAiError(null);
 
-      const res = await fetch('/api/gemini/generate-outfits', {
+      const res = await safeApiFetch('/api/gemini/generate-outfits', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           wardrobeItems: items,
           occasion: selectedOccasion === 'All' ? 'Smart Casual' : selectedOccasion,
@@ -84,14 +84,12 @@ export const LookbookView: React.FC<LookbookViewProps> = ({
         }),
       });
 
-      if (!res.ok) {
-        const errorData = await res.json().catch(() => ({}));
-        throw new Error(errorData.error || 'Server returned an error.');
+      if (!res.success) {
+        throw new Error(res.error || 'Server returned an error.');
       }
 
-      const data = await res.json();
-      if (data.outfits && Array.isArray(data.outfits)) {
-        setAiGeneratedOutfits(data.outfits);
+      if (res.data?.outfits && Array.isArray(res.data.outfits)) {
+        setAiGeneratedOutfits(res.data.outfits);
       }
     } catch (err: any) {
       console.error('Failed to generate AI outfits', err);

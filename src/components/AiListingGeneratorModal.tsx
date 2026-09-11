@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { SaleItem, SellingPlatform } from '../types';
 import { useWardrobe } from '../context/WardrobeContext';
+import { safeApiFetch } from '../utils/apiHelper';
 
 interface AiListingGeneratorModalProps {
   isOpen: boolean;
@@ -65,10 +66,9 @@ export const AiListingGeneratorModal: React.FC<AiListingGeneratorModalProps> = (
     setIsGenerating(true);
 
     try {
-      // Attempt backend Gemini endpoint
-      const res = await fetch('/api/gemini/generate-listing', {
+      // Attempt backend Gemini endpoint (or external API if configured)
+      const res = await safeApiFetch('/api/gemini/generate-listing', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           item,
           platform: targetPlatform,
@@ -77,8 +77,8 @@ export const AiListingGeneratorModal: React.FC<AiListingGeneratorModalProps> = (
         }),
       });
 
-      if (res.ok) {
-        const data = await res.json();
+      if (res.success && res.data) {
+        const data = res.data;
         setGeneratedTitle(data.title);
         setGeneratedDescription(data.description);
         setSuggestedTags(data.tags || []);

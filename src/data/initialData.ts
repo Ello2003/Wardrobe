@@ -1,6 +1,7 @@
 import { WardrobeItem, LookbookOutfit, ShoppingItem, SaleItem, VersionChangeLog, WardrobeSnapshot, TrendInspiration } from '../types';
+import backupPayload from '../../wardrobe-database-backup.json';
 
-export const INITIAL_WARDROBE_ITEMS: WardrobeItem[] = [
+const DEFAULT_WARDROBE_ITEMS: WardrobeItem[] = [
   {
     id: 'item-1',
     name: 'Classic Beaufort Waxed Jacket',
@@ -390,7 +391,13 @@ export const INITIAL_LOOKBOOK_OUTFITS: LookbookOutfit[] = [
   }
 ];
 
-export const INITIAL_SHOPPING_LIST: ShoppingItem[] = [
+export const INITIAL_WARDROBE_ITEMS: WardrobeItem[] = (
+  backupPayload?.data?.items && backupPayload.data.items.length > 0
+    ? (backupPayload.data.items as unknown as WardrobeItem[])
+    : DEFAULT_WARDROBE_ITEMS
+);
+
+const DEFAULT_SHOPPING_LIST: ShoppingItem[] = [
   {
     id: 'shop-1',
     name: 'Double-Breasted Wool Trench Coat',
@@ -469,7 +476,13 @@ export const INITIAL_SHOPPING_LIST: ShoppingItem[] = [
   }
 ];
 
-export const INITIAL_SALE_ITEMS: SaleItem[] = [
+export const INITIAL_SHOPPING_LIST: ShoppingItem[] = (
+  backupPayload?.data?.shoppingList && backupPayload.data.shoppingList.length > 0
+    ? (backupPayload.data.shoppingList as unknown as ShoppingItem[])
+    : DEFAULT_SHOPPING_LIST
+);
+
+const DEFAULT_SALE_ITEMS: SaleItem[] = [
   {
     id: 'sale-1',
     name: 'Heavy Cotton Drill Overshirt',
@@ -623,6 +636,12 @@ export const INITIAL_SALE_ITEMS: SaleItem[] = [
     updatedAt: '2026-08-26T16:00:00Z',
   }
 ];
+
+export const INITIAL_SALE_ITEMS: SaleItem[] = (
+  backupPayload?.data?.saleItems && backupPayload.data.saleItems.length > 0
+    ? (backupPayload.data.saleItems as unknown as SaleItem[])
+    : DEFAULT_SALE_ITEMS
+);
 
 export const INITIAL_VERSION_LOGS: VersionChangeLog[] = [
   {

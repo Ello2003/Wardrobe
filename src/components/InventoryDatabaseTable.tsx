@@ -27,6 +27,7 @@ import {
   Flame,
   ShoppingBag,
   PoundSterling,
+  Tag,
 } from 'lucide-react';
 
 interface InventoryDatabaseTableProps {
@@ -925,14 +926,14 @@ export const InventoryDatabaseTable: React.FC<InventoryDatabaseTableProps> = ({
                     className={`${densityPadding} text-right`}
                   >
                     <div className="flex items-center justify-end gap-1">
-                      {onSellItem && (
+                      {onSellItem && tableSettings.showResaleOption !== false && (
                         <button
                           type="button"
                           onClick={() => onSellItem(item)}
-                          className="p-1 rounded text-[#767670] hover:text-[#8C7355] hover:bg-[#F2F1ED] cursor-pointer"
+                          className="p-1 rounded text-[#007782] hover:text-white hover:bg-[#007782] transition-colors cursor-pointer"
                           title="List for Resale / Selling"
                         >
-                          <ShoppingBag className="w-3.5 h-3.5" />
+                          <Tag className="w-3.5 h-3.5" />
                         </button>
                       )}
                       <button
