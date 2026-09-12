@@ -60,7 +60,24 @@ export interface AppSettings {
   maxAutoSnapshots: number; // max auto checkpoints kept (default 20)
   vintedWorkerAuth?: VintedWorkerAuth;
   ebayAuth?: EbayAuth;
+  googleDriveSettings?: GoogleDriveSettings;
 }
+
+export interface GoogleDriveSettings {
+  autoBackupEnabled?: boolean;
+  backupFolderId?: string;
+  backupFolderName?: string;
+  lastBackupTime?: string;
+  autoBackupIntervalHours?: number; // e.g. 12, 24, 48 hours
+  syncPhotosToDrive?: boolean;
+}
+
+export const DEFAULT_GOOGLE_DRIVE_SETTINGS: GoogleDriveSettings = {
+  autoBackupEnabled: false,
+  backupFolderName: 'Wardrobe & Style Studio Backups',
+  autoBackupIntervalHours: 24,
+  syncPhotosToDrive: true,
+};
 
 export interface EbayAuth {
   userToken?: string; // eBay OAuth Bearer / User Token
@@ -131,6 +148,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   maxAutoSnapshots: 20,
   vintedWorkerAuth: DEFAULT_VINTED_WORKER_AUTH,
   ebayAuth: DEFAULT_EBAY_AUTH,
+  googleDriveSettings: DEFAULT_GOOGLE_DRIVE_SETTINGS,
 };
 
 export interface BulkEditWardrobePayload {
@@ -465,4 +483,53 @@ export interface TrendInspiration {
   colorPalette: { name: string; hex: string }[];
   styleTips: string[];
   coverImageUrl: string;
+}
+
+export interface EditorialFeedSource {
+  id: string;
+  name: string;
+  tagline: string;
+  siteUrl: string;
+  feedUrl: string;
+  brandBadge: string;
+  brandColor: string;
+  enabled: boolean;
+  isCustom?: boolean;
+  category?: string;
+  logoLetter?: string;
+}
+
+export interface EditorialArticle {
+  id: string;
+  title: string;
+  sourceId: string;
+  sourceName: string;
+  brandBadge: string;
+  brandColor: string;
+  siteUrl: string;
+  articleUrl: string;
+  author?: string;
+  publishedAt: string; // ISO 8601 string
+  summary: string;
+  contentSnippet?: string;
+  imageUrl?: string;
+  tags: string[];
+  readTimeMinutes?: number;
+  isSaved?: boolean;
+  stylingNotes?: string;
+  suggestedGarments?: {
+    name: string;
+    category: Category;
+    estimatedPriceGbp: number;
+    reason: string;
+  }[];
+}
+
+export interface EditorialFeedSettings {
+  activeSourceIds: string[];
+  customSources: EditorialFeedSource[];
+  savedArticleIds: string[];
+  autoRefreshMinutes: number;
+  lastRefreshedAt?: string;
+  defaultViewMode: 'magazine' | 'compact' | 'editorial-split';
 }

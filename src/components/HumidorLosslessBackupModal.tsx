@@ -28,7 +28,19 @@ import {
   FileJson,
   Layers,
   Sparkles,
+  Cloud,
+  ExternalLink,
 } from 'lucide-react';
+import {
+  signInWithGoogleDrive,
+  getDriveAccessToken,
+  findOrCreateAppFolder,
+  uploadLosslessBackupToDrive,
+  uploadCsvToDrive,
+  listDriveBackups,
+  downloadDriveFileContent,
+  DriveFileItem,
+} from '../services/googleDriveService';
 
 interface HumidorLosslessBackupModalProps {
   onNotify: (type: 'success' | 'info' | 'error', message: string) => void;
@@ -60,6 +72,13 @@ export const HumidorLosslessBackupModal: React.FC<HumidorLosslessBackupModalProp
   const [diffSummary, setDiffSummary] = useState<BackupDiffSummary | null>(null);
   const [healthReport, setHealthReport] = useState<DatabaseHealthReport | null>(null);
   const [isRepairing, setIsRepairing] = useState(false);
+
+  // Google Drive state
+  const [isSavingToDrive, setIsSavingToDrive] = useState(false);
+  const [isLoadingDriveList, setIsLoadingDriveList] = useState(false);
+  const [driveBackups, setDriveBackups] = useState<DriveFileItem[]>([]);
+  const [showDrivePicker, setShowDrivePicker] = useState(false);
+  const [isExportingCsvToDrive, setIsExportingCsvToDrive] = useState(false);
 
   // Format currency helper
   const formatGbp = (val: number) => {
@@ -95,6 +114,120 @@ export const HumidorLosslessBackupModal: React.FC<HumidorLosslessBackupModalProp
     URL.revokeObjectURL(url);
 
     onNotify('success', 'Lossless Humidor database archive exported with SHA integrity check!');
+  };
+
+  // Google Drive: Save Lossless JSON to Drive
+  const handleSaveToGoogleDrive = async () => {
+    setIsSavingToDrive(true);
+    try {
+      let token = getDriveAccessToken();
+      if (!token) {
+        const authRes = await signInWithGoogleDrive();
+        token = authRes.accessToken;
+      }
+      const folder = await findOrCreateAppFolder('Wardrobe & Style Studio Backups', token);
+      const backup = createLosslessBackup({
+        items,
+        outfits,
+        shoppingList,
+        saleItems,
+        snapshots,
+        changeLogs,
+        categories,
+        monthlyBudget,
+      });
+
+      const uploaded = await uploadLosslessBackupToDrive(backup, folder.id, undefined, token);
+      onNotify(
+        'success',
+        `Lossless backup saved to Google Drive folder "${folder.name}" (${items.length} garments, £${formatGbp(
+          backup.metadata?.totalValuationGbp || 0
+        )})!`
+      );
+    } catch (err: any) {
+      console.error('Error saving to Google Drive:', err);
+      onNotify('error', err.message || 'Could not save backup to Google Drive.');
+    } finally {
+      setIsSavingToDrive(false);
+    }
+  };
+
+  // Google Drive: Open picker to browse existing backups
+  const handleOpenDrivePicker = async () => {
+    setIsLoadingDriveList(true);
+    setShowDrivePicker(true);
+    try {
+      let token = getDriveAccessToken();
+      if (!token) {
+        const authRes = await signInWithGoogleDrive();
+        token = authRes.accessToken;
+      }
+      const folder = await findOrCreateAppFolder('Wardrobe & Style Studio Backups', token);
+      const files = await listDriveBackups(folder.id, token);
+      setDriveBackups(files.filter((f) => f.isWardrobeBackup));
+    } catch (err: any) {
+      console.error('Error loading Drive backups:', err);
+      onNotify('error', err.message || 'Could not load Google Drive backups.');
+    } finally {
+      setIsLoadingDriveList(false);
+    }
+  };
+
+  // Google Drive: Select a backup file to import
+  const handleSelectDriveFile = async (file: DriveFileItem) => {
+    try {
+      const content = await downloadDriveFileContent(file.id);
+      setImportedJson(content);
+      const validation = validateLosslessBackup(content);
+      setValidationResult(validation);
+
+      if (validation.valid && validation.payload) {
+        const currentData = createLosslessBackup({
+          items,
+          outfits,
+          shoppingList,
+          saleItems,
+          snapshots,
+          changeLogs,
+          categories,
+          monthlyBudget,
+        });
+        const diff = compareLosslessBackups(currentData, validation.payload);
+        setDiffSummary(diff);
+      } else {
+        setDiffSummary(null);
+      }
+      setShowDrivePicker(false);
+      onNotify('info', `Loaded backup "${file.name}" from Google Drive.`);
+    } catch (err: any) {
+      console.error('Error loading file from Drive:', err);
+      onNotify('error', err.message || 'Failed to download backup from Google Drive.');
+    }
+  };
+
+  // Google Drive: Export CSVs to Drive
+  const handleExportAllCsvsToDrive = async () => {
+    setIsExportingCsvToDrive(true);
+    try {
+      let token = getDriveAccessToken();
+      if (!token) {
+        const authRes = await signInWithGoogleDrive();
+        token = authRes.accessToken;
+      }
+      const folder = await findOrCreateAppFolder('Wardrobe & Style Studio Backups', token);
+      const today = new Date().toISOString().slice(0, 10);
+
+      await uploadCsvToDrive(`Wardrobe_Inventory_${today}.csv`, exportWardrobeToCsv(items), folder.id, token);
+      await uploadCsvToDrive(`Resale_Archive_${today}.csv`, exportSalesToCsv(saleItems), folder.id, token);
+      await uploadCsvToDrive(`Wishlist_Pipeline_${today}.csv`, exportShoppingToCsv(shoppingList), folder.id, token);
+
+      onNotify('success', 'Exported 3 CSV spreadsheets directly to Google Drive folder!');
+    } catch (err: any) {
+      console.error('Error exporting CSVs to Drive:', err);
+      onNotify('error', err.message || 'Failed to export CSVs to Google Drive.');
+    } finally {
+      setIsExportingCsvToDrive(false);
+    }
   };
 
   // 2. Handle File Input for Lossless Import
@@ -309,14 +442,27 @@ export const HumidorLosslessBackupModal: React.FC<HumidorLosslessBackupModalProp
                 </p>
               </div>
 
-              <button
-                type="button"
-                onClick={handleDownloadLosslessJson}
-                className="flex items-center gap-2 px-4 py-2.5 bg-[#8C7355] hover:bg-[#786248] text-white text-xs font-semibold shadow-xs cursor-pointer transition shrink-0"
-              >
-                <Download className="w-4 h-4" />
-                <span>Download Lossless JSON</span>
-              </button>
+              <div className="flex items-center gap-2 flex-wrap shrink-0">
+                <button
+                  type="button"
+                  onClick={handleSaveToGoogleDrive}
+                  disabled={isSavingToDrive}
+                  className="flex items-center gap-2 px-3.5 py-2.5 bg-white hover:bg-[#FAF9F5] text-[#1A1A1A] border border-[#CCCCCC] hover:border-[#4285F4] text-xs font-semibold shadow-2xs cursor-pointer transition"
+                  title="Upload this complete lossless JSON archive directly to your Google Drive folder"
+                >
+                  <Cloud className="w-4 h-4 text-[#4285F4]" />
+                  <span>{isSavingToDrive ? 'Saving to Drive…' : 'Save to Google Drive'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleDownloadLosslessJson}
+                  className="flex items-center gap-2 px-4 py-2.5 bg-[#8C7355] hover:bg-[#786248] text-white text-xs font-semibold shadow-xs cursor-pointer transition"
+                >
+                  <Download className="w-4 h-4" />
+                  <span>Download Lossless JSON</span>
+                </button>
+              </div>
             </div>
 
             {/* Current Vault Statistics */}
@@ -371,6 +517,72 @@ export const HumidorLosslessBackupModal: React.FC<HumidorLosslessBackupModalProp
                 onChange={handleFileChange}
                 className="hidden"
               />
+            </div>
+
+            {/* Google Drive Direct Loader */}
+            <div className="pt-2">
+              <div className="flex items-center justify-between p-3 bg-[#FAF9F5] border border-[#E5E5E1]">
+                <div className="flex items-center gap-2">
+                  <Cloud className="w-4 h-4 text-[#4285F4]" />
+                  <span className="text-xs font-mono font-bold text-[#1A1A1A]">
+                    Load Directly from Google Drive
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleOpenDrivePicker}
+                  disabled={isLoadingDriveList}
+                  className="px-3 py-1.5 bg-white hover:bg-[#F2F1ED] border border-[#CCCCCC] hover:border-[#4285F4] text-xs font-mono font-medium text-[#1A1A1A] flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                >
+                  <RefreshCw className={`w-3 h-3 ${isLoadingDriveList ? 'animate-spin' : ''}`} />
+                  <span>{isLoadingDriveList ? 'Fetching Drive Backups…' : 'Browse Google Drive Backups'}</span>
+                </button>
+              </div>
+
+              {/* Expandable Drive Backups Dropdown */}
+              {showDrivePicker && (
+                <div className="mt-2 p-3 bg-white border border-[#E5E5E1] shadow-xs space-y-2 text-xs font-mono">
+                  <div className="flex items-center justify-between pb-1 border-b border-[#E5E5E1]">
+                    <span className="text-[#767670] font-bold">Select a Google Drive Backup:</span>
+                    <button
+                      type="button"
+                      onClick={() => setShowDrivePicker(false)}
+                      className="text-[#767670] hover:text-[#1A1A1A]"
+                    >
+                      Close
+                    </button>
+                  </div>
+
+                  {driveBackups.length === 0 ? (
+                    <div className="py-4 text-center text-[#767670]">
+                      No wardrobe backup files found in your Google Drive folder yet.
+                    </div>
+                  ) : (
+                    <div className="divide-y divide-[#F0EFEB] max-h-56 overflow-y-auto">
+                      {driveBackups.map((f) => (
+                        <div
+                          key={f.id}
+                          className="py-2 px-1 flex items-center justify-between hover:bg-[#FAF9F5] transition-colors"
+                        >
+                          <div>
+                            <div className="font-bold text-[#1A1A1A]">{f.name}</div>
+                            <div className="text-[10px] text-[#767670]">
+                              Modified {new Date(f.modifiedTime).toLocaleDateString()} • {f.itemCount ? `${f.itemCount} items` : ''}
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleSelectDriveFile(f)}
+                            className="px-2.5 py-1 bg-[#1A1A1A] hover:bg-[#333] text-white text-[11px] font-bold cursor-pointer"
+                          >
+                            Load This Backup
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Validation & Diff Results */}
@@ -464,14 +676,26 @@ export const HumidorLosslessBackupModal: React.FC<HumidorLosslessBackupModalProp
       {activeSubTab === 'csv' && (
         <div className="space-y-4">
           <div className="p-5 bg-white border border-[#E5E5E1] shadow-2xs space-y-4">
-            <div>
-              <h3 className="font-serif font-bold text-base text-[#1A1A1A] flex items-center gap-2">
-                <FileSpreadsheet className="w-4 h-4 text-[#8C7355]" />
-                CSV Spreadsheet Exporter
-              </h3>
-              <p className="text-xs text-[#767670] mt-1">
-                Export your wardrobe data into clean, formatted CSV spreadsheets ready for Excel, Google Sheets, or Notion.
-              </p>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h3 className="font-serif font-bold text-base text-[#1A1A1A] flex items-center gap-2">
+                  <FileSpreadsheet className="w-4 h-4 text-[#8C7355]" />
+                  CSV Spreadsheet Exporter
+                </h3>
+                <p className="text-xs text-[#767670] mt-1">
+                  Export your wardrobe data into clean, formatted CSV spreadsheets ready for Excel, Google Sheets, or Notion.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleExportAllCsvsToDrive}
+                disabled={isExportingCsvToDrive}
+                className="flex items-center gap-2 px-3.5 py-2 bg-white hover:bg-[#FAF9F5] text-[#1A1A1A] border border-[#CCCCCC] hover:border-[#4285F4] text-xs font-semibold shadow-2xs cursor-pointer transition shrink-0"
+              >
+                <Cloud className="w-4 h-4 text-[#4285F4]" />
+                <span>{isExportingCsvToDrive ? 'Uploading to Drive…' : 'Export 3 CSVs to Google Drive'}</span>
+              </button>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">

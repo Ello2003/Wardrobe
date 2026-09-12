@@ -7,7 +7,7 @@ import { LookbookView } from './components/LookbookView';
 import { ShoppingView } from './components/ShoppingView';
 import { SellingView } from './components/SellingView';
 import { AnalyticsChartsView } from './components/AnalyticsChartsView';
-import { TrendResearchView } from './components/TrendResearchView';
+import { EditorialFeedView } from './components/EditorialFeedView';
 import { ToolsView } from './components/ToolsView';
 import { ItemDetailModal } from './components/ItemDetailModal';
 import { ItemFormModal } from './components/ItemFormModal';
@@ -151,7 +151,7 @@ const MainAppContent: React.FC = () => {
 
         {activeTab === 'analytics' && <AnalyticsChartsView onOpenAddItem={() => openItemForm()} />}
 
-        {activeTab === 'trends' && <TrendResearchView onOpenAIStylist={() => setIsAIStylistOpen(true)} />}
+        {activeTab === 'trends' && <EditorialFeedView onOpenAIStylist={() => setIsAIStylistOpen(true)} />}
 
         {(activeTab === 'tools' || activeTab === 'history') && (
           <ToolsView
@@ -257,7 +257,7 @@ const MainAppContent: React.FC = () => {
 export default function App() {
   return (
     <ErrorBoundary
-      fallbackTitle="Wardrobe & Lookbook Studio Recovery"
+      fallbackTitle="Wardrobe & Style Studio Recovery"
       onClose={() => {
         try {
           localStorage.clear();

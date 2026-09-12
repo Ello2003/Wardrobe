@@ -20,10 +20,12 @@ import {
   GitCommit,
   Layers,
   FileSpreadsheet,
+  Cloud,
 } from 'lucide-react';
 import { useWardrobe } from '../context/WardrobeContext';
 import { ChangeActionType, VersionChangeLog } from '../types';
 import { safeConfirm } from '../utils/safeConfirm';
+import { GoogleDriveSyncPanel } from './GoogleDriveSyncPanel';
 import { GithubSyncPanel } from './GithubSyncPanel';
 import { HumidorLosslessBackupModal } from './HumidorLosslessBackupModal';
 import { VersionIterationsLog } from './VersionIterationsLog';
@@ -55,7 +57,7 @@ export const VersionHistoryView: React.FC<VersionHistoryViewProps> = ({
     clearDatabase,
   } = useWardrobe();
 
-  const [activeTab, setActiveTab] = useState<'timeline' | 'snapshots' | 'backup' | 'github' | 'releases'>('timeline');
+  const [activeTab, setActiveTab] = useState<'timeline' | 'snapshots' | 'backup' | 'googledrive' | 'github' | 'releases'>('timeline');
   const [filterAction, setFilterAction] = useState<string>('ALL');
   const [snapshotTypeFilter, setSnapshotTypeFilter] = useState<'all' | 'manual' | 'auto'>('all');
   const [restoringSnapId, setRestoringSnapId] = useState<string | null>(null);
@@ -386,6 +388,18 @@ export const VersionHistoryView: React.FC<VersionHistoryViewProps> = ({
         >
           <Download className="w-3.5 h-3.5" />
           Lossless Backup Suite
+        </button>
+
+        <button
+          onClick={() => setActiveTab('googledrive')}
+          className={`pb-2.5 font-semibold flex items-center gap-1.5 transition-colors border-b-2 cursor-pointer whitespace-nowrap ${
+            activeTab === 'googledrive'
+              ? 'border-[#4285F4] text-[#4285F4]'
+              : 'border-transparent text-[#767670] hover:text-[#1A1A1A]'
+          }`}
+        >
+          <Cloud className="w-3.5 h-3.5 text-[#4285F4]" />
+          Google Drive Vault
         </button>
 
         <button
@@ -795,6 +809,16 @@ export const VersionHistoryView: React.FC<VersionHistoryViewProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* TAB 3: GOOGLE DRIVE CLOUD VAULT */}
+      {activeTab === 'googledrive' && (
+        <GoogleDriveSyncPanel
+          onNotify={(type, message) => {
+            setStatusNotification({ type, message });
+            setTimeout(() => setStatusNotification(null), 6000);
+          }}
+        />
       )}
 
       {/* TAB 4: AUTOMATIC GITHUB CLOUD SYNC */}

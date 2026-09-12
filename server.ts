@@ -1,8 +1,9 @@
 import express from 'express';
 import path from 'path';
 import dotenv from 'dotenv';
+import Parser from 'rss-parser';
 import { GoogleGenAI, Type } from '@google/genai';
-import { extractAllGarmentAttributes } from './src/utils/garmentAttributeExtractor';
+import { extractAllGarmentAttributes } from './src/utils/garmentAttributeExtractor.ts';
 
 dotenv.config();
 
@@ -3714,6 +3715,327 @@ app.post('/api/ebay/scrape-seller', async (req, res) => {
   }
 });
 
+// ==========================================
+// EDITORIAL & SARTORIAL BRAND FEEDS ENDPOINTS
+// ==========================================
+
+const rssParser = new Parser({
+  timeout: 6000,
+  headers: {
+    'User-Agent':
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 (WardrobeStyleStudio-EditorialBot/1.0)',
+    Accept: 'application/rss+xml, application/atom+xml, application/xml, text/xml, */*',
+  },
+  customFields: {
+    item: [
+      ['media:content', 'mediaContent'],
+      ['content:encoded', 'contentEncoded'],
+      ['dc:creator', 'creator'],
+    ],
+  },
+});
+
+function stripHtmlTags(html: string): string {
+  if (!html) return '';
+  return html
+    .replace(/<script[^>]*>([\S\s]*?)<\/script>/gim, '')
+    .replace(/<style[^>]*>([\S\s]*?)<\/style>/gim, '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#8217;/g, "'")
+    .replace(/&#8216;/g, "'")
+    .replace(/&#8220;/g, '"')
+    .replace(/&#8221;/g, '"')
+    .replace(/&#8211;/g, '–')
+    .replace(/&#8212;/g, '—')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function extractRssImage(item: any): string | undefined {
+  if (item.enclosure?.url) {
+    return item.enclosure.url;
+  }
+  if (item.mediaContent?.$?.url) {
+    return item.mediaContent.$.url;
+  }
+  if (item['media:content']?.$?.url) {
+    return item['media:content'].$.url;
+  }
+  const htmlToSearch = item.contentEncoded || item.content || item.summary || item.description || '';
+  const imgMatch = htmlToSearch.match(/<img[^>]+src=["'](https?:\/\/[^"']+)["']/i);
+  if (imgMatch && imgMatch[1]) {
+    return imgMatch[1];
+  }
+  return undefined;
+}
+
+// Brand Fallback Imagery & Metadata
+const BRAND_METADATA_MAP: Record<string, {
+  name: string;
+  brandBadge: string;
+  brandColor: string;
+  siteUrl: string;
+  defaultImages: string[];
+}> = {
+  drakes: {
+    name: "Drake's",
+    brandBadge: "DRAKE'S LONDON",
+    brandColor: '#2D3E33',
+    siteUrl: 'https://www.drakes.com',
+    defaultImages: [
+      'https://images.unsplash.com/photo-1507679799987-c73779587ccf?auto=format&fit=crop&w=1200&q=80',
+      'https://images.unsplash.com/photo-1589756823695-278bc923f962?auto=format&fit=crop&w=1200&q=80',
+    ],
+  },
+  suitsupply: {
+    name: 'Suitsupply',
+    brandBadge: 'SUITSUPPLY',
+    brandColor: '#1A1A1A',
+    siteUrl: 'https://suitsupply.com',
+    defaultImages: [
+      'https://images.unsplash.com/photo-1544441893-675973e31985?auto=format&fit=crop&w=1200&q=80',
+      'https://images.unsplash.com/photo-1617137984095-74e4e5e3613f?auto=format&fit=crop&w=1200&q=80',
+    ],
+  },
+  'the-rake': {
+    name: 'The Rake',
+    brandBadge: 'THE RAKE',
+    brandColor: '#841B1B',
+    siteUrl: 'https://therake.com',
+    defaultImages: [
+      'https://images.unsplash.com/photo-1593032465175-481ac7f401a0?auto=format&fit=crop&w=1200&q=80',
+      'https://images.unsplash.com/photo-1598808503746-f34c53b9323e?auto=format&fit=crop&w=1200&q=80',
+    ],
+  },
+  'permanent-style': {
+    name: 'Permanent Style',
+    brandBadge: 'PERMANENT STYLE',
+    brandColor: '#8C7355',
+    siteUrl: 'https://www.permanentstyle.com',
+    defaultImages: [
+      'https://images.unsplash.com/photo-1594938298603-c8148c4dae35?auto=format&fit=crop&w=1200&q=80',
+      'https://images.unsplash.com/photo-1533867617858-e7b97e060509?auto=format&fit=crop&w=1200&q=80',
+    ],
+  },
+  'die-workwear': {
+    name: 'Die, Workwear!',
+    brandBadge: 'DIE, WORKWEAR!',
+    brandColor: '#204060',
+    siteUrl: 'https://dieworkwear.com',
+    defaultImages: [
+      'https://images.unsplash.com/photo-1617137984095-74e4e5e3613f?auto=format&fit=crop&w=1200&q=80',
+    ],
+  },
+  'put-this-on': {
+    name: 'Put This On',
+    brandBadge: 'PUT THIS ON',
+    brandColor: '#536551',
+    siteUrl: 'https://putthison.com',
+    defaultImages: [
+      'https://images.unsplash.com/photo-1589756823695-278bc923f962?auto=format&fit=crop&w=1200&q=80',
+    ],
+  },
+};
+
+const DEFAULT_FEED_URLS: Record<string, string> = {
+  'permanent-style': 'https://www.permanentstyle.com/feed',
+  'the-rake': 'https://therake.com/stories/rss',
+  'die-workwear': 'https://dieworkwear.com/feed/',
+  'put-this-on': 'https://putthison.com/feed/',
+  drakes: 'https://www.drakes.com/blogs/open.atom',
+};
+
+// GET /api/editorial-feeds - Aggregates brand feeds in parallel
+app.get('/api/editorial-feeds', async (req, res) => {
+  try {
+    const sourcesParam = (req.query.sources as string) || 'drakes,suitsupply,the-rake,permanent-style,die-workwear';
+    const requestedSources = sourcesParam.split(',').map((s) => s.trim().toLowerCase());
+
+    let customSourcesList: any[] = [];
+    if (req.query.customSources) {
+      try {
+        customSourcesList = JSON.parse(req.query.customSources as string);
+      } catch (e) {
+        console.warn('Could not parse customSources query:', e);
+      }
+    }
+
+    const aggregatedArticles: any[] = [];
+
+    // Fetch in parallel with Promise.allSettled
+    const fetchPromises = requestedSources.map(async (sourceId) => {
+      // Check if it's a custom user feed
+      const customSource = customSourcesList.find((c: any) => c.id === sourceId);
+      const feedUrl = customSource ? customSource.feedUrl : DEFAULT_FEED_URLS[sourceId];
+      const brandMeta = customSource
+        ? {
+            name: customSource.name,
+            brandBadge: customSource.brandBadge || customSource.name.toUpperCase(),
+            brandColor: customSource.brandColor || '#8C7355',
+            siteUrl: customSource.siteUrl || '',
+            defaultImages: ['https://images.unsplash.com/photo-1507679799987-c73779587ccf?auto=format&fit=crop&w=1200&q=80'],
+          }
+        : BRAND_METADATA_MAP[sourceId] || {
+            name: sourceId,
+            brandBadge: sourceId.toUpperCase(),
+            brandColor: '#8C7355',
+            siteUrl: '',
+            defaultImages: ['https://images.unsplash.com/photo-1507679799987-c73779587ccf?auto=format&fit=crop&w=1200&q=80'],
+          };
+
+      if (!feedUrl) {
+        return [];
+      }
+
+      try {
+        // Fetch raw feed XML with timeout
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 6500);
+
+        const response = await fetch(feedUrl, {
+          signal: controller.signal,
+          headers: {
+            'User-Agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 (WardrobeStyleStudio-EditorialBot/1.0)',
+            Accept: 'application/rss+xml, application/atom+xml, application/xml, text/xml, */*',
+          },
+        });
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status} from ${feedUrl}`);
+        }
+
+        const xmlText = await response.text();
+        const feed = await rssParser.parseString(xmlText);
+
+        const items = (feed.items || []).slice(0, 8).map((rawItem, idx) => {
+          const item = rawItem as any;
+          const rawSummary = item.contentSnippet || item.content || item.summary || item.description || '';
+          const cleanedSummary = stripHtmlTags(rawSummary).slice(0, 320);
+          const words = cleanedSummary.split(/\s+/).length;
+          const readTime = Math.max(2, Math.round(words / 40) || 4);
+          const extractedImg = extractRssImage(item);
+          const fallbackImg = brandMeta.defaultImages[idx % brandMeta.defaultImages.length];
+
+          const pubDate = item.isoDate || item.pubDate || new Date(Date.now() - idx * 3600000 * 8).toISOString();
+
+          return {
+            id: `${sourceId}-${item.guid || item.link || idx}`,
+            title: item.title?.trim() || 'Untitled Editorial',
+            sourceId,
+            sourceName: brandMeta.name,
+            brandBadge: brandMeta.brandBadge,
+            brandColor: brandMeta.brandColor,
+            siteUrl: brandMeta.siteUrl,
+            articleUrl: item.link || brandMeta.siteUrl,
+            author: item.creator || item.author || brandMeta.name,
+            publishedAt: pubDate,
+            summary: cleanedSummary,
+            imageUrl: extractedImg || fallbackImg,
+            tags: item.categories && item.categories.length > 0 ? item.categories.slice(0, 3) : ['Tailoring', 'Editorial', brandMeta.name],
+            readTimeMinutes: readTime,
+          };
+        });
+
+        return items;
+      } catch (err: any) {
+        console.warn(`Feed fetch failed for ${sourceId} (${feedUrl}):`, err?.message);
+        return [];
+      }
+    });
+
+    const results = await Promise.allSettled(fetchPromises);
+    results.forEach((res) => {
+      if (res.status === 'fulfilled' && Array.isArray(res.value)) {
+        aggregatedArticles.push(...res.value);
+      }
+    });
+
+    // If no articles returned or specific key brands missing (e.g. Suitsupply which doesn't have standard open RSS),
+    // import the curated fallback articles from editorialFeedService
+    const { CURATED_EDITORIAL_ARTICLES } = await import('./src/services/editorialFeedService');
+    const existingSourceIds = new Set(aggregatedArticles.map((a) => a.sourceId));
+
+    requestedSources.forEach((src) => {
+      if (!existingSourceIds.has(src)) {
+        const fallbacks = CURATED_EDITORIAL_ARTICLES.filter((a) => a.sourceId === src);
+        aggregatedArticles.push(...fallbacks);
+      }
+    });
+
+    // Sort all articles by publishedAt descending
+    aggregatedArticles.sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime());
+
+    return res.json({
+      success: true,
+      articles: aggregatedArticles,
+      totalCount: aggregatedArticles.length,
+      lastUpdated: new Date().toISOString(),
+    });
+  } catch (err: any) {
+    console.error('Editorial feeds aggregation error:', err);
+    return res.status(500).json({
+      success: false,
+      error: err?.message || 'Failed to aggregate editorial feeds.',
+    });
+  }
+});
+
+// POST /api/editorial-feeds/test - Validates a custom user RSS/Atom feed
+app.post('/api/editorial-feeds/test', async (req, res) => {
+  try {
+    const { url } = req.body;
+    if (!url || typeof url !== 'string') {
+      return res.status(400).json({ valid: false, error: 'Valid RSS feed URL is required.' });
+    }
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 6000);
+
+    const response = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 (WardrobeStyleStudio-EditorialBot/1.0)',
+        Accept: 'application/rss+xml, application/atom+xml, application/xml, text/xml, */*',
+      },
+    });
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      return res.status(response.status).json({
+        valid: false,
+        error: `Remote server returned HTTP ${response.status} (${response.statusText})`,
+      });
+    }
+
+    const xml = await response.text();
+    const feed = await rssParser.parseString(xml);
+
+    return res.json({
+      valid: true,
+      title: feed.title || 'Untitled Feed',
+      description: feed.description || '',
+      itemCount: feed.items?.length || 0,
+      link: feed.link || url,
+      sampleItems: (feed.items || []).slice(0, 3).map((item) => ({
+        title: item.title,
+        link: item.link,
+        pubDate: item.pubDate || item.isoDate,
+      })),
+    });
+  } catch (err: any) {
+    return res.status(400).json({
+      valid: false,
+      error: err?.message || 'Failed to parse RSS XML feed from provided URL.',
+    });
+  }
+});
+
 
 // Vite & Static Asset Handling
 async function startServer() {
@@ -3739,7 +4061,7 @@ async function startServer() {
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Wardrobe & Lookbook Studio server running on http://localhost:${PORT}`);
+    console.log(`Wardrobe & Style Studio server running on http://localhost:${PORT}`);
   });
 }
 

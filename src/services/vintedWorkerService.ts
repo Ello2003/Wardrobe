@@ -18,6 +18,7 @@ export interface VintedOrder {
   material?: string;
   fabric?: string;
   size?: string;
+  category?: string;
   description?: string;
   user?: { login?: string; username?: string };
   seller_username?: string;
@@ -273,6 +274,7 @@ export const fetchAllVintedOrders = async (
               color: l.color,
               material: l.material,
               size: l.size,
+              category: l.category,
               description: l.description,
             });
           });

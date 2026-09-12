@@ -3984,7 +3984,14 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             : parseFloat(String(order.price || '0').replace(/[^0-9.]/g, '')) || 0;
         const rawDate = order.date ? String(order.date).slice(0, 10) : now.slice(0, 10);
         const orderTitle = (order.title || 'Vinted Order').trim();
-        const inferredCategory = normalizeCategoryName(inferCategoryFromTitle(orderTitle), categories);
+        // Active listings carry real brand/colour/category/size from the account scrape;
+        // sold/purchased orders come from Vinted's private orders API, which doesn't
+        // return that detail, so those fall back to a heuristic title-based guess.
+        const inferredCategory = order.category
+          ? normalizeCategoryName(order.category, categories)
+          : normalizeCategoryName(inferCategoryFromTitle(orderTitle), categories);
+        const inferredBrand = order.brand || 'Vinted';
+        const inferredColor = order.color || order.colour || 'Various';
 
         if (order.type === 'sold' || (order.type as any) === 'active' || order.status === 'Listed') {
           if (skipDuplicates && orderId && existingSaleOrderIds.has(orderId)) {
@@ -4008,8 +4015,10 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           const saleItem: SaleItem = {
             id: generateUniqueId('sale'),
             name: orderTitle,
-            brand: 'Vinted',
+            brand: inferredBrand,
             category: inferredCategory,
+            size: order.size || undefined,
+            color: order.color || order.colour || undefined,
             condition: 'Good',
             originalPricePaid: 0,
             listingPrice: orderPrice,
@@ -4057,7 +4066,7 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             const shopItem: ShoppingItem = {
               id: generateUniqueId('shop'),
               name: orderTitle,
-              brand: 'Vinted',
+              brand: inferredBrand,
               category: inferredCategory,
               estimatedPrice: orderPrice,
               actualPricePaid: orderPrice,
@@ -4096,9 +4105,9 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             const wItem: WardrobeItem = {
               id: generateUniqueId('item'),
               name: orderTitle,
-              brand: 'Vinted',
+              brand: inferredBrand,
               category: inferredCategory,
-              color: 'Various',
+              color: inferredColor,
               season: ['All-Season'],
               purchasePrice: orderPrice,
               purchaseDate: rawDate,
@@ -4771,7 +4780,7 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     );
 
     const exportPayload = {
-      app: 'Wardrobe & Lookbook Studio',
+      app: 'Wardrobe & Style Studio',
       currency: 'GBP (£)',
       exportedAt: new Date().toISOString(),
       schemaVersion: '2.4.0',

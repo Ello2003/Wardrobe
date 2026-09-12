@@ -2,6 +2,7 @@ import {
   BarChart3,
   History,
   Layers,
+  Newspaper,
   Plus,
   PoundSterling,
   Search,
@@ -39,7 +40,7 @@ const tabs: readonly TabItem[] = [
   { id: 'selling', label: 'Selling', icon: PoundSterling, countKey: 'saleItems' },
   { id: 'analytics', label: 'Analytics', icon: BarChart3 },
   { id: 'lookbook', label: 'Lookbook', icon: Layers, countKey: 'outfits' },
-  { id: 'trends', label: 'Trends', icon: Sparkles },
+  { id: 'trends', label: 'Editorials', icon: Newspaper },
   { id: 'tools', label: 'Tools', icon: Wrench },
 ];
 

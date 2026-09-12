@@ -9,6 +9,7 @@ import {
 } from '../services/githubSyncService';
 import { useWardrobe } from '../context/WardrobeContext';
 import { createLosslessBackup, validateLosslessBackup } from '../services/losslessBackupService';
+import { safeConfirm } from '../utils/safeConfirm';
 import {
   Github,
   CheckCircle2,
@@ -153,7 +154,7 @@ export const GithubSyncPanel: React.FC<GithubSyncPanelProps> = ({ onNotify }) =>
     }
 
     if (
-      !window.confirm(
+      !safeConfirm(
         'Pulling from GitHub will update your closet with the repository backup. A safety rollback snapshot will be automatically created first. Continue?'
       )
     ) {
