@@ -46,6 +46,9 @@ import {
 } from './ShoppingDisplaySettingsModal';
 import { ShoppingDatabaseTable } from './ShoppingDatabaseTable';
 import { DuplicateMergeModal } from './DuplicateMergeModal';
+import { BulkActionBar } from './common/BulkActionBar';
+import { EmptyState } from './common/EmptyState';
+import { formatGbp } from '../utils/formatters';
 
 interface ShoppingViewProps {
   onOpenAddShoppingItem: () => void;
@@ -725,15 +728,6 @@ export const ShoppingView: React.FC<ShoppingViewProps> = ({
     if (selectedCategory === catToDelete) {
       setSelectedCategory('All');
     }
-  };
-
-  const formatGbp = (val: number) => {
-    return new Intl.NumberFormat('en-GB', {
-      style: 'currency',
-      currency: 'GBP',
-      minimumFractionDigits: val % 1 === 0 ? 0 : 2,
-      maximumFractionDigits: 2,
-    }).format(val);
   };
 
   const handleSaveBudget = () => {
@@ -1681,116 +1675,54 @@ export const ShoppingView: React.FC<ShoppingViewProps> = ({
       </div>
 
       {/* Bulk Selection Action Bar */}
-      {selectedItemIds.size > 0 && (
-        <div className="bg-[#1A1A1A] text-white p-3 border border-[#333] shadow-md flex flex-wrap items-center justify-between gap-3 animate-fadeIn">
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={handleToggleSelectAll}
-                className={`w-4 h-4 border flex items-center justify-center cursor-pointer transition-colors ${
-                  areAllFilteredSelected
-                    ? 'bg-[#8C7355] border-[#8C7355] text-white'
-                    : areSomeFilteredSelected
-                    ? 'bg-[#8C7355]/30 border-[#8C7355] text-[#8C7355]'
-                    : 'border-[#666] bg-[#2A2A2A] hover:border-[#8C7355]'
-                }`}
-                title={areAllFilteredSelected ? 'Deselect all visible items' : 'Select all visible items'}
-                aria-label={areAllFilteredSelected ? 'Deselect all visible items' : 'Select all visible items'}
-              >
-                {areAllFilteredSelected && <Check className="w-3 h-3 stroke-[3] text-white" />}
-                {!areAllFilteredSelected && areSomeFilteredSelected && (
-                  <span className="w-2 h-0.5 bg-[#8C7355] block" />
-                )}
-              </button>
-              <span className="font-mono text-xs font-semibold">
-                {selectedItemIds.size} of {shoppingList.length} items selected
-                {filteredItems.length !== shoppingList.length && (
-                  <span className="text-[#A5A59E] font-normal"> ({filteredItems.length} matching filter)</span>
-                )}
-              </span>
-            </div>
-            <span className="text-xs text-[#A5A59E] font-mono hidden sm:inline">
-              (Estimated Total: {formatGbp(selectedTotalEstimated)})
-            </span>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={() => {
-                const ids = Array.from(selectedItemIds);
-                moveMultipleShoppingItems(ids, 'selling');
-                setSelectedItemIds(new Set());
-              }}
-              className="flex items-center gap-1.5 px-3 py-1 text-xs font-mono font-bold bg-[#007782] hover:bg-[#005E67] text-white shadow-xs cursor-pointer transition-colors"
-              title="Move selected items to Resale / Sales"
-            >
-              <Tag className="w-3.5 h-3.5" />
-              <span>To Sales / Resale ({selectedItemIds.size})</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                const ids = Array.from(selectedItemIds);
-                moveMultipleShoppingItems(ids, 'wardrobe');
-                setSelectedItemIds(new Set());
-              }}
-              className="flex items-center gap-1.5 px-3 py-1 text-xs font-mono font-bold bg-[#8C7355] hover:bg-[#735D43] text-white shadow-xs cursor-pointer transition-colors"
-              title="Move selected items to Wardrobe Inventory"
-            >
-              <FolderUp className="w-3.5 h-3.5" />
-              <span>To Wardrobe ({selectedItemIds.size})</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setIsBulkEditOpen(true)}
-              className="flex items-center gap-1.5 px-3 py-1 text-xs font-mono font-medium bg-[#3A3A38] hover:bg-[#4A4A48] text-[#E5E5E1] border border-[#555] shadow-xs cursor-pointer transition-colors"
-              title="Bulk edit category, priority, status, retailer, tags, and prices for selected wishlist items"
-            >
-              <Sliders className="w-3.5 h-3.5" />
-              <span>Bulk Edit ({selectedItemIds.size})</span>
-            </button>
-            <button
-              type="button"
-              onClick={handleClearAllSelection}
-              className="px-3 py-1 text-xs font-mono text-[#D5D5D0] hover:text-white border border-[#444] hover:border-[#666] bg-[#2A2A2A] cursor-pointer transition-colors"
-            >
-              Deselect
-            </button>
-            <button
-              type="button"
-              onClick={handleDeleteSelected}
-              className="flex items-center gap-1.5 px-3.5 py-1 text-xs font-mono font-medium bg-rose-700 hover:bg-rose-800 text-white shadow-xs cursor-pointer transition-colors"
-              title="Delete all selected items immediately"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              <span>Delete ({selectedItemIds.size})</span>
-            </button>
-          </div>
-        </div>
-      )}
+      <BulkActionBar
+        selectedCount={selectedItemIds.size}
+        totalFilteredCount={filteredItems.length}
+        totalItemCount={shoppingList.length}
+        areAllSelected={areAllFilteredSelected}
+        areSomeSelected={areSomeFilteredSelected}
+        onToggleSelectAll={handleToggleSelectAll}
+        onClearSelection={handleClearAllSelection}
+        selectedValuation={selectedTotalEstimated}
+        entityName="wishlist items"
+        onMoveToResale={() => {
+          const ids = Array.from(selectedItemIds);
+          moveMultipleShoppingItems(ids, 'selling');
+          setSelectedItemIds(new Set());
+        }}
+        onMoveToCloset={() => {
+          const ids = Array.from(selectedItemIds);
+          moveMultipleShoppingItems(ids, 'wardrobe');
+          setSelectedItemIds(new Set());
+        }}
+        onBulkEdit={() => setIsBulkEditOpen(true)}
+        onBulkDelete={handleDeleteSelected}
+      />
 
       {/* Main Content: Wishlist Items (Database Table View OR Card Grid View) */}
       {filteredItems.length === 0 ? (
-        <div className="text-center py-12 bg-white border border-[#E5E5E1] space-y-3">
-          <ShoppingBag className="w-6 h-6 text-[#8C7355] mx-auto" />
-          <h3 className="text-sm font-serif font-semibold text-[#1A1A1A]">
-            No wishlist items found
-          </h3>
-          <p className="text-xs text-[#767670] max-w-sm mx-auto">
-            Add items you are researching or auto-import them from a retailer link to plan your acquisition pipeline.
-          </p>
-          <div className="flex items-center justify-center gap-2 pt-2">
-            <button
-              onClick={onOpenAddShoppingItem}
-              className="px-3.5 py-1.5 text-xs bg-[#8C7355] hover:bg-[#735D43] text-white cursor-pointer flex items-center gap-1.5"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              Add Wishlist Item
-            </button>
-          </div>
-        </div>
+        <EmptyState
+          icon={ShoppingBag}
+          title="No wishlist items found"
+          description="Add items you are researching or auto-import them from a retailer link to plan your acquisition pipeline."
+          onResetFilters={() => {
+            handleSetPipelineTab('All');
+            handleSetSelectedTag('All');
+            handleSetSelectedStatus('All');
+            handleSetSelectedBrand('All');
+            handleSetSelectedPriority('All');
+            handleSetSelectedCategory('All');
+            setSearchQuery('');
+          }}
+          actions={[
+            {
+              label: 'Add Wishlist Item',
+              icon: Plus,
+              primary: true,
+              onClick: onOpenAddShoppingItem,
+            },
+          ]}
+        />
       ) : displaySettings.viewMode === 'database' || (displaySettings.viewMode as any) === 'table' ? (
         /* DATABASE SPREADSHEET TABLE VIEW */
         <ShoppingDatabaseTable

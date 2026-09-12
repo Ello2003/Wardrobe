@@ -17,6 +17,7 @@ import { CreateSnapshotModal } from './components/CreateSnapshotModal';
 import { AIStylistModal } from './components/AIStylistModal';
 import { SettingsModal } from './components/SettingsModal';
 import { DuplicateMergeModal } from './components/DuplicateMergeModal';
+import { GlobalSearchModal } from './components/common/GlobalSearchModal';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { WardrobeItem, LookbookOutfit, ShoppingItem } from './types';
 import { History, Undo2, X } from 'lucide-react';
@@ -42,6 +43,7 @@ const MainAppContent: React.FC = () => {
   const [isAIStylistOpen, setIsAIStylistOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isDuplicateMergeOpen, setIsDuplicateMergeOpen] = useState(false);
+  const [isGlobalSearchOpen, setIsGlobalSearchOpen] = useState(false);
 
   useEffect(() => {
     document.title = 'Wardrobe & Style Studio';
@@ -49,6 +51,13 @@ const MainAppContent: React.FC = () => {
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
+      // Ctrl+K / Cmd+K universal search shortcut
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        setIsGlobalSearchOpen((prev) => !prev);
+        return;
+      }
+
       const activeElement = document.activeElement as HTMLElement | null;
       const activeTag = activeElement?.tagName.toLowerCase();
       if (activeTag === 'input' || activeTag === 'textarea' || activeElement?.isContentEditable) return;
@@ -102,6 +111,7 @@ const MainAppContent: React.FC = () => {
         onOpenCreateSnapshot={() => setIsSnapshotModalOpen(true)}
         onOpenSettings={() => setIsSettingsOpen(true)}
         onOpenDuplicateMerge={() => setIsDuplicateMergeOpen(true)}
+        onOpenGlobalSearch={() => setIsGlobalSearchOpen(true)}
       />
 
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
@@ -204,6 +214,15 @@ const MainAppContent: React.FC = () => {
           isOpen={isDuplicateMergeOpen}
           onClose={() => setIsDuplicateMergeOpen(false)}
           initialScope="all"
+        />
+      </ErrorBoundary>
+
+      <ErrorBoundary isModal onClose={() => setIsGlobalSearchOpen(false)}>
+        <GlobalSearchModal
+          isOpen={isGlobalSearchOpen}
+          onClose={() => setIsGlobalSearchOpen(false)}
+          onSelectItem={setSelectedDetailItem}
+          onEditShoppingItem={openShoppingItemForm}
         />
       </ErrorBoundary>
 

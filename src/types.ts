@@ -220,6 +220,17 @@ export interface WardrobeItem {
   updatedAt: string;
 }
 
+export interface LookbookOutfitPiece {
+  name: string;
+  category: Category;
+  suggestedBrand?: string;
+  matchedWardrobeItemId?: string;
+  isGap?: boolean;
+  color?: string;
+  estimatedPrice?: number;
+  stylingRole?: string;
+}
+
 export interface LookbookOutfit {
   id: string;
   title: string;
@@ -230,6 +241,13 @@ export interface LookbookOutfit {
   wishlistItemIds?: string[]; // references ShoppingItem id (prospective additions)
   tags: string[];
   imageUrl?: string;
+  sourceUrl?: string; // internet research source URL (Pinterest, GQ, Vogue, Instagram, Mr Porter)
+  inspirationSource?: string; // e.g. "Pitti Uomo Street Style", "Vogue Runway FW25", "Mr Porter Editorial"
+  aesthetic?: string; // e.g. "Old Money Sartorial", "Modern Minimalist", "Quiet Luxury"
+  colorPalette?: string[]; // hex codes e.g. ['#2B2B28', '#8C7355', '#EAE8E3']
+  pieceBreakdown?: LookbookOutfitPiece[]; // decomposed garments from the photographic look
+  isEditorialIdea?: boolean; // flag indicating it's an imported research idea / cookbook recipe
+  photographicMood?: string; // e.g. "Editorial Street Style", "Studio Flatlay", "Runway Snapshot"
   isFavorite: boolean;
   timesWorn: number;
   lastWornDate?: string;

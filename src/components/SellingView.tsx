@@ -59,6 +59,8 @@ import { GarmentImage } from './GarmentImage';
 import { BulkEditModal } from './BulkEditModal';
 import { DuplicateMergeModal } from './DuplicateMergeModal';
 import { SellingDatabaseTable } from './SellingDatabaseTable';
+import { BulkActionBar } from './common/BulkActionBar';
+import { EmptyState } from './common/EmptyState';
 import {
   SellingDisplaySettingsModal,
   SellingDisplaySettings,
@@ -1175,96 +1177,31 @@ export const SellingView: React.FC = () => {
       </div>
 
       {/* Bulk Selection Action Bar */}
-      {selectedSaleIds.size > 0 && (
-        <div className="bg-[#1A1A1A] text-white p-3 border border-[#333] shadow-md flex flex-wrap items-center justify-between gap-3 animate-fadeIn">
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={handleToggleSelectAll}
-                className={`w-4 h-4 border flex items-center justify-center cursor-pointer transition-colors ${
-                  areAllSelected
-                    ? 'bg-[#8C7355] border-[#8C7355] text-white'
-                    : areSomeSelected
-                    ? 'bg-[#8C7355]/30 border-[#8C7355] text-[#8C7355]'
-                    : 'border-[#666] bg-[#2A2A2A] hover:border-[#8C7355]'
-                }`}
-                title={areAllSelected ? 'Deselect all visible items' : 'Select all visible items'}
-                aria-label={areAllSelected ? 'Deselect all visible items' : 'Select all visible items'}
-              >
-                {areAllSelected && <Check className="w-3 h-3 stroke-[3] text-white" />}
-                {!areAllSelected && areSomeSelected && (
-                  <span className="w-2 h-0.5 bg-[#8C7355] block" />
-                )}
-              </button>
-              <span className="font-mono text-xs font-semibold">
-                {selectedSaleIds.size} of {saleItems.length} listings selected
-                {filteredSales.length !== saleItems.length && (
-                  <span className="text-[#A5A59E] font-normal"> ({filteredSales.length} matching filter)</span>
-                )}
-              </span>
-            </div>
-            <span className="text-xs text-[#A5A59E] font-mono hidden sm:inline">
-              (Total Listed: {formatCurrency(selectedTotalListingPrice)})
-            </span>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={handleBulkMoveToWardrobe}
-              className="flex items-center gap-1.5 px-3 py-1 text-xs font-mono font-bold bg-[#8C7355] hover:bg-[#735D43] text-white shadow-xs cursor-pointer transition-colors"
-              title="Move selected items back to Wardrobe Inventory"
-            >
-              <Shirt className="w-3.5 h-3.5" />
-              <span>To Wardrobe ({selectedSaleIds.size})</span>
-            </button>
-            <button
-              type="button"
-              onClick={handleBulkMoveToShopping}
-              className="flex items-center gap-1.5 px-3 py-1 text-xs font-mono font-medium bg-[#3A3A38] hover:bg-[#4A4A48] text-[#E5E5E1] border border-[#555] shadow-xs cursor-pointer transition-colors"
-              title="Move selected items to Wishlist"
-            >
-              <ShoppingBag className="w-3.5 h-3.5" />
-              <span>To Wishlist ({selectedSaleIds.size})</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setIsBulkEditOpen(true)}
-              className="flex items-center gap-1.5 px-3 py-1 text-xs font-mono font-bold bg-[#8C7355] hover:bg-[#735D43] text-white shadow-xs cursor-pointer transition-colors"
-              title="Bulk edit category, platform, status, tags, and prices for selected listings"
-            >
-              <Sliders className="w-3.5 h-3.5" />
-              <span>Bulk Edit ({selectedSaleIds.size})</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setSelectedSaleIds(new Set())}
-              className="px-3 py-1 text-xs font-mono text-[#D5D5D0] hover:text-white border border-[#444] hover:border-[#666] bg-[#2A2A2A] cursor-pointer transition-colors"
-            >
-              Deselect
-            </button>
-            <button
-              type="button"
-              onClick={handleBulkDelete}
-              className="flex items-center gap-1.5 px-3 py-1 text-xs font-mono font-medium bg-rose-700 hover:bg-rose-800 text-white shadow-xs cursor-pointer transition-colors"
-              title="Delete all selected listings immediately"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              <span>Delete ({selectedSaleIds.size})</span>
-            </button>
-          </div>
-        </div>
-      )}
+      <BulkActionBar
+        selectedCount={selectedSaleIds.size}
+        totalFilteredCount={filteredSales.length}
+        totalItemCount={saleItems.length}
+        areAllSelected={areAllSelected}
+        areSomeSelected={areSomeSelected}
+        onToggleSelectAll={handleToggleSelectAll}
+        onClearSelection={() => setSelectedSaleIds(new Set())}
+        selectedValuation={selectedTotalListingPrice}
+        entityName="listings"
+        onMoveToCloset={handleBulkMoveToWardrobe}
+        onMoveToWishlist={handleBulkMoveToShopping}
+        onBulkEdit={() => setIsBulkEditOpen(true)}
+        onBulkDelete={handleBulkDelete}
+      />
 
       {/* Content View: Grid or Database Table */}
       {viewMode === 'grid' ? (
         filteredSales.length === 0 ? (
-          <div className="bg-white border border-[#E5E5E1] p-12 text-center text-[#767670]">
-            <ShoppingBag className="w-10 h-10 mx-auto text-[#A5A59E] mb-3" />
-            <p className="font-serif font-bold text-[#1A1A1A]">No sale items match your criteria</p>
-            <p className="text-xs text-[#767670] mt-1 font-mono">Try resetting filters or adding a new listing.</p>
-          </div>
+          <EmptyState
+            icon={Tag}
+            title="No sale items match your criteria"
+            description="Try resetting your filters or list items from your wardrobe to track them across Vinted, Depop, or eBay."
+            onResetFilters={handleResetAllFilters}
+          />
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
             {filteredSales.map((item) => {

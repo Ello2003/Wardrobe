@@ -388,6 +388,114 @@ export const INITIAL_LOOKBOOK_OUTFITS: LookbookOutfit[] = [
     lastWornDate: '2026-08-17',
     createdAt: '2024-05-10T12:00:00Z',
     updatedAt: '2026-08-17T20:00:00Z',
+  },
+  {
+    id: 'editorial-1',
+    title: 'Pitti Uomo Camel & Charcoal Flannel',
+    description: 'Textural harmony: unlined double-breasted camel overcoat layered over grey wool flannel trousers, cashmere turtleneck, and suede oxford derbies.',
+    occasion: 'Work & Office',
+    season: 'Autumn',
+    itemIds: ['item-4', 'item-7', 'item-5'],
+    tags: ['Pitti Uomo', 'Old Money', 'Camel Coat', 'Sartorial', 'Editorial Study'],
+    imageUrl: 'https://images.unsplash.com/photo-1507679799987-c73779587ccf?q=80&w=1200&auto=format&fit=crop',
+    sourceUrl: 'https://www.gq-magazine.co.uk/style/article/pitti-uomo-street-style',
+    inspirationSource: 'Pitti Uomo 106 Florence Street Style',
+    aesthetic: 'Old Money Sartorial',
+    colorPalette: ['#C4A47C', '#333333', '#EFECE6', '#5C432A'],
+    photographicMood: 'Editorial Street Style',
+    isEditorialIdea: true,
+    pieceBreakdown: [
+      {
+        name: 'Double-Breasted Wool Overcoat',
+        category: 'Outerwear',
+        color: 'Camel / Tan',
+        suggestedBrand: 'Private White V.C. / Max Mara',
+        estimatedPrice: 650,
+        stylingRole: 'Anchor piece providing structural drape and architectural line'
+      },
+      {
+        name: 'Chunky Ribbed Cashmere Turtleneck',
+        category: 'Knitwear',
+        color: 'Oatmeal Melange',
+        suggestedBrand: 'Johnstons of Elgin',
+        estimatedPrice: 320,
+        stylingRole: 'Soft tactile warmth insulating the collar line'
+      },
+      {
+        name: 'Pleated Flannel Trousers',
+        category: 'Bottoms',
+        color: 'Charcoal Grey',
+        suggestedBrand: 'Incotex / Drake’s',
+        estimatedPrice: 280,
+        stylingRole: 'Draped wool flannel grounding the silhouette with formal discipline'
+      },
+      {
+        name: 'Suede Split-Toe Oxford Derbies',
+        category: 'Footwear',
+        color: 'Bitter Chocolate Brown',
+        suggestedBrand: 'Crockett & Jones',
+        estimatedPrice: 460,
+        stylingRole: 'Rich velvety texture that softens sharp trouser creases'
+      }
+    ],
+    isFavorite: true,
+    timesWorn: 0,
+    createdAt: '2026-08-20T10:00:00Z',
+    updatedAt: '2026-08-20T10:00:00Z',
+  },
+  {
+    id: 'editorial-2',
+    title: 'Parisian Left Bank Trench & Crisp Poplin',
+    description: 'Effortless Left Bank nonchalance: draped waterproof gabardine trench coat over structured poplin shirt, straight denim, and dark leather tote.',
+    occasion: 'Weekend Casual',
+    season: 'Autumn',
+    itemIds: ['item-10', 'item-11', 'item-8', 'item-7'],
+    tags: ['Parisian Chic', 'Trench Coat', 'Quiet Luxury', 'Left Bank', 'Street Style'],
+    imageUrl: 'https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?q=80&w=1200&auto=format&fit=crop',
+    sourceUrl: 'https://www.vogue.fr/mode/street-style',
+    inspirationSource: 'Vogue Paris Fashion Week Street Style',
+    aesthetic: 'Quiet Luxury Minimalist',
+    colorPalette: ['#C5A880', '#1C2833', '#F4F6F7', '#2C3E50'],
+    photographicMood: 'Street Snapshot',
+    isEditorialIdea: true,
+    pieceBreakdown: [
+      {
+        name: 'Raglan Sleeve Gabardine Trench',
+        category: 'Outerwear',
+        color: 'Honey Khaki',
+        suggestedBrand: 'Mackintosh / Burberry Heritage',
+        estimatedPrice: 695,
+        stylingRole: 'Weather protection with fluid movement and cinch waist option'
+      },
+      {
+        name: 'Crisp Poplin Button-Down Shirt',
+        category: 'Tops',
+        color: 'Ice Blue Stripe',
+        suggestedBrand: 'Charvet / Arket',
+        estimatedPrice: 110,
+        stylingRole: 'Clean sartorial structure framing neck and wrists'
+      },
+      {
+        name: 'Straight-Leg Rigid Indigo Denim',
+        category: 'Bottoms',
+        color: 'Raw Indigo',
+        suggestedBrand: 'A.P.C. Standard / Arket',
+        estimatedPrice: 160,
+        stylingRole: 'Mid-rise straight cut offering relaxed silhouette'
+      },
+      {
+        name: 'Heritage Leather Tote',
+        category: 'Bags',
+        color: 'Deep Oak Brown',
+        suggestedBrand: 'Mulberry Bayswater',
+        estimatedPrice: 850,
+        stylingRole: 'Substantial leather companion balancing casual denim'
+      }
+    ],
+    isFavorite: true,
+    timesWorn: 0,
+    createdAt: '2026-08-21T14:30:00Z',
+    updatedAt: '2026-08-21T14:30:00Z',
   }
 ];
 

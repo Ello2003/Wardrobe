@@ -22,6 +22,7 @@ interface NavigationProps {
   onOpenCreateSnapshot: () => void;
   onOpenSettings: () => void;
   onOpenDuplicateMerge: () => void;
+  onOpenGlobalSearch?: () => void;
 }
 
 interface TabItem {
@@ -49,6 +50,7 @@ export const Navigation = ({
   onOpenCreateSnapshot,
   onOpenSettings,
   onOpenDuplicateMerge,
+  onOpenGlobalSearch,
 }: NavigationProps) => {
   const {
     activeTab,
@@ -91,26 +93,37 @@ export const Navigation = ({
             </div>
           </div>
 
-          <div className="relative hidden max-w-xs flex-1 md:flex">
-            <Search className="pointer-events-none absolute left-2.5 top-2 w-3.5 h-3.5 text-[#9A9A95]" />
+          <div className="relative hidden max-w-xs flex-1 md:flex items-center">
+            <Search className="pointer-events-none absolute left-2.5 top-2.5 w-3.5 h-3.5 text-[#9A9A95]" />
             <input
               type="search"
               aria-label="Search wardrobe"
               placeholder="Search wardrobe, shopping or selling..."
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}
-              className="w-full rounded-md border border-[#E5E5E1] bg-[#F8F7F4] py-1 pl-8 pr-7 text-xs text-[#1A1A1A] placeholder-[#9A9A95] transition-all focus:border-[#8C7355] focus:outline-none focus:ring-1 focus:ring-[#8C7355]"
+              className="w-full rounded-md border border-[#E5E5E1] bg-[#F8F7F4] py-1.5 pl-8 pr-16 text-xs text-[#1A1A1A] placeholder-[#9A9A95] transition-all focus:border-[#8C7355] focus:outline-none focus:ring-1 focus:ring-[#8C7355]"
             />
-            {searchQuery && (
-              <button
-                type="button"
-                aria-label="Clear search"
-                onClick={() => setSearchQuery('')}
-                className="absolute right-2 text-xs font-bold text-[#9A9A95] hover:text-[#1A1A1A]"
-              >
-                ×
-              </button>
-            )}
+            <div className="absolute right-2 flex items-center gap-1">
+              {searchQuery ? (
+                <button
+                  type="button"
+                  aria-label="Clear search"
+                  onClick={() => setSearchQuery('')}
+                  className="text-xs font-bold text-[#9A9A95] hover:text-[#1A1A1A] px-1"
+                >
+                  ×
+                </button>
+              ) : onOpenGlobalSearch ? (
+                <button
+                  type="button"
+                  onClick={onOpenGlobalSearch}
+                  className="text-[10px] font-mono text-[#9A9A95] hover:text-[#1A1A1A] bg-white border border-[#E5E5E1] px-1.5 py-0.5 rounded-xs"
+                  title="Universal search (Ctrl+K)"
+                >
+                  ⌘K
+                </button>
+              ) : null}
+            </div>
           </div>
 
           <div className="flex items-center gap-2">

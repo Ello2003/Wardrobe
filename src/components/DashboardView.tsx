@@ -23,6 +23,7 @@ import {
   DEFAULT_DASHBOARD_DISPLAY_SETTINGS,
   DashboardDisplaySettingsModal,
 } from './DashboardDisplaySettingsModal';
+import { formatGbp } from '../utils/formatters';
 
 interface DashboardViewProps {
   onOpenAddItem: () => void;
@@ -75,15 +76,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   };
 
   const recentLogs = changeLogs.slice(0, 5);
-
-  const formatGbp = (val: number) => {
-    return new Intl.NumberFormat('en-GB', {
-      style: 'currency',
-      currency: 'GBP',
-      minimumFractionDigits: val % 1 === 0 ? 0 : 2,
-      maximumFractionDigits: 2,
-    }).format(val);
-  };
 
   const budgetProgressPercent = Math.min(
     Math.round((spentThisMonth / Math.max(monthlyBudget, 1)) * 100),

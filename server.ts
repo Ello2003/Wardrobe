@@ -41,12 +41,12 @@ function getGeminiClient(): GoogleGenAI | null {
 // Helper to call Gemini with model fallback if a model experiences 503/demand spikes
 async function generateContentWithFallback(
   ai: GoogleGenAI,
-  prompt: string,
+  prompt: string | any[],
   systemInstruction: string,
   schema?: any,
   temperature: number = 0.7
 ) {
-  const modelsToTry = ['gemini-3.7-flash', 'gemini-2.5-flash', 'gemini-1.5-flash'];
+  const modelsToTry = ['gemini-3.8-flash', 'gemini-flash-latest', 'gemini-2.5-flash'];
   let lastError: any = null;
 
   for (const model of modelsToTry) {
@@ -295,6 +295,197 @@ Only use valid IDs from the provided items list. Calculate the total outfit valu
   } catch (error: any) {
     console.error('Outfit generation error:', error);
     res.status(500).json({ error: 'Failed to generate outfits.' });
+  }
+});
+
+// Gemini Endpoint 3b: Extract & Research Lookbook Outfit Ideas from Web Link or Image
+app.post('/api/gemini/extract-lookbook-idea', async (req, res) => {
+  try {
+    const { url, imageBase64, imageMimeType, promptText, wardrobeItems } = req.body;
+    const ai = getGeminiClient();
+
+    if (!ai) {
+      return res.status(503).json({ error: 'GEMINI_API_KEY is not configured.' });
+    }
+
+    let resolvedImageUrl = '';
+    let pageContext = '';
+    let inspirationSource = 'Internet Research';
+
+    if (url && typeof url === 'string') {
+      const cleanUrl = url.trim();
+      // Check if direct image link
+      if (cleanUrl.match(/\.(jpeg|jpg|gif|png|webp|avif)(\?.*)?$/i) || cleanUrl.includes('images.unsplash.com')) {
+        resolvedImageUrl = cleanUrl;
+        try {
+          inspirationSource = new URL(cleanUrl).hostname.replace('www.', '');
+        } catch {
+          inspirationSource = 'Direct Photo URL';
+        }
+      } else {
+        // Scrape web page metadata
+        try {
+          const fetchRes = await fetch(cleanUrl, {
+            headers: {
+              'User-Agent':
+                'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+              Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/*,*/*;q=0.8',
+            },
+            signal: AbortSignal.timeout(6000),
+          });
+
+          if (fetchRes.ok) {
+            const html = await fetchRes.text();
+            const ogTitleMatch = html.match(/<meta\s+(?:property|name)=["'](?:og:title|twitter:title)["']\s+content=["'](.*?)["']/i);
+            const ogImageMatch = html.match(/<meta\s+(?:property|name)=["'](?:og:image|twitter:image)["']\s+content=["'](.*?)["']/i);
+            const ogDescMatch = html.match(/<meta\s+(?:property|name)=["'](?:og:description|twitter:description|description)["']\s+content=["'](.*?)["']/i);
+            const ogSiteMatch = html.match(/<meta\s+(?:property|name)=["']og:site_name["']\s+content=["'](.*?)["']/i);
+
+            if (ogImageMatch && ogImageMatch[1]) {
+              resolvedImageUrl = cleanImageUrl(ogImageMatch[1], cleanUrl) || '';
+            }
+            if (ogSiteMatch && ogSiteMatch[1]) {
+              inspirationSource = ogSiteMatch[1];
+            } else {
+              try {
+                inspirationSource = new URL(cleanUrl).hostname.replace('www.', '');
+              } catch {
+                inspirationSource = 'Web Link';
+              }
+            }
+
+            pageContext = `Page Title: ${ogTitleMatch ? ogTitleMatch[1] : ''}\nDescription: ${ogDescMatch ? ogDescMatch[1] : ''}\nSource: ${inspirationSource}\nURL: ${cleanUrl}`;
+          }
+        } catch (scrapeErr) {
+          console.warn('Scraping URL failed, proceeding with URL string:', scrapeErr);
+          try {
+            inspirationSource = new URL(cleanUrl).hostname.replace('www.', '');
+          } catch {
+            inspirationSource = 'Web Link';
+          }
+          pageContext = `URL: ${cleanUrl}`;
+        }
+      }
+    }
+
+    // Wardrobe inventory summary to match existing garments
+    const closetInventory = (wardrobeItems || []).map((w: any) => ({
+      id: w.id,
+      name: w.name,
+      brand: w.brand,
+      category: w.category,
+      color: w.color,
+    }));
+
+    const schema = {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'Sophisticated editorial look title' },
+        description: { type: 'string', description: 'Editorial styling breakdown explaining drape, texture, and visual balance' },
+        aesthetic: { type: 'string', description: 'Aesthetic archetype e.g. Old Money Sartorial, Modern Minimalist, Quiet Luxury, Tokyo Ivy, Rugged Heritage, Riviera Resort' },
+        photographicMood: { type: 'string', description: 'Photographic style e.g. Editorial Street Style, Studio Flatlay, Runway Snapshot' },
+        occasion: {
+          type: 'string',
+          enum: [
+            'Work & Office',
+            'Weekend Casual',
+            'Evening & Dining',
+            'Formal & Events',
+            'Travel Capsule',
+            'Date Night',
+            'Seasonal Transition',
+          ],
+        },
+        season: {
+          type: 'string',
+          enum: ['Autumn', 'Winter', 'Spring', 'Summer', 'All-Season'],
+        },
+        colorPalette: {
+          type: 'array',
+          items: { type: 'string' },
+          description: '4 to 5 hex color codes extracted from the photographic mood',
+        },
+        tags: {
+          type: 'array',
+          items: { type: 'string' },
+          description: '4 to 6 concise style, textile, or occasion tags',
+        },
+        pieceBreakdown: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              name: { type: 'string' },
+              category: {
+                type: 'string',
+                enum: ['Tops', 'Bottoms', 'Knitwear', 'Outerwear', 'Footwear', 'Accessories', 'Dresses', 'Activewear', 'Formal', 'Loungewear', 'Underwear', 'Bags'],
+              },
+              color: { type: 'string' },
+              suggestedBrand: { type: 'string' },
+              estimatedPrice: { type: 'number', description: 'Estimated price in GBP' },
+              stylingRole: { type: 'string', description: 'Why this garment works within the ensemble' },
+              matchedWardrobeItemId: { type: 'string', description: 'If user owns a matching piece, provide its ID from closet, otherwise empty string' },
+              isGap: { type: 'boolean', description: 'True if user does not own this piece' },
+            },
+            required: ['name', 'category', 'color', 'stylingRole', 'isGap'],
+          },
+        },
+      },
+      required: ['title', 'description', 'aesthetic', 'occasion', 'season', 'colorPalette', 'tags', 'pieceBreakdown'],
+    };
+
+    const systemInstruction = `You are a world-class sartorial director, high-fashion editorial stylist, and capsule wardrobe curator specializing in menswear, womenswear, and bespoke tailoring.
+Your task is to analyze an editorial fashion photograph or researched internet style idea, decompose the look into its key garment components, extract its color palette as hex codes, and match the garments against the user's wardrobe inventory.
+
+If the user owns an item that matches the role, assign matchedWardrobeItemId and set isGap=false.
+If no item in the user's wardrobe fits the piece, set isGap=true and provide a realistic estimatedPrice in GBP and suggested heritage or contemporary brand.`;
+
+    let promptContents: any;
+
+    if (imageBase64) {
+      const mime = imageMimeType || 'image/jpeg';
+      promptContents = [
+        {
+          inlineData: {
+            mimeType: mime,
+            data: imageBase64.replace(/^data:image\/\w+;base64,/, ''),
+          },
+        },
+        {
+          text: `Analyze this fashion photograph in detail. Decompose the outfit into its individual garments, extract a 4-color palette, and identify whether any of these closet pieces match:\n${JSON.stringify(closetInventory, null, 2)}\n\nExtra context: ${promptText || ''}`,
+        },
+      ];
+    } else {
+      promptContents = `Analyze this researched outfit idea from the web:
+${pageContext}
+${promptText ? `User Notes: ${promptText}` : ''}
+${resolvedImageUrl ? `Image URL: ${resolvedImageUrl}` : ''}
+
+Compare with user's current closet inventory:
+${JSON.stringify(closetInventory, null, 2)}
+
+Provide a complete editorial look breakdown.`;
+    }
+
+    const response = await generateContentWithFallback(
+      ai,
+      promptContents,
+      systemInstruction,
+      schema,
+      0.4
+    );
+
+    const parsed = JSON.parse(response.text || '{}');
+    if (resolvedImageUrl && !parsed.imageUrl) {
+      parsed.imageUrl = resolvedImageUrl;
+    }
+    parsed.sourceUrl = url || '';
+    parsed.inspirationSource = inspirationSource;
+
+    res.json({ success: true, idea: parsed });
+  } catch (error: any) {
+    console.error('Extract lookbook idea error:', error);
+    res.status(500).json({ error: error.message || 'Failed to extract lookbook idea.' });
   }
 });
 

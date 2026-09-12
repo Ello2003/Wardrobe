@@ -36,6 +36,9 @@ import { GarmentImage } from './GarmentImage';
 import { BulkEditModal } from './BulkEditModal';
 import { DuplicateMergeModal } from './DuplicateMergeModal';
 import { InventoryDatabaseTable } from './InventoryDatabaseTable';
+import { BulkActionBar } from './common/BulkActionBar';
+import { EmptyState } from './common/EmptyState';
+import { formatGbp } from '../utils/formatters';
 import {
   InventoryDisplaySettings,
   DEFAULT_INVENTORY_DISPLAY_SETTINGS,
@@ -511,15 +514,6 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
     }
     return sum;
   }, [selectedItemIds, items]);
-
-  const formatGbp = (val: number) => {
-    return new Intl.NumberFormat('en-GB', {
-      style: 'currency',
-      currency: 'GBP',
-      minimumFractionDigits: val % 1 === 0 ? 0 : 2,
-      maximumFractionDigits: 2,
-    }).format(val);
-  };
 
   // Inline editing commit handler
   const handleSaveInline = (itemId: string, field: keyof WardrobeItem) => {
@@ -1441,128 +1435,52 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
       )}
 
       {/* Bulk Selection Action Bar */}
-      {selectedItemIds.size > 0 && (
-        <div className="bg-[#1A1A1A] text-white p-3 border border-[#333] shadow-md flex flex-wrap items-center justify-between gap-3 animate-fadeIn">
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={handleToggleSelectAll}
-                className={`w-4 h-4 border flex items-center justify-center cursor-pointer transition-colors ${
-                  areAllFilteredSelected
-                    ? 'bg-[#8C7355] border-[#8C7355] text-white'
-                    : areSomeFilteredSelected
-                    ? 'bg-[#8C7355]/30 border-[#8C7355] text-[#8C7355]'
-                    : 'border-[#666] bg-[#2A2A2A] hover:border-[#8C7355]'
-                }`}
-                title={areAllFilteredSelected ? 'Deselect all visible items' : 'Select all visible items'}
-                aria-label={areAllFilteredSelected ? 'Deselect all visible items' : 'Select all visible items'}
-              >
-                {areAllFilteredSelected && <Check className="w-3 h-3 stroke-[3] text-white" />}
-                {!areAllFilteredSelected && areSomeFilteredSelected && (
-                  <span className="w-2 h-0.5 bg-[#8C7355] block" />
-                )}
-              </button>
-              <span className="font-mono text-xs font-semibold">
-                {selectedItemIds.size} of {items.length} garments selected
-                {filteredItems.length !== items.length && (
-                  <span className="text-[#A5A59E] font-normal"> ({filteredItems.length} matching filter)</span>
-                )}
-              </span>
-            </div>
-            <span className="text-xs text-[#A5A59E] font-mono hidden sm:inline">
-              (Valuation: {formatGbp(selectedTotalValuation)})
-            </span>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={() => {
-                const ids = Array.from(selectedItemIds);
-                moveMultipleWardrobeItems(ids, 'selling');
-                setSelectedItemIds(new Set());
-              }}
-              className="flex items-center gap-1.5 px-3 py-1 text-xs font-mono font-bold bg-[#007782] hover:bg-[#005E67] text-white shadow-xs cursor-pointer transition-colors"
-              title="List selected garments for resale/sales"
-            >
-              <Tag className="w-3.5 h-3.5" />
-              <span>List for Resale ({selectedItemIds.size})</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                const ids = Array.from(selectedItemIds);
-                moveMultipleWardrobeItems(ids, 'shopping');
-                setSelectedItemIds(new Set());
-              }}
-              className="flex items-center gap-1.5 px-3 py-1 text-xs font-mono font-medium bg-[#3A3A38] hover:bg-[#4A4A48] text-[#E5E5E1] border border-[#555] shadow-xs cursor-pointer transition-colors"
-              title="Move selected garments to shopping/wishlist"
-            >
-              <ShoppingBag className="w-3.5 h-3.5" />
-              <span>To Wishlist ({selectedItemIds.size})</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setIsBulkEditOpen(true)}
-              className="flex items-center gap-1.5 px-3 py-1 text-xs font-mono font-bold bg-[#8C7355] hover:bg-[#735D43] text-white shadow-xs cursor-pointer transition-colors"
-              title="Bulk edit category, tags, condition, seasons, and prices for selected garments"
-            >
-              <Sliders className="w-3.5 h-3.5" />
-              <span>Bulk Edit ({selectedItemIds.size})</span>
-            </button>
-            <button
-              type="button"
-              onClick={handleClearAllSelection}
-              className="px-3 py-1 text-xs font-mono text-[#D5D5D0] hover:text-white border border-[#444] hover:border-[#666] bg-[#2A2A2A] cursor-pointer transition-colors"
-            >
-              Deselect
-            </button>
-            <button
-              type="button"
-              onClick={handleDeleteSelected}
-              className="flex items-center gap-1.5 px-3 py-1 text-xs font-mono font-medium bg-rose-700 hover:bg-rose-800 text-white shadow-xs cursor-pointer transition-colors"
-              title="Delete all selected items immediately"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              <span>Delete ({selectedItemIds.size})</span>
-            </button>
-          </div>
-        </div>
-      )}
+      <BulkActionBar
+        selectedCount={selectedItemIds.size}
+        totalFilteredCount={filteredItems.length}
+        totalItemCount={items.length}
+        areAllSelected={areAllFilteredSelected}
+        areSomeSelected={areSomeFilteredSelected}
+        onToggleSelectAll={handleToggleSelectAll}
+        onClearSelection={handleClearAllSelection}
+        selectedValuation={selectedTotalValuation}
+        entityName="garments"
+        onMoveToResale={() => {
+          const ids = Array.from(selectedItemIds);
+          moveMultipleWardrobeItems(ids, 'selling');
+          setSelectedItemIds(new Set());
+        }}
+        onMoveToWishlist={() => {
+          const ids = Array.from(selectedItemIds);
+          moveMultipleWardrobeItems(ids, 'shopping');
+          setSelectedItemIds(new Set());
+        }}
+        onBulkEdit={() => setIsBulkEditOpen(true)}
+        onBulkDelete={handleDeleteSelected}
+      />
 
       {/* Wardrobe Items Display */}
       {filteredItems.length === 0 ? (
-        <div className="text-center py-12 bg-white border border-[#E5E5E1] space-y-3">
-          <Info className="w-6 h-6 text-[#8C7355] mx-auto" />
-          <h3 className="text-sm font-serif font-semibold text-[#1A1A1A]">
-            No wardrobe items match your criteria
-          </h3>
-          <p className="text-xs text-[#767670] max-w-sm mx-auto">
-            Try adjusting your search query, clearing category filters, or importing clothes from a link.
-          </p>
-          <div className="flex items-center justify-center gap-2 pt-2">
-            <button
-              onClick={() => {
-                setSelectedCategory('All');
-                setSelectedSeason('All');
-                setSelectedCondition('All');
-                setFavoritesOnly(false);
-                setSearchQuery('');
-              }}
-              className="px-3 py-1.5 text-xs bg-[#F2F1ED] hover:bg-[#E5E3DC] text-[#1A1A1A] border border-[#E5E5E1] cursor-pointer"
-            >
-              Reset Filters
-            </button>
-            <button
-              onClick={onOpenAddItem}
-              className="px-3.5 py-1.5 text-xs bg-[#8C7355] hover:bg-[#735D43] text-white cursor-pointer flex items-center gap-1.5"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              Add Garment
-            </button>
-          </div>
-        </div>
+        <EmptyState
+          icon={Info}
+          title="No wardrobe items match your criteria"
+          description="Try adjusting your search query, clearing category filters, or importing clothes from a product link or photo."
+          onResetFilters={() => {
+            setSelectedCategory('All');
+            setSelectedSeason('All');
+            setSelectedCondition('All');
+            setFavoritesOnly('All' as any);
+            setSearchQuery('');
+          }}
+          actions={[
+            {
+              label: 'Add Garment',
+              icon: Plus,
+              primary: true,
+              onClick: onOpenAddItem,
+            },
+          ]}
+        />
       ) : viewMode === 'grid' ? (
         /* ======================== GRID VIEW (WITH INLINE EDITING) ======================== */
         <div

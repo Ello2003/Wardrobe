@@ -24,6 +24,10 @@ export const OutfitFormModal: React.FC<OutfitFormModalProps> = ({
   const [selectedItemIds, setSelectedItemIds] = useState<string[]>([]);
   const [tagsInput, setTagsInput] = useState('');
   const [imageUrl, setImageUrl] = useState('');
+  const [sourceUrl, setSourceUrl] = useState('');
+  const [inspirationSource, setInspirationSource] = useState('');
+  const [aesthetic, setAesthetic] = useState('');
+  const [colorPaletteInput, setColorPaletteInput] = useState('');
   const [itemSearch, setItemSearch] = useState('');
 
   const occasions = [
@@ -47,6 +51,12 @@ export const OutfitFormModal: React.FC<OutfitFormModalProps> = ({
       setSelectedItemIds(Array.isArray(initialOutfit.itemIds) ? initialOutfit.itemIds : []);
       setTagsInput(Array.isArray(initialOutfit.tags) ? initialOutfit.tags.join(', ') : '');
       setImageUrl(initialOutfit.imageUrl || '');
+      setSourceUrl(initialOutfit.sourceUrl || '');
+      setInspirationSource(initialOutfit.inspirationSource || '');
+      setAesthetic(initialOutfit.aesthetic || '');
+      setColorPaletteInput(
+        Array.isArray(initialOutfit.colorPalette) ? initialOutfit.colorPalette.join(', ') : ''
+      );
     } else {
       setTitle('');
       setDescription('');
@@ -55,6 +65,10 @@ export const OutfitFormModal: React.FC<OutfitFormModalProps> = ({
       setSelectedItemIds([]);
       setTagsInput('Casual, Autumn Formula');
       setImageUrl('');
+      setSourceUrl('');
+      setInspirationSource('');
+      setAesthetic('');
+      setColorPaletteInput('');
     }
   }, [initialOutfit, isOpen]);
 
@@ -90,33 +104,44 @@ export const OutfitFormModal: React.FC<OutfitFormModalProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!title.trim() || selectedItemIds.length === 0) return;
+    if (!title.trim()) return;
 
     const tags = tagsInput
       .split(',')
       .map((t) => t.trim())
       .filter(Boolean);
 
+    const colorPalette = colorPaletteInput
+      .split(',')
+      .map((c) => c.trim())
+      .filter((c) => c.startsWith('#'));
+
+    const outfitData = {
+      title,
+      description,
+      occasion,
+      season,
+      itemIds: selectedItemIds,
+      tags,
+      imageUrl: imageUrl.trim() || undefined,
+      sourceUrl: sourceUrl.trim() || undefined,
+      inspirationSource: inspirationSource.trim() || undefined,
+      aesthetic: aesthetic.trim() || undefined,
+      colorPalette: colorPalette.length > 0 ? colorPalette : undefined,
+    };
+
     if (initialOutfit) {
       updateOutfit(initialOutfit.id, {
-        title,
-        description,
-        occasion,
-        season,
-        itemIds: selectedItemIds,
-        tags,
-        imageUrl: imageUrl || undefined,
+        ...outfitData,
+        isEditorialIdea: initialOutfit.isEditorialIdea,
+        photographicMood: initialOutfit.photographicMood,
+        pieceBreakdown: initialOutfit.pieceBreakdown,
       });
     } else {
       addOutfit({
-        title,
-        description,
-        occasion,
-        season,
-        itemIds: selectedItemIds,
-        tags,
-        imageUrl: imageUrl || undefined,
+        ...outfitData,
         isFavorite: false,
+        isEditorialIdea: selectedItemIds.length === 0 && Boolean(imageUrl),
       });
     }
 
@@ -195,6 +220,67 @@ export const OutfitFormModal: React.FC<OutfitFormModalProps> = ({
                     </option>
                   ))}
                 </select>
+              </div>
+            </div>
+          </div>
+
+          {/* Editorial & Photographic Research Section */}
+          <div className="p-3 bg-[#FAF9F7] border border-[#E5E5E1] rounded-lg space-y-3">
+            <div className="text-[11px] font-mono text-[#8C7355] uppercase font-bold tracking-wider">
+              Photographic Inspiration &amp; Research Metadata (Optional)
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <div>
+                <label className="text-[10px] font-mono text-[#5A5A55] block mb-0.5">
+                  High-Resolution Photograph URL
+                </label>
+                <input
+                  type="url"
+                  value={imageUrl}
+                  onChange={(e) => setImageUrl(e.target.value)}
+                  placeholder="https://images.unsplash.com/..."
+                  className="w-full px-2 py-1 bg-white border border-[#E5E5E1] rounded text-xs text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="text-[10px] font-mono text-[#5A5A55] block mb-0.5">
+                  Aesthetic Style Archetype
+                </label>
+                <input
+                  type="text"
+                  value={aesthetic}
+                  onChange={(e) => setAesthetic(e.target.value)}
+                  placeholder="e.g. Old Money Sartorial, Quiet Luxury"
+                  className="w-full px-2 py-1 bg-white border border-[#E5E5E1] rounded text-xs text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="text-[10px] font-mono text-[#5A5A55] block mb-0.5">
+                  Inspiration Source / Publication
+                </label>
+                <input
+                  type="text"
+                  value={inspirationSource}
+                  onChange={(e) => setInspirationSource(e.target.value)}
+                  placeholder="e.g. Pitti Uomo 105, GQ, Pinterest"
+                  className="w-full px-2 py-1 bg-white border border-[#E5E5E1] rounded text-xs text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="text-[10px] font-mono text-[#5A5A55] block mb-0.5">
+                  Color Story Palette (Hex Codes)
+                </label>
+                <input
+                  type="text"
+                  value={colorPaletteInput}
+                  onChange={(e) => setColorPaletteInput(e.target.value)}
+                  placeholder="#8C7355, #2B3A4A, #E5E5E1, #1A1A1A"
+                  className="w-full px-2 py-1 bg-white border border-[#E5E5E1] rounded text-xs text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none font-mono"
+                />
               </div>
             </div>
           </div>
@@ -325,7 +411,7 @@ export const OutfitFormModal: React.FC<OutfitFormModalProps> = ({
             </button>
             <button
               type="submit"
-              disabled={selectedItemIds.length === 0}
+              disabled={selectedItemIds.length === 0 && !imageUrl.trim()}
               className="px-3.5 py-1.5 text-xs font-semibold bg-[#8C7355] hover:bg-[#786248] text-white rounded-md shadow-xs transition-all disabled:opacity-50 cursor-pointer"
             >
               {initialOutfit ? 'Save Outfit Changes' : 'Save Look to Lookbook'}
