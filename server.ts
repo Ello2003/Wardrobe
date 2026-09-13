@@ -3816,8 +3816,8 @@ app.get('/api/editorial-feeds', async (req, res) => {
     });
 
     // If no articles returned or specific key brands missing (e.g. Suitsupply which doesn't have standard open RSS),
-    // import the curated fallback articles from editorialFeedService
-    const { CURATED_EDITORIAL_ARTICLES } = await import('./src/services/editorialFeedService');
+    // import the curated fallback articles from editorialCurated.ts
+    const { CURATED_EDITORIAL_ARTICLES } = await import('./src/data/editorialCurated.ts');
     const existingSourceIds = new Set(aggregatedArticles.map((a) => a.sourceId));
 
     requestedSources.forEach((src) => {
