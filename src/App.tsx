@@ -14,7 +14,6 @@ import { ItemFormModal } from './components/ItemFormModal';
 import { OutfitFormModal } from './components/OutfitFormModal';
 import { ShoppingFormModal } from './components/ShoppingFormModal';
 import { CreateSnapshotModal } from './components/CreateSnapshotModal';
-import { AIStylistModal } from './components/AIStylistModal';
 import { SettingsModal } from './components/SettingsModal';
 import { DuplicateMergeModal } from './components/DuplicateMergeModal';
 import { GlobalSearchModal } from './components/common/GlobalSearchModal';
@@ -40,7 +39,6 @@ const MainAppContent: React.FC = () => {
   const [isShoppingFormOpen, setIsShoppingFormOpen] = useState(false);
   const [editingShoppingItem, setEditingShoppingItem] = useState<ShoppingItem | null>(null);
   const [isSnapshotModalOpen, setIsSnapshotModalOpen] = useState(false);
-  const [isAIStylistOpen, setIsAIStylistOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isDuplicateMergeOpen, setIsDuplicateMergeOpen] = useState(false);
   const [isGlobalSearchOpen, setIsGlobalSearchOpen] = useState(false);
@@ -107,7 +105,6 @@ const MainAppContent: React.FC = () => {
       <Navigation
         onOpenAddItem={() => openItemForm()}
         onOpenCreateLook={() => openOutfitForm()}
-        onOpenAIStylist={() => setIsAIStylistOpen(true)}
         onOpenCreateSnapshot={() => setIsSnapshotModalOpen(true)}
         onOpenSettings={() => setIsSettingsOpen(true)}
         onOpenDuplicateMerge={() => setIsDuplicateMergeOpen(true)}
@@ -119,7 +116,6 @@ const MainAppContent: React.FC = () => {
           <DashboardView
             onOpenAddItem={() => openItemForm()}
             onOpenCreateLook={() => openOutfitForm()}
-            onOpenAIStylist={() => setIsAIStylistOpen(true)}
             onSelectItem={setSelectedDetailItem}
           />
         )}
@@ -151,7 +147,7 @@ const MainAppContent: React.FC = () => {
 
         {activeTab === 'analytics' && <AnalyticsChartsView onOpenAddItem={() => openItemForm()} />}
 
-        {activeTab === 'trends' && <EditorialFeedView onOpenAIStylist={() => setIsAIStylistOpen(true)} />}
+        {activeTab === 'trends' && <EditorialFeedView />}
 
         {(activeTab === 'tools' || activeTab === 'history') && (
           <ToolsView
@@ -199,10 +195,6 @@ const MainAppContent: React.FC = () => {
 
       <ErrorBoundary isModal onClose={() => setIsSnapshotModalOpen(false)}>
         <CreateSnapshotModal isOpen={isSnapshotModalOpen} onClose={() => setIsSnapshotModalOpen(false)} />
-      </ErrorBoundary>
-
-      <ErrorBoundary isModal onClose={() => setIsAIStylistOpen(false)}>
-        <AIStylistModal isOpen={isAIStylistOpen} onClose={() => setIsAIStylistOpen(false)} />
       </ErrorBoundary>
 
       <ErrorBoundary isModal onClose={() => setIsSettingsOpen(false)}>

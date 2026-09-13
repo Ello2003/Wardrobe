@@ -9,7 +9,6 @@ import {
   SlidersHorizontal,
   LayoutGrid,
   List,
-  Sparkles,
   ShoppingBag,
   Clock,
   User,
@@ -39,11 +38,9 @@ import {
 import { ManageFeedsModal } from './ManageFeedsModal';
 import { TREND_RESEARCH_DATA } from '../data/initialData';
 
-interface EditorialFeedViewProps {
-  onOpenAIStylist?: () => void;
-}
+interface EditorialFeedViewProps {}
 
-export const EditorialFeedView: React.FC<EditorialFeedViewProps> = ({ onOpenAIStylist }) => {
+export const EditorialFeedView: React.FC<EditorialFeedViewProps> = () => {
   const { addShoppingItem, items } = useWardrobe();
 
   // Settings & Feed State
@@ -331,16 +328,6 @@ export const EditorialFeedView: React.FC<EditorialFeedViewProps> = ({ onOpenAISt
               {settings.activeSourceIds.length}
             </span>
           </button>
-
-          {onOpenAIStylist && (
-            <button
-              onClick={onOpenAIStylist}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-[#8C7355] hover:bg-[#786248] text-white shadow-xs transition cursor-pointer"
-            >
-              <Sparkles className="w-3.5 h-3.5" />
-              <span>Capsule Advisor</span>
-            </button>
-          )}
         </div>
       </div>
 

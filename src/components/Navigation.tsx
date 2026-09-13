@@ -9,7 +9,6 @@ import {
   Settings,
   Shirt,
   ShoppingBag,
-  Sparkles,
   TrendingUp,
   Undo2,
   Wrench,
@@ -19,7 +18,6 @@ import { useWardrobe } from '../context/WardrobeContext';
 interface NavigationProps {
   onOpenAddItem: () => void;
   onOpenCreateLook: () => void;
-  onOpenAIStylist: () => void;
   onOpenCreateSnapshot: () => void;
   onOpenSettings: () => void;
   onOpenDuplicateMerge: () => void;
@@ -47,7 +45,6 @@ const tabs: readonly TabItem[] = [
 export const Navigation = ({
   onOpenAddItem,
   onOpenCreateLook,
-  onOpenAIStylist,
   onOpenCreateSnapshot,
   onOpenSettings,
   onOpenDuplicateMerge,
@@ -137,14 +134,6 @@ export const Navigation = ({
             >
               <Undo2 className="h-3.5 w-3.5" />
               <span className="hidden sm:inline">Undo</span>
-            </button>
-            <button
-              type="button"
-              onClick={onOpenAIStylist}
-              className="inline-flex items-center gap-1.5 rounded-md bg-[#8C7355] px-3 py-1.5 text-xs font-semibold text-white shadow-xs transition-all hover:bg-[#786248]"
-            >
-              <Sparkles className="h-3.5 w-3.5 text-amber-200" />
-              <span className="hidden sm:inline">AI Stylist</span>
             </button>
             <button
               type="button"

@@ -3,7 +3,6 @@ import {
   TrendingDown,
   TrendingUp,
   Shirt,
-  Sparkles,
   Layers,
   ShoppingBag,
   History,
@@ -28,14 +27,12 @@ import { formatGbp } from '../utils/formatters';
 interface DashboardViewProps {
   onOpenAddItem: () => void;
   onOpenCreateLook: () => void;
-  onOpenAIStylist: () => void;
   onSelectItem: (item: WardrobeItem) => void;
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
   onOpenAddItem,
   onOpenCreateLook,
-  onOpenAIStylist,
   onSelectItem,
 }) => {
   const {
@@ -111,14 +108,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             >
               <SlidersHorizontal className="w-3.5 h-3.5 text-[#767670]" />
               <span>Dashboard Settings</span>
-            </button>
-            <button
-              onClick={onOpenAIStylist}
-              id="dash-ai-audit-btn"
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md bg-[#8C7355] hover:bg-[#786248] text-white shadow-xs transition-all cursor-pointer"
-            >
-              <Sparkles className="w-3.5 h-3.5 text-amber-200" />
-              AI Inventory Audit
             </button>
             <button
               onClick={onOpenCreateLook}
