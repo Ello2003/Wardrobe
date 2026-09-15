@@ -53,3 +53,51 @@ export function formatDate(isoDateString?: string | null): string {
     return isoDateString;
   }
 }
+
+export interface RrpSavingsInfo {
+  savingsAmount: number;
+  discountPercent: number;
+  isDiscounted: boolean;
+  formattedSavings: string;
+  formattedDiscount: string;
+  hasRrp: boolean;
+  rrp: number;
+}
+
+/**
+ * Calculates retail savings, discount percentages, and formatted metrics
+ * comparing actual/purchase price against the Recommended Retail Price (RRP).
+ * Standardized across cards, tables, detail modals, and analytics.
+ */
+export function calculateRrpSavings(
+  price: number | null | undefined,
+  rrp: number | null | undefined
+): RrpSavingsInfo {
+  const safePrice = typeof price === 'number' && !isNaN(price) ? Math.max(0, price) : 0;
+  const safeRrp = typeof rrp === 'number' && !isNaN(rrp) ? Math.max(0, rrp) : 0;
+
+  if (safeRrp <= 0) {
+    return {
+      savingsAmount: 0,
+      discountPercent: 0,
+      isDiscounted: false,
+      formattedSavings: '',
+      formattedDiscount: '',
+      hasRrp: false,
+      rrp: 0,
+    };
+  }
+
+  const savings = Math.max(0, safeRrp - safePrice);
+  const discountPercent = safeRrp > 0 ? Math.round((savings / safeRrp) * 100) : 0;
+
+  return {
+    savingsAmount: savings,
+    discountPercent,
+    isDiscounted: savings > 0.01,
+    formattedSavings: formatGbp(savings),
+    formattedDiscount: `-${discountPercent}%`,
+    hasRrp: true,
+    rrp: safeRrp,
+  };
+}

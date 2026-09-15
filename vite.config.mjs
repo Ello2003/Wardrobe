@@ -8,4 +8,10 @@ const base = process.env.VITE_BASE || (process.env.GITHUB_ACTIONS ? '/Wardrobe/'
 export default defineConfig({
   base,
   plugins: [react(), tailwindcss()],
+  resolve: {
+    dedupe: ['react', 'react-dom', 'react-dom/client'],
+  },
+  optimizeDeps: {
+    include: ['react', 'react-dom', 'react-dom/client'],
+  },
 });

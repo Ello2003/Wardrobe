@@ -176,7 +176,7 @@ export const DuplicateMergeModal: React.FC<DuplicateMergeModalProps> = ({
     const ignored: DuplicateCluster[] = [];
 
     rawClusters.forEach((cl) => {
-      if (ignoredClusterKeys.has(cl.key)) {
+      if (ignoredClusterKeys.has(cl.key) || ignoredClusterKeys.has(cl.id)) {
         ignored.push(cl);
       } else {
         active.push(cl);

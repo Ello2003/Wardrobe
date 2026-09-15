@@ -5,6 +5,7 @@ import { useWardrobe } from '../context/WardrobeContext';
 import { GarmentImage } from './GarmentImage';
 import { isGarmentDuplicate } from './duplicateMerge/duplicateUtils';
 import { safeApiFetch } from '../utils/apiHelper';
+import { calculateRrpSavings } from '../utils/formatters';
 
 interface ItemFormModalProps {
   isOpen: boolean;
@@ -30,6 +31,7 @@ export const ItemFormModal: React.FC<ItemFormModalProps> = ({
   const [color, setColor] = useState('');
   const [seasons, setSeasons] = useState<Season[]>(['Autumn', 'Winter']);
   const [purchasePrice, setPurchasePrice] = useState<string>('');
+  const [rrp, setRrp] = useState<string>('');
   const [purchaseDate, setPurchaseDate] = useState<string>('');
   const [condition, setCondition] = useState<Condition>('Excellent');
   const [material, setMaterial] = useState('');
@@ -85,6 +87,11 @@ export const ItemFormModal: React.FC<ItemFormModalProps> = ({
           ? initialItem.purchasePrice.toString()
           : ''
       );
+      setRrp(
+        initialItem.rrp !== undefined && initialItem.rrp !== null
+          ? initialItem.rrp.toString()
+          : ''
+      );
       setPurchaseDate(initialItem.purchaseDate || '');
       setCondition(initialItem.condition || 'Excellent');
       setMaterial(initialItem.material || '');
@@ -107,6 +114,7 @@ export const ItemFormModal: React.FC<ItemFormModalProps> = ({
       setColor('');
       setSeasons(['Autumn', 'Winter']);
       setPurchasePrice('');
+      setRrp('');
       setPurchaseDate(new Date().toISOString().split('T')[0]);
       setCondition('Excellent');
       setMaterial('');
@@ -200,6 +208,7 @@ export const ItemFormModal: React.FC<ItemFormModalProps> = ({
           if (item.color) setColor(item.color);
           if (item.material) setMaterial(item.material);
           if (item.purchasePrice) setPurchasePrice(item.purchasePrice.toString());
+          if (item.rrp) setRrp(item.rrp.toString());
           if (item.notes) setNotes(item.notes);
           if (item.season && Array.isArray(item.season)) setSeasons(item.season);
           if (item.tags && Array.isArray(item.tags)) setTagsInput(item.tags.join(', '));
@@ -239,6 +248,7 @@ export const ItemFormModal: React.FC<ItemFormModalProps> = ({
       if (item.color) setColor(item.color);
       if (item.material) setMaterial(item.material);
       if (item.purchasePrice) setPurchasePrice(item.purchasePrice.toString());
+      if (item.rrp) setRrp(item.rrp.toString());
       if (item.imageUrl) setImageUrl(item.imageUrl);
       if (item.careNotes) setCareNotes(item.careNotes);
       if (item.notes) setNotes(item.notes);
@@ -264,6 +274,7 @@ export const ItemFormModal: React.FC<ItemFormModalProps> = ({
 
     setIsSubmitting(true);
     const priceNum = parseFloat(purchasePrice) || 0;
+    const rrpNum = rrp.trim() ? parseFloat(rrp) || undefined : undefined;
     const tags = tagsInput
       .split(',')
       .map((t) => t.trim().toLowerCase().replace(/^#/, ''))
@@ -282,6 +293,7 @@ export const ItemFormModal: React.FC<ItemFormModalProps> = ({
             color: color.trim(),
             season: seasons,
             purchasePrice: priceNum,
+            rrp: rrpNum,
             purchaseDate,
             condition,
             material: material.trim(),
@@ -304,6 +316,7 @@ export const ItemFormModal: React.FC<ItemFormModalProps> = ({
             color: color.trim(),
             season: seasons,
             purchasePrice: priceNum,
+            rrp: rrpNum,
             currentValuation: priceNum,
             purchaseDate,
             condition,
@@ -690,8 +703,8 @@ export const ItemFormModal: React.FC<ItemFormModalProps> = ({
             </div>
           </div>
 
-          {/* Price & Purchase Date */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          {/* Price, RRP & Purchase Date */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
             <div>
               <label className="text-[11px] font-mono text-[#5A5A55] block mb-1 font-semibold">
                 Purchase Price (£ GBP)
@@ -704,6 +717,23 @@ export const ItemFormModal: React.FC<ItemFormModalProps> = ({
                   value={purchasePrice}
                   onChange={(e) => setPurchasePrice(e.target.value)}
                   placeholder="299"
+                  className="w-full pl-6 pr-2.5 py-1.5 bg-white border border-[#D5D5D0] text-xs font-mono text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none font-semibold"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="text-[11px] font-mono text-[#5A5A55] block mb-1 font-semibold">
+                RRP Retail Price (£ GBP)
+              </label>
+              <div className="relative">
+                <span className="absolute left-2.5 top-1.5 text-xs text-[#8C7355] font-mono font-bold">£</span>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={rrp}
+                  onChange={(e) => setRrp(e.target.value)}
+                  placeholder="380"
                   className="w-full pl-6 pr-2.5 py-1.5 bg-white border border-[#D5D5D0] text-xs font-mono text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none font-semibold"
                 />
               </div>
@@ -737,6 +767,24 @@ export const ItemFormModal: React.FC<ItemFormModalProps> = ({
               </select>
             </div>
           </div>
+
+          {/* Live RRP Savings Indicator if applicable */}
+          {(() => {
+            const p = parseFloat(purchasePrice);
+            const r = parseFloat(rrp);
+            if (!isNaN(p) && !isNaN(r) && r > p) {
+              const savings = calculateRrpSavings(p, r);
+              return (
+                <div className="flex items-center justify-between text-xs bg-[#EBF3ED] text-[#245934] border border-[#BBDBC2] px-3 py-1.5">
+                  <span className="font-mono font-medium">
+                    Saving vs RRP: <strong>{savings.formattedSavings}</strong> ({savings.formattedDiscount})
+                  </span>
+                  <span className="text-[11px] text-[#2E7D32]/80 uppercase tracking-wider font-mono">Retail discount recorded</span>
+                </div>
+              );
+            }
+            return null;
+          })()}
 
           {/* Material & Size */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

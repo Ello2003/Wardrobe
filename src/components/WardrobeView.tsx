@@ -213,18 +213,18 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
   };
 
   const [sortBy, setSortBy] = useState<
-    'wears_desc' | 'price_desc' | 'price_asc' | 'newest'
+    'wears_desc' | 'price_desc' | 'price_asc' | 'rrp_desc' | 'newest'
   >(() => {
     try {
       const saved = localStorage.getItem('inventory_sort_by');
-      if (saved && ['wears_desc', 'price_desc', 'price_asc', 'newest'].includes(saved)) {
+      if (saved && ['wears_desc', 'price_desc', 'price_asc', 'rrp_desc', 'newest'].includes(saved)) {
         return saved as any;
       }
     } catch (e) {}
     return 'wears_desc';
   });
 
-  const handleSetSortBy = (sort: 'wears_desc' | 'price_desc' | 'price_asc' | 'newest') => {
+  const handleSetSortBy = (sort: 'wears_desc' | 'price_desc' | 'price_asc' | 'rrp_desc' | 'newest') => {
     setSortBy(sort);
     try {
       localStorage.setItem('inventory_sort_by', sort);
@@ -495,6 +495,8 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
             return b.purchasePrice - a.purchasePrice;
           case 'price_asc':
             return a.purchasePrice - b.purchasePrice;
+          case 'rrp_desc':
+            return (b.rrp || 0) - (a.rrp || 0);
           case 'newest':
             return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
           default:
@@ -504,6 +506,7 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
   }, [items, pipelineTab, selectedTag, selectedCategory, selectedBrand, selectedSeason, selectedCondition, favoritesOnly, searchQuery, sortBy]);
 
   const filteredTotalValue = filteredItems.reduce((acc, item) => acc + item.purchasePrice, 0);
+  const filteredTotalRrp = filteredItems.reduce((acc, item) => acc + (item.rrp || 0), 0);
   const filteredTotalWears = filteredItems.reduce((acc, item) => acc + item.wearCount, 0);
 
   const selectedTotalValuation = useMemo(() => {
@@ -523,6 +526,9 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
     let parsedVal: any = editingValue.trim();
     if (field === 'purchasePrice') {
       parsedVal = parseFloat(editingValue) || item.purchasePrice;
+    } else if (field === 'rrp') {
+      const p = parseFloat(editingValue);
+      parsedVal = !isNaN(p) && p >= 0 ? p : undefined;
     } else if (field === 'wearCount') {
       parsedVal = Math.max(0, parseInt(editingValue) || 0);
     }
@@ -681,11 +687,29 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
               </span>
             </div>
             {displaySettings.showStatsBanner && (
-              <p className="text-xs text-[#767670] mt-0.5">
-                Showing {filteredItems.length} matching pieces • Valuation:{' '}
-                <strong className="text-[#1A1A1A] font-mono">{formatGbp(filteredTotalValue)}</strong> • Total
-                Wears Logged:{' '}
-                <strong className="text-[#1A1A1A] font-mono">{filteredTotalWears} wears</strong>
+              <p className="text-xs text-[#767670] mt-0.5 flex flex-wrap items-center gap-x-1.5">
+                <span>Showing {filteredItems.length} matching pieces</span>
+                <span>•</span>
+                <span>
+                  Valuation: <strong className="text-[#1A1A1A] font-mono">{formatGbp(filteredTotalValue)}</strong>
+                </span>
+                {filteredTotalRrp > 0 && (
+                  <>
+                    <span>•</span>
+                    <span>
+                      Est. Retail RRP: <strong className="text-[#5A5A55] font-mono">{formatGbp(filteredTotalRrp)}</strong>
+                    </span>
+                    {filteredTotalRrp > filteredTotalValue && (
+                      <span className="text-emerald-700 font-mono text-[11px] font-bold">
+                        (Saved {formatGbp(filteredTotalRrp - filteredTotalValue)} / {Math.round(((filteredTotalRrp - filteredTotalValue) / filteredTotalRrp) * 100)}%)
+                      </span>
+                    )}
+                  </>
+                )}
+                <span>•</span>
+                <span>
+                  Total Wears Logged: <strong className="text-[#1A1A1A] font-mono">{filteredTotalWears} wears</strong>
+                </span>
               </p>
             )}
           </div>
@@ -1313,6 +1337,7 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
                     <option value="wears_desc">Most Worn (Frequency)</option>
                     <option value="price_desc">Price: High to Low (£)</option>
                     <option value="price_asc">Price: Low to High (£)</option>
+                    <option value="rrp_desc">RRP: High to Low (£)</option>
                     <option value="newest">Recently Added</option>
                   </select>
                   <ChevronDown className="w-3 h-3 text-[#767670] absolute right-1.5 top-2 pointer-events-none" />
@@ -1496,6 +1521,7 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
             const isEditingBrand = editingFieldId === `${item.id}_brand`;
             const isEditingName = editingFieldId === `${item.id}_name`;
             const isEditingPrice = editingFieldId === `${item.id}_purchasePrice`;
+            const isEditingRrp = editingFieldId === `${item.id}_rrp`;
             const isEditingWear = editingFieldId === `${item.id}_wearCount`;
             const isSelected = selectedItemIds.has(item.id);
 
@@ -1645,44 +1671,100 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
                         </div>
                       )}
 
-                      {/* Price (£) Editor */}
-                      {displaySettings.showPrice && (
-                        <div>
-                          {isEditingPrice ? (
-                            <div className="flex items-center gap-1">
-                              <span className="text-xs font-mono font-bold text-[#8C7355]">£</span>
-                              <input
-                                type="number"
-                                step="0.01"
-                                value={editingValue}
-                                onChange={(e) => setEditingValue(e.target.value)}
-                                onBlur={() => handleSaveInline(item.id, 'purchasePrice')}
-                                onKeyDown={(e) => {
-                                  if (e.key === 'Enter') handleSaveInline(item.id, 'purchasePrice');
-                                  if (e.key === 'Escape') setEditingFieldId(null);
-                                }}
-                                autoFocus
-                                className="w-16 text-xs font-mono font-bold text-[#1A1A1A] border border-[#8C7355] px-1 py-0.5 bg-white"
-                              />
-                              <button
-                                onClick={() => handleSaveInline(item.id, 'purchasePrice')}
-                                className="text-emerald-700 hover:text-emerald-900"
-                              >
-                                <Check className="w-3 h-3" />
-                              </button>
+                      {/* Price (£) & RRP (£) Editor */}
+                      {(displaySettings.showPrice || displaySettings.showRrp) && (
+                        <div className="flex flex-col items-end gap-0.5">
+                          {displaySettings.showPrice && (
+                            <div>
+                              {isEditingPrice ? (
+                                <div className="flex items-center gap-1">
+                                  <span className="text-xs font-mono font-bold text-[#8C7355]">£</span>
+                                  <input
+                                    type="number"
+                                    step="0.01"
+                                    value={editingValue}
+                                    onChange={(e) => setEditingValue(e.target.value)}
+                                    onBlur={() => handleSaveInline(item.id, 'purchasePrice')}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') handleSaveInline(item.id, 'purchasePrice');
+                                      if (e.key === 'Escape') setEditingFieldId(null);
+                                    }}
+                                    autoFocus
+                                    className="w-16 text-xs font-mono font-bold text-[#1A1A1A] border border-[#8C7355] px-1 py-0.5 bg-white"
+                                  />
+                                  <button
+                                    onClick={() => handleSaveInline(item.id, 'purchasePrice')}
+                                    className="text-emerald-700 hover:text-emerald-900"
+                                  >
+                                    <Check className="w-3 h-3" />
+                                  </button>
+                                </div>
+                              ) : (
+                                <span
+                                  onClick={() => {
+                                    setEditingFieldId(`${item.id}_purchasePrice`);
+                                    setEditingValue(item.purchasePrice.toString());
+                                  }}
+                                  className="text-xs font-mono font-bold text-[#1A1A1A] hover:text-[#8C7355] hover:underline cursor-pointer flex items-center gap-0.5"
+                                  title="Click to edit purchase price inline (£)"
+                                >
+                                  {formatGbp(item.purchasePrice)}
+                                  <PencilIcon />
+                                </span>
+                              )}
                             </div>
-                          ) : (
-                            <span
-                              onClick={() => {
-                                setEditingFieldId(`${item.id}_purchasePrice`);
-                                setEditingValue(item.purchasePrice.toString());
-                              }}
-                              className="text-xs font-mono font-bold text-[#1A1A1A] hover:text-[#8C7355] hover:underline cursor-pointer flex items-center gap-0.5"
-                              title="Click to edit price inline (£)"
-                            >
-                              {formatGbp(item.purchasePrice)}
-                              <PencilIcon />
-                            </span>
+                          )}
+
+                          {displaySettings.showRrp && (
+                            <div>
+                              {isEditingRrp ? (
+                                <div className="flex items-center gap-1">
+                                  <span className="text-[10px] font-mono text-[#767670]">RRP £</span>
+                                  <input
+                                    type="number"
+                                    step="0.01"
+                                    value={editingValue}
+                                    onChange={(e) => setEditingValue(e.target.value)}
+                                    onBlur={() => handleSaveInline(item.id, 'rrp')}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') handleSaveInline(item.id, 'rrp');
+                                      if (e.key === 'Escape') setEditingFieldId(null);
+                                    }}
+                                    autoFocus
+                                    className="w-14 text-[10px] font-mono font-medium text-[#1A1A1A] border border-[#8C7355] px-1 py-0.5 bg-white"
+                                  />
+                                  <button
+                                    onClick={() => handleSaveInline(item.id, 'rrp')}
+                                    className="text-emerald-700 hover:text-emerald-900"
+                                  >
+                                    <Check className="w-3 h-3" />
+                                  </button>
+                                </div>
+                              ) : (
+                                <span
+                                  onClick={() => {
+                                    setEditingFieldId(`${item.id}_rrp`);
+                                    setEditingValue(item.rrp !== undefined && item.rrp !== null ? item.rrp.toString() : '');
+                                  }}
+                                  className="text-[10px] font-mono text-[#767670] hover:text-[#8C7355] hover:underline cursor-pointer flex items-center gap-0.5"
+                                  title="Click to edit RRP inline (£)"
+                                >
+                                  {item.rrp ? (
+                                    <>
+                                      <span>RRP {formatGbp(item.rrp)}</span>
+                                      {item.purchasePrice > 0 && item.rrp > item.purchasePrice && (
+                                        <span className="text-[9px] text-emerald-700 font-bold ml-0.5">
+                                          (-{Math.round(((item.rrp - item.purchasePrice) / item.rrp) * 100)}%)
+                                        </span>
+                                      )}
+                                    </>
+                                  ) : (
+                                    <span className="text-[#A5A59E] italic">+ RRP</span>
+                                  )}
+                                  <PencilIcon />
+                                </span>
+                              )}
+                            </div>
                           )}
                         </div>
                       )}

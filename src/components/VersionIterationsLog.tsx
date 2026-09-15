@@ -34,12 +34,36 @@ export interface AppReleaseIteration {
 
 export const APP_ITERATIONS_LOG: AppReleaseIteration[] = [
   {
+    version: 'v4.6',
+    releaseDate: 'September 2026',
+    title: 'React Deduplication & Build Pipeline Stability',
+    summary:
+      'Configures strict single-instance React and React DOM resolution across Vite plugins and build outputs, eliminating runtime hook dispatcher conflicts and ensuring rock-solid WardrobeProvider initialization.',
+    isLatest: true,
+    tags: ['RUNTIME STABILITY', 'VITE DEDUPLICATION', 'REACT 19', 'BUILD VERIFICATION'],
+    changes: {
+      features: [
+        'Vite Runtime Deduplication: Configured explicit dedupe and optimizeDeps resolution for react, react-dom, and react-dom/client in vite.config.mjs.',
+        'Hook Dispatcher Protection: Ensured deterministic React dispatcher binding on initial component tree mount in sandboxed iframe environments.',
+      ],
+      fixes: [
+        'Fixed potential multiple React copy resolution causing "resolveDispatcher().useState" errors in WardrobeProvider.',
+        'Cleaned up obsolete archive fragments and verified full production compilation passing clean.',
+      ],
+      improvements: [
+        'Instantaneous cold-start initialization and clean hydration across all wardrobe views.',
+        'Maintained resilient ErrorBoundary recovery fallbacks with local state integrity.',
+      ],
+    },
+    affectedModules: ['Vite Config', 'WardrobeProvider', 'ErrorBoundary', 'Build System'],
+  },
+  {
     version: 'v4.5',
     releaseDate: 'September 2026',
     title: 'Instant Boot Recovery & Dedicated Resale Pipeline Workflow Bar',
     summary:
       'Eliminates blank page startup failures by moving storage sanitization into non-blocking asynchronous lifecycles with depth and cycle guards. Integrates the prominent Interactive Pipeline Stage Bar in the Sales & Resale view featuring Draft, Listed, Reserved, Awaiting Dispatch, In Transit, Completed, and Cancelled workflow stages with real-time valuation metrics.',
-    isLatest: true,
+    isLatest: false,
     tags: ['CRASH PREVENTION', 'PIPELINE STAGES', 'SALES WORKFLOW', 'BOOT RECOVERY', 'FILTER SYSTEM'],
     changes: {
       features: [

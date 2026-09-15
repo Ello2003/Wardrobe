@@ -25,6 +25,7 @@ export interface InventoryTableColumnSettings {
   showCategory: boolean;
   showBrand: boolean;
   showPrice: boolean;
+  showRrp?: boolean;
   showWearCount: boolean;
   showCondition: boolean;
   showSeason: boolean;
@@ -58,6 +59,7 @@ export interface InventoryDisplaySettings {
   showBrand: boolean;
   showCategory: boolean;
   showPrice: boolean;
+  showRrp?: boolean;
   showWearCount: boolean;
   showSeason: boolean;
   showCondition: boolean;
@@ -86,6 +88,7 @@ export const DEFAULT_INVENTORY_TABLE_SETTINGS: InventoryTableDisplaySettings = {
   showCategory: true,
   showBrand: true,
   showPrice: true,
+  showRrp: true,
   showWearCount: true,
   showCondition: true,
   showSeason: true,
@@ -108,6 +111,7 @@ export const DEFAULT_INVENTORY_DISPLAY_SETTINGS: InventoryDisplaySettings = {
   showBrand: true,
   showCategory: true,
   showPrice: true,
+  showRrp: true,
   showWearCount: true,
   showSeason: true,
   showCondition: true,
@@ -308,6 +312,7 @@ export const InventoryDisplaySettingsModal: React.FC<InventoryDisplaySettingsMod
     { key: 'showBrand', label: 'Brand Name' },
     { key: 'showCategory', label: 'Category & Subcategory' },
     { key: 'showPrice', label: 'Purchase Price (£)' },
+    { key: 'showRrp', label: 'RRP / Retail Benchmark (£)' },
     { key: 'showWearCount', label: 'Wear Count & CPW' },
     { key: 'showSeason', label: 'Season Badges' },
     { key: 'showCondition', label: 'Condition Grade' },
@@ -328,6 +333,7 @@ export const InventoryDisplaySettingsModal: React.FC<InventoryDisplaySettingsMod
     { key: 'showCategory', label: 'Category & Subcategory', description: 'Category pill with inline selector' },
     { key: 'showBrand', label: 'Brand & Designer', description: 'Brand name with inline edit' },
     { key: 'showPrice', label: 'Purchase Price (£)', description: 'Price in GBP with inline edit' },
+    { key: 'showRrp', label: 'RRP Retail Price (£)', description: 'Retail price benchmark with inline edit' },
     { key: 'showWearCount', label: 'Wear Count & +1 Logger', description: 'Wear tracker with quick +1 button' },
     { key: 'showCondition', label: 'Condition Grade', description: 'Condition dropdown selector' },
     { key: 'showSeason', label: 'Target Season', description: 'Spring, Summer, Autumn, Winter tags' },
@@ -698,6 +704,7 @@ export const InventoryDisplaySettingsModal: React.FC<InventoryDisplaySettingsMod
                         showCategory: true,
                         showBrand: true,
                         showPrice: true,
+                        showRrp: true,
                         showWearCount: true,
                         showCondition: true,
                         showSeason: true,

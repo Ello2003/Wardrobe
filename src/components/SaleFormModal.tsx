@@ -19,6 +19,7 @@ import {
   ShippingStatus,
 } from '../types';
 import { useWardrobe } from '../context/WardrobeContext';
+import { calculateRrpSavings } from '../utils/formatters';
 
 interface SaleFormModalProps {
   isOpen: boolean;
@@ -43,6 +44,7 @@ export const SaleFormModal: React.FC<SaleFormModalProps> = ({
   const [color, setColor] = useState('');
   const [condition, setCondition] = useState<Condition>('Excellent');
   const [originalPricePaid, setOriginalPricePaid] = useState('');
+  const [rrp, setRrp] = useState('');
   const [listingPrice, setListingPrice] = useState('');
   const [soldPrice, setSoldPrice] = useState('');
   const [platform, setPlatform] = useState<SellingPlatform>('Vinted');
@@ -71,6 +73,7 @@ export const SaleFormModal: React.FC<SaleFormModalProps> = ({
       setColor(saleItemToEdit.color || '');
       setCondition(saleItemToEdit.condition || 'Excellent');
       setOriginalPricePaid(saleItemToEdit.originalPricePaid?.toString() || '0');
+      setRrp(saleItemToEdit.rrp !== undefined && saleItemToEdit.rrp !== null ? saleItemToEdit.rrp.toString() : '');
       setListingPrice(saleItemToEdit.listingPrice?.toString() || '');
       setSoldPrice(saleItemToEdit.soldPrice !== undefined && saleItemToEdit.soldPrice !== null ? saleItemToEdit.soldPrice.toString() : '');
       setPlatform(saleItemToEdit.platform || 'Vinted');
@@ -108,6 +111,7 @@ export const SaleFormModal: React.FC<SaleFormModalProps> = ({
       setColor('');
       setCondition('Excellent');
       setOriginalPricePaid('0');
+      setRrp('');
       setListingPrice('');
       setSoldPrice('');
       setPlatform('Vinted');
@@ -148,6 +152,7 @@ export const SaleFormModal: React.FC<SaleFormModalProps> = ({
       color: color.trim() || undefined,
       condition,
       originalPricePaid: parseFloat(originalPricePaid) || 0,
+      rrp: rrp.trim() !== '' ? parseFloat(rrp) || undefined : undefined,
       listingPrice: parseFloat(listingPrice) || 0,
       soldPrice: soldPrice.trim() !== '' ? parseFloat(soldPrice) : undefined,
       platform,
@@ -356,8 +361,8 @@ export const SaleFormModal: React.FC<SaleFormModalProps> = ({
             </div>
           </div>
 
-          {/* Row 3: Financials - Original Paid vs Listing Price */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-3 bg-[#F8F7F4] border border-[#E5E5E1] rounded-lg">
+          {/* Row 3: Financials - Original Paid, RRP vs Listing Price */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 p-3 bg-[#F8F7F4] border border-[#E5E5E1] rounded-lg">
             <div>
               <label className="text-[11px] font-mono text-[#5A5A55] block mb-1 font-semibold">
                 Original Cost Basis (£)
@@ -374,6 +379,26 @@ export const SaleFormModal: React.FC<SaleFormModalProps> = ({
                   onChange={(e) => setOriginalPricePaid(e.target.value)}
                   placeholder="0.00"
                   className="w-full pl-7 pr-3 py-1.5 bg-white border border-[#E5E5E1] rounded-md text-xs font-mono text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="text-[11px] font-mono text-[#5A5A55] block mb-1 font-semibold">
+                RRP Retail Price (£)
+              </label>
+              <div className="relative">
+                <span className="absolute left-2.5 top-2 text-[#767670] font-mono text-xs">
+                  £
+                </span>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={rrp}
+                  onChange={(e) => setRrp(e.target.value)}
+                  placeholder="e.g. 250.00"
+                  className="w-full pl-7 pr-3 py-1.5 bg-white border border-[#E5E5E1] rounded-md text-xs font-mono text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none font-semibold"
                 />
               </div>
             </div>
@@ -419,6 +444,24 @@ export const SaleFormModal: React.FC<SaleFormModalProps> = ({
               </div>
             </div>
           </div>
+
+          {/* RRP vs Asking / Realized Price Savings Tag */}
+          {(() => {
+            const r = parseFloat(rrp);
+            const l = parseFloat(listingPrice);
+            if (!isNaN(r) && !isNaN(l) && r > l) {
+              const savings = calculateRrpSavings(l, r);
+              return (
+                <div className="flex items-center justify-between text-xs bg-[#EBF3ED] text-[#245934] border border-[#BBDBC2] px-3 py-1.5 rounded-md">
+                  <span className="font-mono font-medium">
+                    Discount vs RRP: <strong>{savings.formattedDiscount}</strong> (Listed at {savings.formattedSavings} below retail)
+                  </span>
+                  <span className="text-[10px] text-[#2E7D32]/80 uppercase tracking-wider font-mono">Retail Comparison</span>
+                </div>
+              );
+            }
+            return null;
+          })()}
 
           {/* Row 4: Platform & Status */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">

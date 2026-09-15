@@ -387,6 +387,7 @@ export function exportWardrobeToCsv(items: WardrobeItem[]): string {
     'Brand',
     'Category',
     'Purchase Price (£)',
+    'RRP (£)',
     'Current Valuation (£)',
     'Wear Count',
     'Cost Per Wear (£)',
@@ -407,6 +408,7 @@ export function exportWardrobeToCsv(items: WardrobeItem[]): string {
       `"${(i.brand || '').replace(/"/g, '""')}"`,
       `"${(i.category || '').replace(/"/g, '""')}"`,
       Number(i.purchasePrice || 0).toFixed(2),
+      i.rrp !== undefined && i.rrp !== null ? Number(i.rrp).toFixed(2) : '',
       Number(i.currentValuation || i.purchasePrice || 0).toFixed(2),
       i.wearCount || 0,
       cpw.toFixed(2),
@@ -435,6 +437,7 @@ export function exportSalesToCsv(items: SaleItem[]): string {
     'Platform',
     'Status',
     'Original Cost (£)',
+    'RRP (£)',
     'Listing Price (£)',
     'Sold Price (£)',
     'Net Profit (£)',
@@ -455,6 +458,7 @@ export function exportSalesToCsv(items: SaleItem[]): string {
       `"${i.platform}"`,
       `"${i.status}"`,
       Number(i.originalPricePaid || 0).toFixed(2),
+      i.rrp !== undefined && i.rrp !== null ? Number(i.rrp).toFixed(2) : '',
       Number(i.listingPrice || 0).toFixed(2),
       i.soldPrice !== undefined ? Number(i.soldPrice).toFixed(2) : '',
       profit.toFixed(2),
@@ -479,6 +483,7 @@ export function exportShoppingToCsv(items: ShoppingItem[]): string {
     'Brand',
     'Category',
     'Estimated Price (£)',
+    'RRP (£)',
     'Priority',
     'Status',
     'Retailer',
@@ -494,6 +499,7 @@ export function exportShoppingToCsv(items: ShoppingItem[]): string {
     `"${(i.brand || '').replace(/"/g, '""')}"`,
     `"${(i.category || '').replace(/"/g, '""')}"`,
     Number(i.estimatedPrice || 0).toFixed(2),
+    i.rrp !== undefined && i.rrp !== null ? Number(i.rrp).toFixed(2) : '',
     `"${i.priority}"`,
     `"${i.status}"`,
     `"${(i.retailerName || '').replace(/"/g, '""')}"`,
@@ -610,6 +616,7 @@ export function repairDatabaseInconsistencies(
     ...it,
     name: it.name && it.name.trim() ? it.name.trim() : 'Untitled Garment',
     purchasePrice: Math.max(0, Number(it.purchasePrice) || 0),
+    rrp: it.rrp !== undefined && it.rrp !== null ? Math.max(0, Number(it.rrp) || 0) : undefined,
     wearCount: Math.max(0, Number(it.wearCount) || 0),
   }));
 
@@ -624,6 +631,14 @@ export function repairDatabaseInconsistencies(
     ...s,
     listingPrice: Math.max(0, Number(s.listingPrice) || 0),
     originalPricePaid: Math.max(0, Number(s.originalPricePaid) || 0),
+    rrp: s.rrp !== undefined && s.rrp !== null ? Math.max(0, Number(s.rrp) || 0) : undefined,
+  }));
+
+  // Sanitize shopping
+  const repairedShopping = (data.shoppingList || []).map((sh) => ({
+    ...sh,
+    estimatedPrice: Math.max(0, Number(sh.estimatedPrice) || 0),
+    rrp: sh.rrp !== undefined && sh.rrp !== null ? Math.max(0, Number(sh.rrp) || 0) : undefined,
   }));
 
   return {
@@ -631,5 +646,6 @@ export function repairDatabaseInconsistencies(
     items: repairedItems,
     outfits: repairedOutfits,
     saleItems: repairedSales,
+    shoppingList: repairedShopping,
   };
 }

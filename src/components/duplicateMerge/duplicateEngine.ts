@@ -46,9 +46,13 @@ export const buildDuplicateItemRefs = (
   scope: 'all' | 'wardrobe' | 'shopping' | 'selling'
 ): DuplicateItemRef[] => {
   const allRefs: DuplicateItemRef[] = [];
+  const safeItems = Array.isArray(items) ? items : [];
+  const safeShopping = Array.isArray(shoppingList) ? shoppingList : [];
+  const safeSale = Array.isArray(saleItems) ? saleItems : [];
 
   if (scope === 'all' || scope === 'wardrobe') {
-    items.forEach((item, idx) => {
+    safeItems.forEach((item, idx) => {
+      if (!item) return;
       const isArchived = Boolean(item.isArchived);
       const statusText = isArchived
         ? 'Archived'
@@ -72,7 +76,7 @@ export const buildDuplicateItemRefs = (
         material: item.material,
         condition: item.condition,
         season: item.season,
-        tags: item.tags || [],
+        tags: Array.isArray(item.tags) ? item.tags : [],
         notes: item.notes,
         wearCount: item.wearCount || 0,
         status: statusText,
@@ -87,7 +91,8 @@ export const buildDuplicateItemRefs = (
   }
 
   if (scope === 'all' || scope === 'shopping') {
-    shoppingList.forEach((item, idx) => {
+    safeShopping.forEach((item, idx) => {
+      if (!item) return;
       const rawStatus = item.status || 'To Buy';
       const statusText = `Wishlist (${rawStatus})`;
       const isArchived = false;
@@ -105,7 +110,7 @@ export const buildDuplicateItemRefs = (
         color: item.color,
         material: item.material,
         season: item.season ? [item.season] : undefined,
-        tags: item.tags || [],
+        tags: Array.isArray(item.tags) ? item.tags : [],
         notes: item.reasonOrGap,
         status: statusText,
         statusCategory: getStatusCategory(rawStatus, isArchived),
@@ -120,7 +125,8 @@ export const buildDuplicateItemRefs = (
   }
 
   if (scope === 'all' || scope === 'selling') {
-    saleItems.forEach((item, idx) => {
+    safeSale.forEach((item, idx) => {
+      if (!item) return;
       const rawStatus = item.status || 'Listed';
       const statusText = `${item.platform || 'Resale'} (${rawStatus})`;
       const isArchived = false;
@@ -138,7 +144,7 @@ export const buildDuplicateItemRefs = (
         size: item.size,
         color: item.color,
         condition: item.condition,
-        tags: item.tags || [],
+        tags: Array.isArray(item.tags) ? item.tags : [],
         notes: item.notes || item.description,
         status: statusText,
         statusCategory: getStatusCategory(rawStatus, isArchived),
@@ -317,8 +323,10 @@ export const computeDuplicateClusters = (
           uf.union(a.refKey, b.refKey);
         }
       } else if (config.matchTags === 'any_overlap') {
-        const sharedTags = a.tags.filter((t) =>
-          b.tags.some((bt) => normalizeString(bt) === normalizeString(t))
+        const tagsA = Array.isArray(a.tags) ? a.tags : [];
+        const tagsB = Array.isArray(b.tags) ? b.tags : [];
+        const sharedTags = tagsA.filter((t) =>
+          tagsB.some((bt) => normalizeString(bt) === normalizeString(t))
         );
         if (sharedTags.length > 0) {
           uf.union(a.refKey, b.refKey);
@@ -382,7 +390,7 @@ export const computeDuplicateClusters = (
       // Analyze multi-parameter alignments
       const colorCounts: Record<string, { count: number; hex: string; family: string }> = {};
       bucket.forEach((it) => {
-        const cName = it.color?.trim() || 'Unspecified';
+        const cName = typeof it.color === 'string' && it.color.trim() ? it.color.trim() : 'Unspecified';
         if (!colorCounts[cName]) {
           colorCounts[cName] = {
             count: 0,
@@ -407,12 +415,12 @@ export const computeDuplicateClusters = (
         new Set(bucket.map((b) => b.statusCategory))
       ) as DuplicateItemRef['statusCategory'][];
 
-      const prices = bucket.map((b) => b.price || 0);
-      const minPrice = Math.min(...prices);
-      const maxPrice = Math.max(...prices);
-      const avgPrice = Math.round(prices.reduce((a, b) => a + b, 0) / prices.length);
-      const totalWears = bucket.reduce((sum, b) => sum + (b.wearCount || 0), 0);
-      const allTags = Array.from(new Set(bucket.flatMap((b) => b.tags || [])));
+      const prices = bucket.map((b) => Number(b.price) || 0);
+      const minPrice = prices.length > 0 ? Math.min(...prices) : 0;
+      const maxPrice = prices.length > 0 ? Math.max(0, ...prices) : 0;
+      const avgPrice = prices.length > 0 ? Math.round(prices.reduce((a, b) => a + b, 0) / prices.length) : 0;
+      const totalWears = bucket.reduce((sum, b) => sum + (Number(b.wearCount) || 0), 0);
+      const allTags = Array.from(new Set(bucket.flatMap((b) => (Array.isArray(b.tags) ? b.tags : []))));
 
       // Colour status detection
       let colorStatus: DuplicateCluster['colorStatus'] = 'same_exact';

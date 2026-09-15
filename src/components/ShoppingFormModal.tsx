@@ -3,6 +3,7 @@ import { X, Calculator, Link2, Sparkles, Loader2, Check, Upload, Image as ImageI
 import { ShoppingItem, ShoppingPriority, ShoppingStatus, Category, Season } from '../types';
 import { useWardrobe } from '../context/WardrobeContext';
 import { GarmentImage } from './GarmentImage';
+import { calculateRrpSavings } from '../utils/formatters';
 
 interface ShoppingFormModalProps {
   isOpen: boolean;
@@ -30,6 +31,7 @@ export const ShoppingFormModal: React.FC<ShoppingFormModalProps> = ({
   const [isAddingCategory, setIsAddingCategory] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
   const [estimatedPrice, setEstimatedPrice] = useState('');
+  const [rrp, setRrp] = useState('');
   const [priority, setPriority] = useState<ShoppingPriority>('High');
   const [status, setStatus] = useState<ShoppingStatus>('Researching');
   const [targetStoreUrl, setTargetStoreUrl] = useState('');
@@ -55,6 +57,7 @@ export const ShoppingFormModal: React.FC<ShoppingFormModalProps> = ({
       setBrand(initialShoppingItem.brand || '');
       setCategory(initialShoppingItem.category || safeCategories[0] || 'Outerwear');
       setEstimatedPrice(initialShoppingItem.estimatedPrice != null ? String(initialShoppingItem.estimatedPrice) : '');
+      setRrp(initialShoppingItem.rrp != null ? String(initialShoppingItem.rrp) : '');
       setPriority(initialShoppingItem.priority || 'High');
       setStatus(initialShoppingItem.status || 'Researching');
       setTargetStoreUrl(initialShoppingItem.targetStoreUrl || '');
@@ -80,6 +83,7 @@ export const ShoppingFormModal: React.FC<ShoppingFormModalProps> = ({
       setBrand('');
       setCategory(safeCategories[0] || 'Outerwear');
       setEstimatedPrice('');
+      setRrp('');
       setPriority('High');
       setStatus('Researching');
       setTargetStoreUrl('');
@@ -154,6 +158,7 @@ export const ShoppingFormModal: React.FC<ShoppingFormModalProps> = ({
           if (item.brand) setBrand(item.brand);
           if (item.category && categories.includes(item.category)) setCategory(item.category);
           if (item.purchasePrice) setEstimatedPrice(String(item.purchasePrice));
+          if (item.rrp) setRrp(String(item.rrp));
           if (item.notes) setReasonOrGap(item.notes);
           if (item.retailerName) setRetailerName(item.retailerName);
           if (Array.isArray(item.tags)) setTagsInput(item.tags.join(', '));
@@ -190,6 +195,7 @@ export const ShoppingFormModal: React.FC<ShoppingFormModalProps> = ({
       if (item?.brand) setBrand(item.brand);
       if (item?.category) setCategory(item.category);
       if (item?.purchasePrice) setEstimatedPrice(String(item.purchasePrice));
+      if (item?.rrp) setRrp(String(item.rrp));
       if (item?.imageUrl) setImageUrl(item.imageUrl);
       if (item?.targetStoreUrl) setTargetStoreUrl(item.targetStoreUrl);
       if (item?.retailerName) setRetailerName(item.retailerName);
@@ -208,6 +214,7 @@ export const ShoppingFormModal: React.FC<ShoppingFormModalProps> = ({
     if (!name.trim() || !brand.trim()) return;
 
     const priceNum = Math.max(0, Number.parseFloat(estimatedPrice) || 0);
+    const rrpNum = rrp.trim() ? Math.max(0, Number.parseFloat(rrp) || 0) : undefined;
     const wearsNum = Math.max(1, Number.parseInt(estimatedWearsPerYear, 10) || 30);
     const tags = tagsInput
       .split(',')
@@ -219,6 +226,7 @@ export const ShoppingFormModal: React.FC<ShoppingFormModalProps> = ({
       brand: brand.trim(),
       category,
       estimatedPrice: priceNum,
+      rrp: rrpNum,
       priority,
       status,
       targetStoreUrl: targetStoreUrl.trim() || undefined,
@@ -285,14 +293,33 @@ export const ShoppingFormModal: React.FC<ShoppingFormModalProps> = ({
             <div><label className="text-[11px] font-mono text-[#5A5A55] block mb-1 font-semibold">Brand / Designer *</label><input type="text" required value={brand} onChange={(event) => setBrand(event.target.value)} placeholder="e.g. Mulberry" className="w-full px-2.5 py-1.5 bg-white border border-[#D5D5D0] text-xs text-[#1A1A1A] font-mono font-semibold focus:border-[#8C7355] focus:outline-none" /></div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
             <div>
               <div className="flex items-center justify-between mb-1"><label className="text-[11px] font-mono text-[#5A5A55] font-semibold">Category *</label>{!isAddingCategory ? <button type="button" onClick={() => setIsAddingCategory(true)} className="text-[10px] font-mono text-[#8C7355] hover:text-[#1A1A1A] hover:underline cursor-pointer">+ New Category</button> : <button type="button" onClick={() => setIsAddingCategory(false)} className="text-[10px] font-mono text-[#767670] hover:text-[#1A1A1A] cursor-pointer">Cancel</button>}</div>
               {isAddingCategory ? <div className="flex items-center gap-1.5"><input type="text" value={newCategoryName} onChange={(event) => setNewCategoryName(event.target.value)} placeholder="Category name..." onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); const clean = newCategoryName.trim(); if (clean) { addCategory(clean); setCategory(clean); setNewCategoryName(''); setIsAddingCategory(false); } } if (event.key === 'Escape') setIsAddingCategory(false); }} autoFocus className="flex-1 px-2.5 py-1.5 bg-white border border-[#8C7355] text-xs text-[#1A1A1A] focus:outline-none" /><button type="button" onClick={() => { const clean = newCategoryName.trim(); if (clean) { addCategory(clean); setCategory(clean); setNewCategoryName(''); setIsAddingCategory(false); } }} disabled={!newCategoryName.trim()} className="px-2.5 py-1.5 bg-[#8C7355] text-white text-xs font-mono disabled:opacity-50 cursor-pointer">Save</button></div> : <select value={category} onChange={(event) => setCategory(event.target.value)} className="w-full px-2.5 py-1.5 bg-white border border-[#D5D5D0] text-xs text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none">{category && !safeCategories.includes(category) && <option value={category}>{category}</option>}{safeCategories.map((itemCategory) => <option key={itemCategory} value={itemCategory}>{itemCategory}</option>)}</select>}
             </div>
             <div><label className="text-[11px] font-mono text-[#5A5A55] block mb-1 font-semibold">Estimated Price (£ GBP) *</label><div className="relative"><span className="absolute left-2.5 top-1.5 text-xs text-[#8C7355] font-mono font-bold">£</span><input type="number" min="0" step="0.01" required value={estimatedPrice} onChange={(event) => setEstimatedPrice(event.target.value)} placeholder="650" className="w-full pl-6 pr-2.5 py-1.5 bg-white border border-[#D5D5D0] text-xs font-mono font-bold text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none" /></div></div>
+            <div><label className="text-[11px] font-mono text-[#5A5A55] block mb-1 font-semibold">RRP Retail Price (£ GBP)</label><div className="relative"><span className="absolute left-2.5 top-1.5 text-xs text-[#8C7355] font-mono font-bold">£</span><input type="number" min="0" step="0.01" value={rrp} onChange={(event) => setRrp(event.target.value)} placeholder="850" className="w-full pl-6 pr-2.5 py-1.5 bg-white border border-[#D5D5D0] text-xs font-mono font-bold text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none" /></div></div>
             <div><label className="text-[11px] font-mono text-[#5A5A55] block mb-1 font-semibold">Priority</label><select value={priority} onChange={(event) => setPriority(event.target.value as ShoppingPriority)} className="w-full px-2.5 py-1.5 bg-white border border-[#D5D5D0] text-xs text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none"><option value="Essential / Must-Have">Essential / Must-Have</option><option value="High">High</option><option value="Medium">Medium</option><option value="Low / Wishlist">Low / Wishlist</option></select></div>
           </div>
+
+          {/* Live RRP Savings Indicator */}
+          {(() => {
+            const p = parseFloat(estimatedPrice);
+            const r = parseFloat(rrp);
+            if (!isNaN(p) && !isNaN(r) && r > p) {
+              const savings = calculateRrpSavings(p, r);
+              return (
+                <div className="flex items-center justify-between text-xs bg-[#EBF3ED] text-[#245934] border border-[#BBDBC2] px-3 py-1.5">
+                  <span className="font-mono font-medium">
+                    Saving vs RRP: <strong>{savings.formattedSavings}</strong> ({savings.formattedDiscount})
+                  </span>
+                  <span className="text-[11px] text-[#2E7D32]/80 uppercase tracking-wider font-mono">Retail discount recorded</span>
+                </div>
+              );
+            }
+            return null;
+          })()}
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3"><div><label className="text-[11px] font-mono text-[#5A5A55] block mb-1 font-semibold">Shopping Status</label><select value={status} onChange={(event) => setStatus(event.target.value as ShoppingStatus)} className="w-full px-2.5 py-1.5 bg-white border border-[#D5D5D0] text-xs text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none"><option value="Researching">Researching</option><option value="To Buy">To Buy</option><option value="In Basket">In Basket</option><option value="Purchased">Purchased</option><option value="Sold">Sold</option><option value="Cancelled">Cancelled</option><option value="Passed">Passed</option></select></div><div><label className="text-[11px] font-mono text-[#5A5A55] block mb-1 font-semibold">Target Store URL</label><input type="url" value={targetStoreUrl} onChange={(event) => setTargetStoreUrl(event.target.value)} placeholder="https://..." className="w-full px-2.5 py-1.5 bg-white border border-[#D5D5D0] text-xs text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none" /></div></div>
 

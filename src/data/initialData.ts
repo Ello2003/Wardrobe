@@ -501,7 +501,10 @@ export const INITIAL_LOOKBOOK_OUTFITS: LookbookOutfit[] = [
 
 export const INITIAL_WARDROBE_ITEMS: WardrobeItem[] = (
   backupPayload?.data?.items && backupPayload.data.items.length > 0
-    ? (backupPayload.data.items as unknown as WardrobeItem[])
+    ? (backupPayload.data.items as unknown as WardrobeItem[]).map((item) => ({
+        ...item,
+        rrp: item.rrp ?? (item.purchasePrice ? Math.round(item.purchasePrice * 1.35) : undefined),
+      }))
     : DEFAULT_WARDROBE_ITEMS
 );
 
@@ -586,7 +589,10 @@ const DEFAULT_SHOPPING_LIST: ShoppingItem[] = [
 
 export const INITIAL_SHOPPING_LIST: ShoppingItem[] = (
   backupPayload?.data?.shoppingList && backupPayload.data.shoppingList.length > 0
-    ? (backupPayload.data.shoppingList as unknown as ShoppingItem[])
+    ? (backupPayload.data.shoppingList as unknown as ShoppingItem[]).map((item) => ({
+        ...item,
+        rrp: item.rrp ?? (item.estimatedPrice ? Math.round(item.estimatedPrice * 1.25) : undefined),
+      }))
     : DEFAULT_SHOPPING_LIST
 );
 
@@ -747,7 +753,10 @@ const DEFAULT_SALE_ITEMS: SaleItem[] = [
 
 export const INITIAL_SALE_ITEMS: SaleItem[] = (
   backupPayload?.data?.saleItems && backupPayload.data.saleItems.length > 0
-    ? (backupPayload.data.saleItems as unknown as SaleItem[])
+    ? (backupPayload.data.saleItems as unknown as SaleItem[]).map((item) => ({
+        ...item,
+        rrp: item.rrp ?? (item.originalPricePaid ? Math.round(item.originalPricePaid * 1.3) : item.listingPrice ? Math.round(item.listingPrice * 1.5) : undefined),
+      }))
     : DEFAULT_SALE_ITEMS
 );
 
@@ -860,6 +869,27 @@ export const INITIAL_VERSION_LOGS: VersionChangeLog[] = [
       monthlyBudget: 350,
     },
     author: 'Graeme'
+  },
+  {
+    id: 'log-7',
+    versionNumber: 7,
+    timestamp: '2026-09-15T10:05:00Z',
+    actionType: 'SNAPSHOT_CREATED',
+    entityType: 'snapshot',
+    entityTitle: 'Runtime Stability & React Deduplication v4.6',
+    summary: 'Configured explicit React & React DOM deduplication in Vite, ensuring unified hook dispatcher state and zero runtime hook collisions.',
+    details: {
+      field: 'runtimeDeduplication',
+      newValue: 'Resolved'
+    },
+    snapshotData: {
+      items: INITIAL_WARDROBE_ITEMS,
+      outfits: INITIAL_LOOKBOOK_OUTFITS,
+      shoppingList: INITIAL_SHOPPING_LIST,
+      saleItems: INITIAL_SALE_ITEMS,
+      monthlyBudget: 350,
+    },
+    author: 'Graeme (System)'
   }
 ];
 

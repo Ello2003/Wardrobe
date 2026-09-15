@@ -5,7 +5,8 @@ import {
 } from './duplicateMergeTypes';
 import { WardrobeItem, ShoppingItem, SaleItem } from '../../types';
 
-export const normalizeString = (str: string = ''): string => {
+export const normalizeString = (str?: string | null): string => {
+  if (!str || typeof str !== 'string') return '';
   return str
     .toLowerCase()
     .trim()
@@ -83,7 +84,7 @@ export const BRAND_ALIASES: Record<string, string> = {
   'isaia napoli': 'isaia',
 };
 
-export const normalizeBrand = (brand: string = ''): string => {
+export const normalizeBrand = (brand?: string | null): string => {
   const clean = normalizeString(brand);
   if (!clean) return 'unbranded';
 
@@ -108,8 +109,8 @@ export const normalizeBrand = (brand: string = ''): string => {
   return stripped || clean;
 };
 
-export const extractGarmentType = (title: string = '', category: string = ''): string => {
-  const norm = normalizeString(`${title} ${category}`);
+export const extractGarmentType = (title?: string | null, category?: string | null): string => {
+  const norm = normalizeString(`${title || ''} ${category || ''}`);
   if (norm.includes('shirt') || norm.includes('chemise') || norm.includes('camicia') || norm.includes('button')) return 'shirt';
   if (norm.includes('jacket') || norm.includes('blazer') || norm.includes('coat') || norm.includes('overcoat') || norm.includes('waxed')) return 'jacket';
   if (norm.includes('trouser') || norm.includes('pant') || norm.includes('chino') || norm.includes('jean') || norm.includes('denim')) return 'trouser';
@@ -119,7 +120,7 @@ export const extractGarmentType = (title: string = '', category: string = ''): s
   return normalizeString(category || 'garment');
 };
 
-export const cleanItemTitle = (str: string = '', brand: string = ''): string => {
+export const cleanItemTitle = (str?: string | null, brand?: string | null): string => {
   let cleaned = normalizeString(str);
   
   // Strip brand name if present in title
@@ -141,7 +142,8 @@ export const cleanItemTitle = (str: string = '', brand: string = ''): string => 
     .trim();
 };
 
-export const getColorSwatchHex = (colorName: string = ''): string => {
+export const getColorSwatchHex = (colorName?: string | null): string => {
+  if (!colorName || typeof colorName !== 'string') return '#E5E5E1';
   const c = colorName.toLowerCase().trim();
   if (!c || c === 'unspecified') return '#E5E5E1';
   if (c.includes('black') || c.includes('nero') || c.includes('noir') || c.includes('onyx') || c.includes('jet black')) return '#1A1A1A';
@@ -169,7 +171,8 @@ export const getColorSwatchHex = (colorName: string = ''): string => {
   return '#9A9A95';
 };
 
-export const getColorFamily = (colorName: string = ''): string => {
+export const getColorFamily = (colorName?: string | null): string => {
+  if (!colorName || typeof colorName !== 'string') return 'unspecified';
   const c = colorName.toLowerCase().trim();
   if (!c || c === 'unspecified') return 'unspecified';
   if (c.includes('black') || c.includes('nero') || c.includes('noir') || c.includes('onyx') || c.includes('jet black')) return 'black';
@@ -191,7 +194,8 @@ export const getColorFamily = (colorName: string = ''): string => {
   return c;
 };
 
-export const normalizeSize = (sizeStr: string = ''): string => {
+export const normalizeSize = (sizeStr?: string | null): string => {
+  if (!sizeStr || typeof sizeStr !== 'string') return '';
   return sizeStr
     .toLowerCase()
     .trim()
@@ -199,14 +203,16 @@ export const normalizeSize = (sizeStr: string = ''): string => {
     .replace(/\s+/g, '');
 };
 
-export const normalizeMaterial = (mat: string = ''): string => {
+export const normalizeMaterial = (mat?: string | null): string => {
+  if (!mat || typeof mat !== 'string') return '';
   return normalizeString(mat)
     .replace(/\b(100%|pure|genuine|fine|gradea|premium)\b/gi, '')
     .trim();
 };
 
-export const getStatusCategory = (rawStatus: string = '', isArchived: boolean = false): StatusCategory => {
+export const getStatusCategory = (rawStatus?: string | null, isArchived: boolean = false): StatusCategory => {
   if (isArchived) return 'archived';
+  if (!rawStatus || typeof rawStatus !== 'string') return 'active';
   const s = rawStatus.toLowerCase();
   if (s.includes('cancel') || s.includes('passed') || s.includes('declined') || s.includes('rejected')) {
     return 'cancelled_passed';
@@ -406,7 +412,7 @@ const KNOWN_COLORS = [
 
 const detectGarmentColors = (item: { color?: string; name?: string }): Set<string> => {
   const colors = new Set<string>();
-  if (item.color) {
+  if (item && item.color && typeof item.color === 'string') {
     const raw = item.color.toLowerCase().trim();
     if (raw && raw !== 'neutral' && raw !== 'unspecified' && raw !== 'multi') {
       KNOWN_COLORS.forEach((c) => {
@@ -415,7 +421,7 @@ const detectGarmentColors = (item: { color?: string; name?: string }): Set<strin
       if (colors.size === 0 && raw.length > 2) colors.add(raw);
     }
   }
-  if (item.name) {
+  if (item && item.name && typeof item.name === 'string') {
     const nameLower = item.name.toLowerCase();
     KNOWN_COLORS.forEach((c) => {
       const regex = new RegExp(`\\b${c}\\b`, 'i');
@@ -455,8 +461,8 @@ export const isGarmentDuplicate = (
   }
 
   // 2. Category Distinction Check: If items have different explicit categories, they are NOT duplicates!
-  const catA = (a.category || '').trim().toLowerCase();
-  const catB = (b.category || '').trim().toLowerCase();
+  const catA = String(a.category || '').trim().toLowerCase();
+  const catB = String(b.category || '').trim().toLowerCase();
   if (catA && catB && catA !== 'other' && catB !== 'other' && catA !== catB) {
     return false;
   }
@@ -466,10 +472,10 @@ export const isGarmentDuplicate = (
     return true;
   }
 
-  const rawBrandA = (a.brand || '').trim();
-  const rawBrandB = (b.brand || '').trim();
-  const rawNameA = (a.name || '').trim();
-  const rawNameB = (b.name || '').trim();
+  const rawBrandA = String(a.brand || '').trim();
+  const rawBrandB = String(b.brand || '').trim();
+  const rawNameA = String(a.name || '').trim();
+  const rawNameB = String(b.name || '').trim();
 
   const brandA = normalizeBrand(rawBrandA);
   const brandB = normalizeBrand(rawBrandB);
@@ -602,19 +608,18 @@ export const consolidateWardrobeDuplicates = (
     });
 
     // Sum all wear counts
-    const totalWears = cluster.reduce((sum, it) => sum + (it.wearCount || 0), 0);
+    const totalWears = cluster.reduce((sum, it) => sum + (Number(it.wearCount) || 0), 0);
 
     // Merge unique tags
-    const allTags = Array.from(new Set(cluster.flatMap((it) => it.tags || [])));
+    const allTags = Array.from(new Set(cluster.flatMap((it) => (Array.isArray(it.tags) ? it.tags : []))));
 
     // Maximum valuation / purchase price
-    const maxValuation = Math.max(
-      ...cluster.map((it) => it.currentValuation || it.purchasePrice || 0)
-    );
+    const valuations = cluster.map((it) => Number(it.currentValuation) || Number(it.purchasePrice) || 0);
+    const maxValuation = valuations.length > 0 ? Math.max(0, ...valuations) : 0;
 
     // Combine distinct notes
     const notePieces = Array.from(
-      new Set(cluster.map((it) => (it.notes || '').trim()).filter(Boolean))
+      new Set(cluster.map((it) => String(it.notes || '').trim()).filter(Boolean))
     );
     const combinedNotes = notePieces.join(' | ');
 
@@ -702,13 +707,13 @@ export const consolidateShoppingDuplicates = (
 
     secondaries.forEach((s) => remappedIds.set(s.id, primary.id));
 
-    const allTags = Array.from(new Set(cluster.flatMap((it) => it.tags || [])));
+    const allTags = Array.from(new Set(cluster.flatMap((it) => (Array.isArray(it.tags) ? it.tags : []))));
     const bestImage = primary.imageUrl || cluster.find((it) => it.imageUrl)?.imageUrl || '';
     const reasonPieces = Array.from(
-      new Set(cluster.map((it) => (it.reasonOrGap || '').trim()).filter(Boolean))
+      new Set(cluster.map((it) => String(it.reasonOrGap || '').trim()).filter(Boolean))
     );
     const allMatching = Array.from(
-      new Set(cluster.flatMap((it) => it.matchingWardrobeItemIds || []))
+      new Set(cluster.flatMap((it) => (Array.isArray(it.matchingWardrobeItemIds) ? it.matchingWardrobeItemIds : [])))
     );
 
     consolidated.push({
@@ -774,9 +779,9 @@ export const consolidateSaleDuplicates = (
 
     secondaries.forEach((s) => remappedIds.set(s.id, primary.id));
 
-    const allTags = Array.from(new Set(cluster.flatMap((it) => it.tags || [])));
+    const allTags = Array.from(new Set(cluster.flatMap((it) => (Array.isArray(it.tags) ? it.tags : []))));
     const bestImage = primary.imageUrl || cluster.find((it) => it.imageUrl)?.imageUrl || '';
-    const notePieces = Array.from(new Set(cluster.map((it) => (it.notes || '').trim()).filter(Boolean)));
+    const notePieces = Array.from(new Set(cluster.map((it) => String(it.notes || '').trim()).filter(Boolean)));
 
     consolidated.push({
       ...primary,

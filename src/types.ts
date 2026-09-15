@@ -41,6 +41,8 @@ export type ShoppingStatus =
 export interface AppSettings {
   currency: 'GBP' | 'USD' | 'EUR' | 'JPY' | 'AUD' | 'CAD';
   currencySymbol: string;
+  showRrp?: boolean; // Show RRP (Recommended Retail Price) sitewide
+  showRrpSavings?: boolean; // Highlight savings & discounts vs RRP
   inlineEditingEnabled: boolean;
   inlineEditTrigger: 'single-click' | 'double-click' | 'always-visible';
   showInlinePencils: boolean;
@@ -129,6 +131,8 @@ export const DEFAULT_VINTED_WORKER_AUTH: VintedWorkerAuth = {
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   currency: 'GBP',
   currencySymbol: '£',
+  showRrp: true,
+  showRrpSavings: true,
   inlineEditingEnabled: true,
   inlineEditTrigger: 'single-click',
   showInlinePencils: true,
@@ -162,6 +166,8 @@ export interface BulkEditWardrobePayload {
   isArchived?: boolean;
   priceAdjustmentType?: 'set' | 'increase_percent' | 'decrease_percent' | 'add_amount';
   priceAdjustmentValue?: number;
+  rrpAdjustmentType?: 'none' | 'set_fixed' | 'percent_discount' | 'percent_increase' | 'add_fixed' | 'match_purchase';
+  rrpAdjustmentValue?: number;
 }
 
 export interface BulkEditShoppingPayload {
@@ -174,6 +180,8 @@ export interface BulkEditShoppingPayload {
   removeTags?: string[];
   priceAdjustmentType?: 'set' | 'increase_percent' | 'decrease_percent' | 'add_amount';
   priceAdjustmentValue?: number;
+  rrpAdjustmentType?: 'none' | 'set_fixed' | 'percent_discount' | 'percent_increase' | 'add_fixed';
+  rrpAdjustmentValue?: number;
 }
 
 export interface BulkEditSalePayload {
@@ -187,6 +195,8 @@ export interface BulkEditSalePayload {
   removeTags?: string[];
   priceAdjustmentType?: 'set' | 'increase_percent' | 'decrease_percent' | 'add_amount';
   priceAdjustmentValue?: number;
+  rrpAdjustmentType?: 'none' | 'set_fixed' | 'percent_discount' | 'percent_increase' | 'add_fixed';
+  rrpAdjustmentValue?: number;
 }
 
 export interface BulkEditOutfitPayload {
@@ -208,6 +218,7 @@ export interface WardrobeItem {
   season: Season[];
   purchaseDate: string; // ISO date string (YYYY-MM-DD)
   purchasePrice: number; // in £ GBP
+  rrp?: number; // Recommended Retail Price in £ GBP
   currentValuation?: number; // in £ GBP
   wearCount: number;
   lastWornDate?: string;
@@ -246,6 +257,7 @@ export interface LookbookOutfitPiece {
   isGap?: boolean;
   color?: string;
   estimatedPrice?: number;
+  rrp?: number; // Recommended Retail Price in £ GBP
   stylingRole?: string;
 }
 
@@ -280,6 +292,7 @@ export interface ShoppingItem {
   category: Category;
   estimatedPrice: number; // in £ GBP
   actualPricePaid?: number; // in £ GBP if bought
+  rrp?: number; // Recommended Retail Price in £ GBP
   targetStoreUrl?: string;
   storeUrl?: string;
   vintedUrl?: string;
@@ -351,6 +364,7 @@ export interface SaleItem {
   originalPricePaid: number; // £ cost basis
   listingPrice: number; // £ asking price
   soldPrice?: number; // £ final sale price
+  rrp?: number; // Recommended Retail Price in £ GBP
   platform: SellingPlatform;
   status: SellingStatus;
   shippingStatus?: ShippingStatus;

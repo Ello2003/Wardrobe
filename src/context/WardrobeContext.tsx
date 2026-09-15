@@ -383,6 +383,9 @@ interface WardrobeContextType {
     activeInventoryCount: number;
     archivedItemsCount: number;
     totalValuationGbp: number;
+    totalRrpGbp: number;
+    totalSavingsFromRrpGbp: number;
+    overallSavingsPercent: number;
     averageCostPerWearGbp: number;
     totalWearsRecorded: number;
     totalOutfitsCount: number;
@@ -754,22 +757,26 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   // Helper to snapshot undo state before any destructive mutation or bulk operation
   const captureUndoState = useCallback(
     (actionTitle: string) => {
-      const stateSnapshot: UndoState = {
-        items: JSON.parse(JSON.stringify(items)),
-        outfits: JSON.parse(JSON.stringify(outfits)),
-        shoppingList: JSON.parse(JSON.stringify(shoppingList)),
-        saleItems: JSON.parse(JSON.stringify(saleItems)),
-        categories: JSON.parse(JSON.stringify(categories)),
-        monthlyBudget,
-        actionTitle,
-        timestamp: Date.now(),
-      };
-      setUndoStack((prev) => [stateSnapshot, ...prev.slice(0, 29)]);
-      setUndoToast({
-        visible: true,
-        message: actionTitle,
-        actionTitle,
-      });
+      try {
+        const stateSnapshot: UndoState = {
+          items: JSON.parse(JSON.stringify(items)),
+          outfits: JSON.parse(JSON.stringify(outfits)),
+          shoppingList: JSON.parse(JSON.stringify(shoppingList)),
+          saleItems: JSON.parse(JSON.stringify(saleItems)),
+          categories: JSON.parse(JSON.stringify(categories)),
+          monthlyBudget,
+          actionTitle,
+          timestamp: Date.now(),
+        };
+        setUndoStack((prev) => [stateSnapshot, ...prev.slice(0, 29)]);
+        setUndoToast({
+          visible: true,
+          message: actionTitle,
+          actionTitle,
+        });
+      } catch (err) {
+        console.warn('[Undo] Failed to capture undo snapshot:', err);
+      }
     },
     [items, outfits, shoppingList, saleItems, categories, monthlyBudget]
   );
@@ -1788,6 +1795,7 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         season: [shoppingItem.season],
         purchaseDate: today,
         purchasePrice: finalPrice,
+        rrp: shoppingItem.rrp,
         currentValuation: finalPrice,
         wearCount: 0,
         condition,
@@ -2066,6 +2074,7 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         color: wardrobeItem.color,
         condition: listingData.condition || wardrobeItem.condition,
         originalPricePaid: wardrobeItem.purchasePrice,
+        rrp: wardrobeItem.rrp,
         listingPrice: listingData.listingPrice,
         platform: listingData.platform,
         status: 'Listed',
@@ -2148,6 +2157,7 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         color: shopItem.color || 'Neutral',
         condition: 'Pristine / New',
         originalPricePaid: shopItem.actualPricePaid || shopItem.estimatedPrice || 0,
+        rrp: shopItem.rrp,
         listingPrice: price,
         platform: platform,
         status: 'Listed',
@@ -2246,6 +2256,7 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         category: item.category,
         estimatedPrice: item.purchasePrice,
         actualPricePaid: item.purchasePrice,
+        rrp: item.rrp,
         priority: 'Medium',
         status: 'Purchased',
         season: item.season[0] || 'All-Season',
@@ -2729,7 +2740,7 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             ...o,
             itemIds: Array.from(
               new Set(
-                o.itemIds.map((id) => (secWardrobeIds.has(id) ? primaryId : id))
+                (o.itemIds || []).map((id) => (secWardrobeIds.has(id) ? primaryId : id))
               )
             ),
           }))
@@ -2922,7 +2933,7 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       // Update outfits lookbook references
       setOutfits((prev) =>
         prev.map((o) => {
-          const updatedItemIds = o.itemIds.map((id) => {
+          const updatedItemIds = (o.itemIds || []).map((id) => {
             const cl = clusters.find((c) =>
               c.secondary.some((s) => s.collection === 'wardrobe' && s.id === id)
             );
@@ -5120,6 +5131,12 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const activeInventoryCount = activeItems.length;
     const archivedItemsCount = archivedItems.length;
     const totalValuationGbp = activeItems.reduce((sum, i) => sum + (i.purchasePrice || 0), 0);
+    const totalRrpGbp = activeItems.reduce(
+      (sum, i) => sum + (typeof i.rrp === 'number' && !isNaN(i.rrp) ? i.rrp : i.purchasePrice || 0),
+      0
+    );
+    const totalSavingsFromRrpGbp = Math.max(0, totalRrpGbp - totalValuationGbp);
+    const overallSavingsPercent = totalRrpGbp > 0 ? Math.round((totalSavingsFromRrpGbp / totalRrpGbp) * 100) : 0;
     const totalWearsRecorded = activeItems.reduce((sum, i) => sum + (i.wearCount || 0), 0);
     const averageCostPerWearGbp =
       totalWearsRecorded > 0 ? totalValuationGbp / totalWearsRecorded : totalValuationGbp;
@@ -5206,6 +5223,9 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       activeInventoryCount,
       archivedItemsCount,
       totalValuationGbp,
+      totalRrpGbp,
+      totalSavingsFromRrpGbp,
+      overallSavingsPercent,
       averageCostPerWearGbp,
       totalWearsRecorded,
       totalOutfitsCount: outfits.length,

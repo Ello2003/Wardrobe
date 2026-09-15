@@ -21,6 +21,7 @@ export interface MarketplaceOrderLike {
   orderId: string;
   title: string;
   price: string | number;
+  rrp?: string | number;
   date?: string;
   image?: string;
   type?: 'sold' | 'purchased' | 'all' | 'active';
@@ -64,6 +65,7 @@ interface CommonFields {
   orderId: string;
   orderTitle: string;
   orderPrice: number;
+  orderRrp?: number;
   rawDate: string;
   isActiveListing: boolean;
   isCancelled: boolean;
@@ -82,6 +84,7 @@ function deriveCommonFields(
 ): CommonFields {
   const orderId = order.orderId ? String(order.orderId).trim() : '';
   const orderPrice = parseMarketplacePrice(order.price);
+  const orderRrp = order.rrp !== undefined ? parseMarketplacePrice(order.rrp) : undefined;
   const rawDate = order.date ? String(order.date).slice(0, 10) : now.slice(0, 10);
   const orderTitle = (order.title || `${platform.platformLabel} Order`).trim();
   const rawStatus = (order.transactionStatus || order.status || '').toLowerCase();
@@ -90,6 +93,7 @@ function deriveCommonFields(
     orderId,
     orderTitle,
     orderPrice,
+    orderRrp: orderRrp && orderRrp > 0 ? orderRrp : undefined,
     rawDate,
     isActiveListing: order.type === 'active' || order.status === 'Listed',
     isCancelled: isCancelledStatus(rawStatus),
@@ -133,6 +137,7 @@ export function buildMarketplaceSaleItem(
     originalPricePaid: 0,
     listingPrice: f.orderPrice,
     soldPrice: f.isActiveListing ? undefined : f.orderPrice,
+    rrp: f.orderRrp,
     platform: platform.platformLabel as SaleItem['platform'],
     status: f.isActiveListing ? 'Listed' : f.isCancelled ? 'Draft' : 'Sold',
     shippingStatus: f.isActiveListing || f.isCancelled ? 'Not Required' : 'Delivered',
@@ -181,6 +186,7 @@ export function buildMarketplaceShoppingItem(
     size: f.inferredSize,
     estimatedPrice: f.orderPrice,
     actualPricePaid: f.orderPrice,
+    rrp: f.orderRrp,
     priority: platform.defaultShoppingPriority || 'Essential / Must-Have',
     status: f.isCancelled ? 'Cancelled' : 'Purchased',
     season: 'All-Season',
@@ -232,6 +238,7 @@ export function buildMarketplaceWardrobeItem(
     color: f.inferredColor || 'Various',
     season: ['All-Season'],
     purchasePrice: f.orderPrice,
+    rrp: f.orderRrp,
     purchaseDate: f.rawDate,
     wearCount: 0,
     imageUrl: order.image || '',

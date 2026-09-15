@@ -95,8 +95,18 @@ export const ItemDetailModal: React.FC<ItemDetailModalProps> = ({ item, onClose,
             <h2 className="text-lg font-serif font-bold text-[#1A1A1A] leading-tight">{item.name}</h2>
           </div>
           <div className="text-right font-mono">
-            <span className="text-[10px] text-[#767670]">Price</span>
+            <span className="text-[10px] text-[#767670]">Price Paid</span>
             <div className="text-base font-bold text-[#1A1A1A]">{formatGbp(item.purchasePrice)}</div>
+            {item.rrp !== undefined && item.rrp !== null && item.rrp > 0 && (
+              <div className="text-[11px] text-[#767670]">
+                RRP: <span className="line-through">{formatGbp(item.rrp)}</span>
+                {item.rrp > item.purchasePrice && (
+                  <span className="ml-1 text-emerald-700 font-bold">
+                    (-{Math.round(((item.rrp - item.purchasePrice) / item.rrp) * 100)}%)
+                  </span>
+                )}
+              </div>
+            )}
           </div>
         </div>
 
@@ -156,6 +166,13 @@ export const ItemDetailModal: React.FC<ItemDetailModalProps> = ({ item, onClose,
               <span className="text-[#767670] font-mono text-[10px]">Purchase Date:</span>
               <p className="text-[#1A1A1A] font-semibold">{item.purchaseDate || 'Unknown'}</p>
             </div>
+
+            {item.rrp !== undefined && item.rrp !== null && (
+              <div>
+                <span className="text-[#767670] font-mono text-[10px]">Original RRP:</span>
+                <p className="text-[#1A1A1A] font-semibold font-mono">{formatGbp(item.rrp)}</p>
+              </div>
+            )}
           </div>
 
           {/* Vinted Acquisition Provenance */}

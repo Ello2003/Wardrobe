@@ -158,6 +158,10 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
   const [priceAdjType, setPriceAdjType] = useState<'none' | 'set_fixed' | 'percent_discount' | 'percent_increase' | 'add_fixed'>('none');
   const [priceAdjValue, setPriceAdjValue] = useState<string>('');
 
+  // RRP Adjustments
+  const [rrpAdjType, setRrpAdjType] = useState<'none' | 'set_fixed' | 'percent_markup_over_price' | 'percent_discount' | 'add_fixed'>('none');
+  const [rrpAdjValue, setRrpAdjValue] = useState<string>('');
+
   // 1. Resolve full items matching selectedIds
   const selectedItemsData = useMemo(() => {
     const idSet = new Set(selectedIds);
@@ -361,6 +365,12 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
     else if (priceAdjType === 'percent_increase') stagedSummary.push(`Markup: +${priceAdjValue}%`);
     else if (priceAdjType === 'add_fixed') stagedSummary.push(`Price: +£${priceAdjValue}`);
   }
+  if (rrpAdjType !== 'none' && rrpAdjValue) {
+    if (rrpAdjType === 'set_fixed') stagedSummary.push(`RRP: £${rrpAdjValue}`);
+    else if (rrpAdjType === 'percent_markup_over_price') stagedSummary.push(`RRP: +${rrpAdjValue}% over price`);
+    else if (rrpAdjType === 'percent_discount') stagedSummary.push(`RRP: -${rrpAdjValue}%`);
+    else if (rrpAdjType === 'add_fixed') stagedSummary.push(`RRP: +£${rrpAdjValue}`);
+  }
   if (targetPriority !== '__NO_CHANGE__') stagedSummary.push(`Priority: ${targetPriority}`);
   if (targetShoppingStatus !== '__NO_CHANGE__') stagedSummary.push(`Status: ${targetShoppingStatus}`);
   if (targetRetailer.trim()) stagedSummary.push(`Retailer: "${targetRetailer.trim()}"`);
@@ -397,6 +407,7 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
     );
 
     const priceValNum = parseFloat(priceAdjValue);
+    const rrpValNum = parseFloat(rrpAdjValue);
 
     if (targetType === 'wardrobe') {
       batchUpdateItems(
@@ -433,6 +444,20 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
             patch.currentValuation = patch.purchasePrice;
           }
 
+          if (rrpAdjType !== 'none' && !isNaN(rrpValNum) && rrpValNum >= 0) {
+            let rrpCurr = item.rrp || item.purchasePrice || 0;
+            if (rrpAdjType === 'set_fixed') rrpCurr = rrpValNum;
+            else if (rrpAdjType === 'percent_markup_over_price') {
+              const base = patch.purchasePrice ?? item.purchasePrice ?? 0;
+              rrpCurr = base * (1 + rrpValNum / 100);
+            } else if (rrpAdjType === 'percent_discount') {
+              rrpCurr = Math.max(0, rrpCurr * (1 - rrpValNum / 100));
+            } else if (rrpAdjType === 'add_fixed') {
+              rrpCurr = Math.max(0, rrpCurr + rrpValNum);
+            }
+            patch.rrp = Math.round(rrpCurr * 100) / 100;
+          }
+
           return patch;
         },
         `Bulk updated ${count} wardrobe items`
@@ -462,6 +487,20 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
             else if (priceAdjType === 'percent_increase') curr = curr * (1 + priceValNum / 100);
             else if (priceAdjType === 'add_fixed') curr = Math.max(0, curr + priceValNum);
             patch.estimatedPrice = Math.round(curr * 100) / 100;
+          }
+
+          if (rrpAdjType !== 'none' && !isNaN(rrpValNum) && rrpValNum >= 0) {
+            let rrpCurr = item.rrp || item.estimatedPrice || 0;
+            if (rrpAdjType === 'set_fixed') rrpCurr = rrpValNum;
+            else if (rrpAdjType === 'percent_markup_over_price') {
+              const base = patch.estimatedPrice ?? item.estimatedPrice ?? 0;
+              rrpCurr = base * (1 + rrpValNum / 100);
+            } else if (rrpAdjType === 'percent_discount') {
+              rrpCurr = Math.max(0, rrpCurr * (1 - rrpValNum / 100));
+            } else if (rrpAdjType === 'add_fixed') {
+              rrpCurr = Math.max(0, rrpCurr + rrpValNum);
+            }
+            patch.rrp = Math.round(rrpCurr * 100) / 100;
           }
 
           return patch;
@@ -494,6 +533,20 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
             else if (priceAdjType === 'percent_increase') curr = curr * (1 + priceValNum / 100);
             else if (priceAdjType === 'add_fixed') curr = Math.max(0, curr + priceValNum);
             patch.listingPrice = Math.round(curr * 100) / 100;
+          }
+
+          if (rrpAdjType !== 'none' && !isNaN(rrpValNum) && rrpValNum >= 0) {
+            let rrpCurr = item.rrp || item.originalPricePaid || item.listingPrice || 0;
+            if (rrpAdjType === 'set_fixed') rrpCurr = rrpValNum;
+            else if (rrpAdjType === 'percent_markup_over_price') {
+              const base = item.originalPricePaid || patch.listingPrice || item.listingPrice || 0;
+              rrpCurr = base * (1 + rrpValNum / 100);
+            } else if (rrpAdjType === 'percent_discount') {
+              rrpCurr = Math.max(0, rrpCurr * (1 - rrpValNum / 100));
+            } else if (rrpAdjType === 'add_fixed') {
+              rrpCurr = Math.max(0, rrpCurr + rrpValNum);
+            }
+            patch.rrp = Math.round(rrpCurr * 100) / 100;
           }
 
           return patch;
@@ -1123,6 +1176,74 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
                     </p>
                   </div>
                 )}
+
+                {/* Batch RRP Retail Price Adjustment */}
+                <div className="pt-4 border-t border-[#E5E5E1] space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-mono uppercase tracking-wider text-[#1A1A1A] font-bold">
+                      RRP Retail Price Adjustment
+                    </span>
+                    <span className="text-[10px] font-mono text-[#767670]">
+                      Sets or updates retail benchmark value
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label
+                        htmlFor="bulk-rrp-adj-type"
+                        className="block text-[10px] font-mono uppercase tracking-widest text-[#767670] font-bold mb-1.5"
+                      >
+                        RRP Formula
+                      </label>
+                      <select
+                        id="bulk-rrp-adj-type"
+                        value={rrpAdjType}
+                        onChange={(e) => setRrpAdjType(e.target.value as any)}
+                        className="w-full bg-white border border-[#D5D5D0] p-2.5 text-xs font-mono text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none cursor-pointer"
+                      >
+                        <option value="none">No RRP Adjustment</option>
+                        <option value="set_fixed">Set Fixed RRP for All (£)</option>
+                        <option value="percent_markup_over_price">Markup over Purchase Price (% e.g. +35%)</option>
+                        <option value="percent_discount">Discount Existing RRP (%)</option>
+                        <option value="add_fixed">Add Fixed Amount to RRP (+£)</option>
+                      </select>
+                    </div>
+
+                    {rrpAdjType !== 'none' && (
+                      <div>
+                        <label
+                          htmlFor="bulk-rrp-val"
+                          className="block text-[10px] font-mono uppercase tracking-widest text-[#8C7355] font-bold mb-1.5"
+                        >
+                          {rrpAdjType === 'percent_markup_over_price'
+                            ? 'Markup Over Price (%)'
+                            : rrpAdjType === 'percent_discount'
+                            ? 'RRP Discount (%)'
+                            : rrpAdjType === 'set_fixed'
+                            ? 'New Fixed RRP (£)'
+                            : 'Amount to Add to RRP (£)'}
+                        </label>
+                        <div className="relative">
+                          <input
+                            id="bulk-rrp-val"
+                            type="number"
+                            step="any"
+                            min="0"
+                            value={rrpAdjValue}
+                            onChange={(e) => setRrpAdjValue(e.target.value)}
+                            placeholder="e.g. 35"
+                            className="w-full bg-white border border-[#D5D5D0] p-2.5 text-xs font-mono text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none"
+                            required
+                          />
+                          <span className="absolute right-3 top-2.5 text-xs font-mono text-[#767670]">
+                            {rrpAdjType.includes('percent') ? '%' : '£'}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
             </div>
           )}

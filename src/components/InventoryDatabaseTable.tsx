@@ -48,6 +48,7 @@ type SortField =
   | 'brand'
   | 'category'
   | 'purchasePrice'
+  | 'rrp'
   | 'wearCount'
   | 'condition'
   | 'purchaseDate';
@@ -59,6 +60,7 @@ const DEFAULT_COLUMN_WIDTHS: Record<string, number> = {
   category: 160,
   brand: 140,
   price: 110,
+  rrp: 110,
   wearCount: 110,
   condition: 140,
   season: 130,
@@ -155,6 +157,9 @@ export const InventoryDatabaseTable: React.FC<InventoryDatabaseTableProps> = ({
         case 'purchasePrice':
           comparison = (a.purchasePrice || 0) - (b.purchasePrice || 0);
           break;
+        case 'rrp':
+          comparison = (a.rrp || 0) - (b.rrp || 0);
+          break;
         case 'wearCount':
           comparison = (a.wearCount || 0) - (b.wearCount || 0);
           break;
@@ -177,6 +182,9 @@ export const InventoryDatabaseTable: React.FC<InventoryDatabaseTableProps> = ({
       if (!isNaN(parsed) && parsed >= 0) {
         updateItem(itemId, { purchasePrice: parsed });
       }
+    } else if (field === 'rrp') {
+      const parsed = parseFloat(editingValue);
+      updateItem(itemId, { rrp: !isNaN(parsed) && parsed >= 0 ? parsed : undefined });
     } else if (field === 'wearCount') {
       const parsed = parseInt(editingValue, 10);
       if (!isNaN(parsed) && parsed >= 0) {
@@ -369,6 +377,22 @@ export const InventoryDatabaseTable: React.FC<InventoryDatabaseTableProps> = ({
               </ResizableHeaderCell>
             )}
 
+            {/* RRP Retail Price (£) */}
+            {tableSettings.showRrp && (
+              <ResizableHeaderCell
+                columnId="rrp"
+                width={getWidth('rrp')}
+                minWidth={80}
+                isResizing={resizingColumn === 'rrp'}
+                onResizeStart={startResize}
+                onDoubleClickReset={() => resetColumnWidth('rrp')}
+                onClick={() => handleSort('rrp')}
+              >
+                <span>RRP (£)</span>
+                <SortIcon field="rrp" />
+              </ResizableHeaderCell>
+            )}
+
             {/* Wear Count */}
             {tableSettings.showWearCount && (
               <ResizableHeaderCell
@@ -494,6 +518,7 @@ export const InventoryDatabaseTable: React.FC<InventoryDatabaseTableProps> = ({
             const isEditingBrand = editingFieldId === `${item.id}_brand`;
             const isEditingName = editingFieldId === `${item.id}_name`;
             const isEditingPrice = editingFieldId === `${item.id}_purchasePrice`;
+            const isEditingRrp = editingFieldId === `${item.id}_rrp`;
             const isEditingWear = editingFieldId === `${item.id}_wearCount`;
             const isEditingLocation = editingFieldId === `${item.id}_storageLocation`;
             const isSelected = selectedItemIds.has(item.id);
@@ -688,6 +713,57 @@ export const InventoryDatabaseTable: React.FC<InventoryDatabaseTableProps> = ({
                         title="Click to edit price inline"
                       >
                         <span>{formatGbp(item.purchasePrice)}</span>
+                        <Pencil className="w-2.5 h-2.5 opacity-0 group-hover/field:opacity-60 shrink-0 text-[#8C7355]" />
+                      </div>
+                    )}
+                  </td>
+                )}
+
+                {/* RRP Retail Price (£) (Inline Editable) */}
+                {tableSettings.showRrp && (
+                  <td
+                    style={{ width: `${getWidth('rrp')}px` }}
+                    className={`${densityPadding}`}
+                  >
+                    {isEditingRrp ? (
+                      <div className="flex items-center gap-0.5 w-full">
+                        <span className="font-mono text-[#767670] font-bold">£</span>
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={editingValue}
+                          onChange={(e) => setEditingValue(e.target.value)}
+                          onBlur={() => handleSaveInline(item.id, 'rrp')}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleSaveInline(item.id, 'rrp');
+                            if (e.key === 'Escape') setEditingFieldId(null);
+                          }}
+                          autoFocus
+                          placeholder="0.00"
+                          className="w-full font-mono font-medium text-[#1A1A1A] border border-[#8C7355] px-1 py-0.5 bg-white rounded-xs"
+                        />
+                      </div>
+                    ) : (
+                      <div
+                        onClick={() => {
+                          setEditingFieldId(`${item.id}_rrp`);
+                          setEditingValue(item.rrp !== undefined && item.rrp !== null ? item.rrp.toString() : '');
+                        }}
+                        className="font-mono text-[#5A5A55] hover:text-[#8C7355] cursor-pointer flex items-center gap-1 group/field"
+                        title="Click to edit RRP inline"
+                      >
+                        {item.rrp ? (
+                          <div className="flex items-center gap-1">
+                            <span className="font-medium text-[#1A1A1A]">{formatGbp(item.rrp)}</span>
+                            {item.purchasePrice > 0 && item.rrp > item.purchasePrice && (
+                              <span className="text-[9px] bg-emerald-50 text-emerald-700 px-1 py-0.2 rounded font-mono font-bold" title={`Saved ${formatGbp(item.rrp - item.purchasePrice)}`}>
+                                -{Math.round(((item.rrp - item.purchasePrice) / item.rrp) * 100)}%
+                              </span>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-[#A5A59E] italic text-[11px]">— Set —</span>
+                        )}
                         <Pencil className="w-2.5 h-2.5 opacity-0 group-hover/field:opacity-60 shrink-0 text-[#8C7355]" />
                       </div>
                     )}

@@ -80,7 +80,7 @@ export const ToolsView: React.FC<ToolsViewProps> = ({
       const cfg = getDefaultPresetConfig('standard');
       const allClusters = computeDuplicateClusters(refs, cfg, 'standard', {});
       const ignored = getStoredIgnoredClusters();
-      return allClusters.filter((c) => !ignored.has(c.id));
+      return allClusters.filter((c) => !ignored.has(c.id) && !ignored.has(c.key));
     } catch (e) {
       console.error('Error computing duplicate clusters', e);
       return [];
