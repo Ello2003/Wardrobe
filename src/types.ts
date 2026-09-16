@@ -549,3 +549,44 @@ export interface EditorialFeedSettings {
   lastRefreshedAt?: string;
   defaultViewMode: 'magazine' | 'compact' | 'editorial-split';
 }
+
+export interface GoogleAiEditorialResearchResult {
+  id: string;
+  query: string;
+  timestamp: string;
+  researchMarkdown: string;
+  structuredBreakdown: {
+    title: string;
+    aesthetic: string;
+    occasion: LookbookOutfit['occasion'];
+    season: LookbookOutfit['season'];
+    summary: string;
+    colorPalette: string[];
+    paletteNames?: string[];
+    tags: string[];
+    photographicMood?: string;
+    stylingTip?: string;
+    pieces: Array<{
+      name: string;
+      category: Category;
+      color: string;
+      suggestedBrand?: string;
+      estimatedPrice?: number;
+      stylingRole?: string;
+      silhouette?: string;
+      matchedWardrobeItemId?: string;
+      matchedItemName?: string;
+      matchedItemImage?: string;
+      isGap?: boolean;
+    }>;
+  };
+  groundingSources: Array<{
+    title: string;
+    url: string;
+    domain?: string;
+  }>;
+  searchQueries?: string[];
+  userNotes?: string;
+  isSaved?: boolean;
+}
+

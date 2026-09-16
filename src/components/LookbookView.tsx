@@ -25,6 +25,7 @@ import { EditorialLookbookModal } from './EditorialLookbookModal';
 import { EDITORIAL_RESEARCH_IDEAS } from '../data/editorialInspirations';
 import { formatGbp } from '../utils/formatters';
 import { EmptyState } from './common/EmptyState';
+import { GoogleAiResearchStudio } from './GoogleAiResearchStudio';
 
 interface LookbookViewProps {
   onOpenCreateLook: () => void;
@@ -49,6 +50,7 @@ export const LookbookView: React.FC<LookbookViewProps> = ({
   const [selectedOccasion, setSelectedOccasion] = useState<string>('All');
   const [selectedSeason, setSelectedSeason] = useState<string>('All');
   const [lookbookFilter, setLookbookFilter] = useState<'all' | 'closet' | 'editorial' | 'favorites'>('all');
+  const [showGoogleAiStudio, setShowGoogleAiStudio] = useState<boolean>(false);
   const [isGeneratingAI, setIsGeneratingAI] = useState<boolean>(false);
   const [aiGeneratedOutfits, setAiGeneratedOutfits] = useState<any[]>([]);
   const [aiError, setAiError] = useState<string | null>(null);
@@ -174,6 +176,24 @@ export const LookbookView: React.FC<LookbookViewProps> = ({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          {/* Google AI Editorial Research Studio Trigger */}
+          <button
+            onClick={() => setShowGoogleAiStudio(!showGoogleAiStudio)}
+            id="lookbook-google-ai-studio-btn"
+            className={`flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-mono font-bold rounded-md shadow-2xs transition-all cursor-pointer ${
+              showGoogleAiStudio
+                ? 'bg-[#8C7355] text-white border border-[#8C7355]'
+                : 'bg-[#FAF9F7] hover:bg-[#F3F2EE] text-[#8C7355] border border-[#8C7355]'
+            }`}
+            title="Open Google AI Fashion & Editorial Research Studio with Live Google Search Grounding"
+          >
+            <Sparkles className={`w-3.5 h-3.5 ${showGoogleAiStudio ? 'text-amber-200' : 'text-amber-600'}`} />
+            <span>Google AI Research</span>
+            <span className="text-[9px] px-1.5 py-0.2 bg-emerald-100 text-emerald-800 rounded font-mono font-semibold">
+              Live Search
+            </span>
+          </button>
+
           {/* Internet Research / Scout Ideas */}
           <button
             onClick={() => setIsImportModalOpen(true)}
@@ -211,11 +231,14 @@ export const LookbookView: React.FC<LookbookViewProps> = ({
       {/* Sub-Navigation: Scope Filters */}
       <div className="flex flex-wrap items-center justify-between gap-3 bg-white border border-[#E5E5E1] rounded-xl p-3 shadow-xs">
         {/* Scope Tabs */}
-        <div className="flex items-center gap-1.5 bg-[#FAF9F7] p-1 border border-[#E5E5E1] rounded-lg">
+        <div className="flex items-center gap-1.5 bg-[#FAF9F7] p-1 border border-[#E5E5E1] rounded-lg flex-wrap">
           <button
-            onClick={() => setLookbookFilter('all')}
+            onClick={() => {
+              setLookbookFilter('all');
+              setShowGoogleAiStudio(false);
+            }}
             className={`px-3 py-1 text-xs font-mono rounded transition-colors cursor-pointer ${
-              lookbookFilter === 'all'
+              lookbookFilter === 'all' && !showGoogleAiStudio
                 ? 'bg-white text-[#1A1A1A] font-bold shadow-2xs border border-[#D5D5D0]'
                 : 'text-[#767670] hover:text-[#1A1A1A]'
             }`}
@@ -223,9 +246,12 @@ export const LookbookView: React.FC<LookbookViewProps> = ({
             All Formulas ({outfits.length})
           </button>
           <button
-            onClick={() => setLookbookFilter('closet')}
+            onClick={() => {
+              setLookbookFilter('closet');
+              setShowGoogleAiStudio(false);
+            }}
             className={`px-3 py-1 text-xs font-mono rounded transition-colors cursor-pointer ${
-              lookbookFilter === 'closet'
+              lookbookFilter === 'closet' && !showGoogleAiStudio
                 ? 'bg-white text-[#1A1A1A] font-bold shadow-2xs border border-[#D5D5D0]'
                 : 'text-[#767670] hover:text-[#1A1A1A]'
             }`}
@@ -233,9 +259,12 @@ export const LookbookView: React.FC<LookbookViewProps> = ({
             Wardrobe Formulations ({closetCount})
           </button>
           <button
-            onClick={() => setLookbookFilter('editorial')}
+            onClick={() => {
+              setLookbookFilter('editorial');
+              setShowGoogleAiStudio(false);
+            }}
             className={`px-3 py-1 text-xs font-mono rounded transition-colors cursor-pointer flex items-center gap-1.5 ${
-              lookbookFilter === 'editorial'
+              lookbookFilter === 'editorial' && !showGoogleAiStudio
                 ? 'bg-white text-[#8C7355] font-bold shadow-2xs border border-[#8C7355]'
                 : 'text-[#767670] hover:text-[#1A1A1A]'
             }`}
@@ -244,15 +273,29 @@ export const LookbookView: React.FC<LookbookViewProps> = ({
             <span>Photographic Ideas ({editorialCount})</span>
           </button>
           <button
-            onClick={() => setLookbookFilter('favorites')}
+            onClick={() => {
+              setLookbookFilter('favorites');
+              setShowGoogleAiStudio(false);
+            }}
             className={`px-3 py-1 text-xs font-mono rounded transition-colors cursor-pointer flex items-center gap-1 ${
-              lookbookFilter === 'favorites'
+              lookbookFilter === 'favorites' && !showGoogleAiStudio
                 ? 'bg-white text-rose-600 font-bold shadow-2xs border border-[#D5D5D0]'
                 : 'text-[#767670] hover:text-[#1A1A1A]'
             }`}
           >
             <Heart className="w-3 h-3" />
             <span>Favorites</span>
+          </button>
+          <button
+            onClick={() => setShowGoogleAiStudio(!showGoogleAiStudio)}
+            className={`px-3 py-1 text-xs font-mono rounded transition-colors cursor-pointer flex items-center gap-1.5 ${
+              showGoogleAiStudio
+                ? 'bg-[#8C7355] text-white font-bold shadow-2xs'
+                : 'text-[#8C7355] hover:text-[#786248]'
+            }`}
+          >
+            <Sparkles className="w-3 h-3" />
+            <span>AI Research Studio</span>
           </button>
         </div>
 
@@ -291,6 +334,19 @@ export const LookbookView: React.FC<LookbookViewProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Google AI Editorial Research Studio Canvas */}
+      {showGoogleAiStudio && (
+        <div className="animate-fadeIn">
+          <GoogleAiResearchStudio
+            onClose={() => setShowGoogleAiStudio(false)}
+            onNavigateToLookbook={() => {
+              setShowGoogleAiStudio(false);
+              setLookbookFilter('all');
+            }}
+          />
+        </div>
+      )}
 
       {/* AI Generated Outfits Drawer (if generated) */}
       {aiGeneratedOutfits.length > 0 && (
@@ -472,6 +528,12 @@ export const LookbookView: React.FC<LookbookViewProps> = ({
 
                   {/* Badges Overlay */}
                   <div className="absolute top-2.5 left-2.5 flex flex-wrap items-center gap-1">
+                    {outfit.tags?.includes('Google AI Research') && (
+                      <span className="text-[9px] font-mono px-2 py-0.5 rounded bg-[#8C7355] text-white backdrop-blur-xs font-semibold flex items-center gap-1 shadow-2xs">
+                        <Sparkles className="w-2.5 h-2.5 text-amber-200" />
+                        Google AI
+                      </span>
+                    )}
                     {outfit.aesthetic && (
                       <span className="text-[9px] font-mono px-2 py-0.5 rounded bg-black/80 text-[#8C7355] backdrop-blur-xs font-semibold">
                         {outfit.aesthetic}

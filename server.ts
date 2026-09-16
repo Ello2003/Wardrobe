@@ -350,6 +350,258 @@ Provide a complete editorial look breakdown.`;
   }
 });
 
+// Gemini Endpoint 3c: Google AI Fashion & Editorial Research Studio with Live Google Search Grounding
+app.post('/api/gemini/editorial-research', async (req, res) => {
+  try {
+    const {
+      query,
+      aestheticFocus,
+      occasion,
+      season,
+      wardrobeItems = [],
+      enableGoogleSearch = true,
+    } = req.body;
+
+    if (!query || typeof query !== 'string' || !query.trim()) {
+      return res.status(400).json({ error: 'A research query or styling prompt is required.' });
+    }
+
+    const ai = getGeminiClient();
+    if (!ai) {
+      return res.status(503).json({ error: 'GEMINI_API_KEY is not configured in server environment.' });
+    }
+
+    // Prepare wardrobe summary for contextual closet gap & synergy matching
+    const closetSummary = (wardrobeItems || []).slice(0, 80).map((w: any) => ({
+      id: w.id,
+      name: w.name,
+      brand: w.brand,
+      category: w.category,
+      color: w.color,
+      material: w.material,
+    }));
+
+    const systemInstruction = `You are a world-renowned fashion editor, sartorial director, and styling archivist for premier publications like Vogue International, GQ British Edition, and The Financial Times HTSI.
+You produce deeply articulate, authoritative, and evocative fashion research reports.
+Currency is strictly British Pounds (£ / GBP).
+Use Google Search to retrieve live, up-to-date runway collections, street style photography reports, designer lookbooks, textile developments, and contemporary wardrobe formulas.
+
+Format your response in two parts:
+Part 1: A beautifully written, comprehensive editorial research article in clean Markdown format with:
+- # [Refined Editorial Look Title]
+- ## Editorial Synthesis & Runway Context (cultural relevance, modern evolution, silhouette dynamics)
+- ## Color Story & Atmospheric Palette (describe 4-5 shades, their visual temperature, and harmony)
+- ## The Outfit Formula & Deconstructed Garments (Outerwear, Knitwear, Tops, Bottoms, Footwear, Accessories with textures, drape, and recommended contemporary/heritage brands in GBP)
+- ## Capsule Synergy & Styling Principles (proportions, tucks, breaks, layering rules, and weather transitions)
+- ## Wardrobe Recommendations (what to look for or adapt from existing garments)
+
+Part 2: You MUST append a valid JSON block at the very end of your response, strictly enclosed between:
+---STRUCTURED_BREAKDOWN_JSON---
+{
+  "title": "Concise, evocative editorial title (e.g. Modern Minimalist Double-Breasted Trench Formula)",
+  "aesthetic": "Specific aesthetic archetype (e.g. Quiet Luxury, Old Money Sartorial, Modern Minimalist, Tokyo Ivy, British Heritage, Riviera Resort)",
+  "occasion": "One of: Work & Office, Weekend Casual, Evening & Dining, Formal & Events, Travel Capsule, Date Night, Seasonal Transition",
+  "season": "One of: Autumn, Winter, Spring, Summer, All-Season",
+  "summary": "2-sentence executive styling synopsis",
+  "colorPalette": ["#HEX1", "#HEX2", "#HEX3", "#HEX4"],
+  "paletteNames": ["Color Name 1", "Color Name 2", "Color Name 3", "Color Name 4"],
+  "tags": ["Tag1", "Tag2", "Tag3", "Tag4"],
+  "photographicMood": "Editorial Street Style, Studio Flatlay, Runway Snapshot, or Magazine Editorial",
+  "stylingTip": "One key tangible rule for proportions, cuffing, or layering",
+  "pieces": [
+    {
+      "name": "Garment Title",
+      "category": "One of: Outerwear, Knitwear, Tops, Bottoms, Shoes, Bags, Accessories, Dresses & Jumpsuits",
+      "color": "Color description",
+      "suggestedBrand": "Brand 1 / Brand 2",
+      "estimatedPrice": 250,
+      "stylingRole": "Brief description of function within the silhouette"
+    }
+  ]
+}
+---END_STRUCTURED_BREAKDOWN_JSON---`;
+
+    const userPrompt = `Perform in-depth fashion research on the following query:
+"${query.trim()}"
+
+Target Aesthetic Focus: ${aestheticFocus || 'Atelier Sartorial / Contemporary Luxury'}
+Target Season: ${season || 'Autumn / Transitional'}
+Target Occasion: ${occasion || 'Smart Casual / Editorial Everyday'}
+
+User's active wardrobe items for cross-referencing and closet-gap analysis:
+${JSON.stringify(closetSummary, null, 2)}
+
+Search the web for real runway references, contemporary streetwear, lookbook formulas, and textile compositions.`;
+
+    const config: any = {
+      systemInstruction,
+      temperature: 0.6,
+    };
+
+    if (enableGoogleSearch !== false) {
+      config.tools = [{ googleSearch: {} }];
+    }
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-3.8-flash',
+      contents: userPrompt,
+      config,
+    });
+
+    const fullText = response.text || '';
+
+    // Extract Google Search Grounding Metadata
+    const candidate = response.candidates?.[0];
+    const groundingMetadata = candidate?.groundingMetadata;
+    const groundingChunks = groundingMetadata?.groundingChunks || [];
+    const webSearchQueries = groundingMetadata?.webSearchQueries || [];
+
+    const groundingSources = groundingChunks
+      .map((chunk: any) => {
+        const web = chunk.web;
+        if (!web?.uri) return null;
+        let domain = '';
+        try {
+          domain = new URL(web.uri).hostname.replace('www.', '');
+        } catch {
+          domain = 'web';
+        }
+        return {
+          title: web.title || domain || 'Web Source',
+          url: web.uri,
+          domain,
+        };
+      })
+      .filter(Boolean);
+
+    // Deduplicate sources by URL
+    const seenUrls = new Set<string>();
+    const uniqueSources = groundingSources.filter((s: any) => {
+      if (seenUrls.has(s.url)) return false;
+      seenUrls.add(s.url);
+      return true;
+    });
+
+    // Extract structured JSON block if present
+    let researchMarkdown = fullText;
+    let structured: any = null;
+
+    const jsonMatch = fullText.match(/---STRUCTURED_BREAKDOWN_JSON---([\s\S]*?)---END_STRUCTURED_BREAKDOWN_JSON---/);
+    if (jsonMatch && jsonMatch[1]) {
+      try {
+        structured = JSON.parse(jsonMatch[1].trim());
+        // Clean markdown by removing the JSON marker block
+        researchMarkdown = fullText.replace(/---STRUCTURED_BREAKDOWN_JSON---[\s\S]*?---END_STRUCTURED_BREAKDOWN_JSON---/, '').trim();
+      } catch (jsonErr) {
+        console.warn('Could not parse embedded research JSON block, using fallback parser:', jsonErr);
+      }
+    }
+
+    // If structured JSON was not found or failed, construct robust fallback from text
+    if (!structured) {
+      const titleMatch = fullText.match(/^#\s*(.+)$/m);
+      const hexMatches = fullText.match(/#[0-9A-Fa-f]{6}/g);
+      const uniqueHexes = Array.from(new Set(hexMatches || [])).slice(0, 5);
+
+      structured = {
+        title: titleMatch ? titleMatch[1].trim() : `${query.trim().slice(0, 50)} Study`,
+        aesthetic: aestheticFocus || 'Contemporary Editorial',
+        occasion: occasion || 'Weekend Casual',
+        season: season || 'Autumn',
+        summary: `Editorial research and styling breakdown for "${query.trim()}".`,
+        colorPalette: uniqueHexes.length >= 2 ? uniqueHexes : ['#1C1D21', '#8C7355', '#E5E5E1', '#4A5568'],
+        paletteNames: ['Charcoal', 'Warm Bronze', 'Bone White', 'Slate'],
+        tags: ['Google AI Research', aestheticFocus || 'Editorial', 'Sartorial'],
+        photographicMood: 'Editorial Street Style',
+        stylingTip: 'Balance textural contrast between structured tailoring and tactile knitwear.',
+        pieces: [
+          {
+            name: 'Structured Overcoat / Jacket',
+            category: 'Outerwear',
+            color: 'Neutral',
+            suggestedBrand: 'Heritage Tailoring',
+            estimatedPrice: 280,
+            stylingRole: 'Hero silhouette anchor',
+          },
+          {
+            name: 'Fine Gauge Knitwear',
+            category: 'Knitwear',
+            color: 'Earth Tone',
+            suggestedBrand: 'Johnstons of Elgin / Arket',
+            estimatedPrice: 160,
+            stylingRole: 'Tactile mid-layer insulation',
+          },
+          {
+            name: 'Pleated Wool Trousers',
+            category: 'Bottoms',
+            color: 'Muted Grey / Navy',
+            suggestedBrand: 'Incotex / Drake’s',
+            estimatedPrice: 220,
+            stylingRole: 'Clean line drape at hem',
+          },
+          {
+            name: 'Leather Derbies or Loafers',
+            category: 'Shoes',
+            color: 'Dark Brown / Black',
+            suggestedBrand: 'Crockett & Jones / Paraboot',
+            estimatedPrice: 320,
+            stylingRole: 'Grounded footwear foundation',
+          },
+        ],
+      };
+    }
+
+    // Cross-reference researched pieces against user's actual wardrobe inventory
+    const enrichedPieces = (structured.pieces || []).map((piece: any) => {
+      const pCat = piece.category || 'Outerwear';
+      const pColor = (piece.color || '').toLowerCase();
+      const pName = (piece.name || '').toLowerCase();
+
+      // Attempt match with user's closet
+      const matched = (wardrobeItems || []).find((item: any) => {
+        if (item.category !== pCat) return false;
+        const itemName = (item.name || '').toLowerCase();
+        const itemColor = (item.color || '').toLowerCase();
+        if (pColor && (itemColor.includes(pColor) || pColor.includes(itemColor))) return true;
+        const keywords = pName.split(/[\s-]+/).filter((w: string) => w.length >= 4);
+        return keywords.some((k: string) => itemName.includes(k));
+      });
+
+      return {
+        name: piece.name,
+        category: piece.category,
+        color: piece.color || 'Neutral',
+        suggestedBrand: piece.suggestedBrand || 'Curated Designer',
+        estimatedPrice: Number(piece.estimatedPrice) || 150,
+        stylingRole: piece.stylingRole || 'Harmonious silhouette piece',
+        silhouette: piece.silhouette || '',
+        matchedWardrobeItemId: matched ? matched.id : undefined,
+        matchedItemName: matched ? `${matched.brand} ${matched.name}` : undefined,
+        matchedItemImage: matched ? matched.imageUrl : undefined,
+        isGap: !matched,
+      };
+    });
+
+    structured.pieces = enrichedPieces;
+
+    res.json({
+      success: true,
+      query: query.trim(),
+      researchMarkdown,
+      structuredBreakdown: structured,
+      groundingSources: uniqueSources,
+      searchQueries: webSearchQueries,
+      hasGoogleSearch: uniqueSources.length > 0,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error: any) {
+    console.error('Google AI Editorial Research error:', error);
+    res.status(500).json({
+      error: error?.message || 'Failed to complete Google AI editorial research.',
+    });
+  }
+});
+
 // Gemini Endpoint 4: Item Purchase Viability & Cost-Per-Wear Scout
 app.post('/api/gemini/scout-item', async (req, res) => {
   try {
