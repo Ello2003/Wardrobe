@@ -18,6 +18,12 @@ import {
   SellingStatus,
   ShippingStatus,
 } from '../types';
+import {
+  ALL_SELLING_STATUSES,
+  SELLING_STATUS_LABELS,
+  ALL_SHIPPING_STATUSES,
+  SHIPPING_STATUS_LABELS,
+} from '../utils/statusUtils';
 import { useWardrobe } from '../context/WardrobeContext';
 import { calculateRrpSavings } from '../utils/formatters';
 
@@ -493,13 +499,11 @@ export const SaleFormModal: React.FC<SaleFormModalProps> = ({
                 onChange={(e) => setStatus(e.target.value as SellingStatus)}
                 className="w-full px-2.5 py-1.5 bg-white border border-[#E5E5E1] rounded-md text-xs text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none"
               >
-                <option value="Draft">Draft (Unpublished)</option>
-                <option value="Listed">Listed (Active)</option>
-                <option value="Reserved">Reserved (Pending Payment)</option>
-                <option value="Sold">Sold (To Dispatch)</option>
-                <option value="Shipped">Shipped (In Transit)</option>
-                <option value="Completed">Completed (Funds Released)</option>
-                <option value="Delisted">Delisted / Withdrawn</option>
+                {ALL_SELLING_STATUSES.map((st) => (
+                  <option key={st} value={st}>
+                    {SELLING_STATUS_LABELS[st] || st}
+                  </option>
+                ))}
               </select>
             </div>
 
@@ -512,11 +516,11 @@ export const SaleFormModal: React.FC<SaleFormModalProps> = ({
                 onChange={(e) => setShippingStatus(e.target.value as ShippingStatus)}
                 className="w-full px-2.5 py-1.5 bg-white border border-[#E5E5E1] rounded-md text-xs text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none"
               >
-                <option value="Not Required">Not Required</option>
-                <option value="To Pack">To Pack / Label Ready</option>
-                <option value="Shipped">Shipped</option>
-                <option value="In Transit">In Transit</option>
-                <option value="Delivered">Delivered</option>
+                {ALL_SHIPPING_STATUSES.map((ss) => (
+                  <option key={ss} value={ss}>
+                    {SHIPPING_STATUS_LABELS[ss] || ss}
+                  </option>
+                ))}
               </select>
             </div>
           </div>

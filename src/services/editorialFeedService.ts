@@ -78,6 +78,7 @@ export const DEFAULT_EDITORIAL_SOURCES: EditorialFeedSource[] = [
 export const DEFAULT_FEED_SETTINGS: EditorialFeedSettings = {
   activeSourceIds: ['drakes', 'suitsupply', 'the-rake', 'permanent-style', 'die-workwear'],
   customSources: [],
+  deletedSourceIds: [],
   savedArticleIds: [],
   autoRefreshMinutes: 30,
   defaultViewMode: 'magazine',
@@ -96,6 +97,7 @@ export function getEditorialSettings(): EditorialFeedSettings {
         ...parsed,
         activeSourceIds: parsed.activeSourceIds || DEFAULT_FEED_SETTINGS.activeSourceIds,
         customSources: parsed.customSources || [],
+        deletedSourceIds: parsed.deletedSourceIds || [],
         savedArticleIds: parsed.savedArticleIds || [],
       };
     }
@@ -111,6 +113,53 @@ export function saveEditorialSettings(settings: EditorialFeedSettings): void {
   } catch (e) {
     console.warn('Failed to save editorial settings', e);
   }
+}
+
+/**
+ * Removes an editorial source (default or custom) permanently or until restored.
+ */
+export function deleteEditorialFeedSource(sourceId: string): EditorialFeedSettings {
+  const current = getEditorialSettings();
+  const deletedSet = new Set(current.deletedSourceIds || []);
+  deletedSet.add(sourceId);
+
+  const updatedCustom = (current.customSources || []).filter((s) => s.id !== sourceId);
+  const updatedActive = (current.activeSourceIds || []).filter((id) => id !== sourceId);
+
+  const updated: EditorialFeedSettings = {
+    ...current,
+    deletedSourceIds: Array.from(deletedSet),
+    customSources: updatedCustom,
+    activeSourceIds: updatedActive,
+  };
+
+  saveEditorialSettings(updated);
+  // Invalidate feed cache so removed source articles disappear
+  try {
+    localStorage.removeItem(STORAGE_CACHE_KEY);
+  } catch {}
+  return updated;
+}
+
+/**
+ * Restores all default curated editorial sources that were previously deleted.
+ */
+export function restoreDefaultEditorialSources(): EditorialFeedSettings {
+  const current = getEditorialSettings();
+  const defaultIds = DEFAULT_EDITORIAL_SOURCES.map((s) => s.id);
+  const updatedActive = Array.from(new Set([...current.activeSourceIds, ...defaultIds]));
+
+  const updated: EditorialFeedSettings = {
+    ...current,
+    deletedSourceIds: [],
+    activeSourceIds: updatedActive,
+  };
+
+  saveEditorialSettings(updated);
+  try {
+    localStorage.removeItem(STORAGE_CACHE_KEY);
+  } catch {}
+  return updated;
 }
 
 // Fallback / Base Curated Articles for high fidelity whenever remote RSS is unreachable or delayed
@@ -353,7 +402,10 @@ export async function fetchEditorialFeed(options?: {
   isLive: boolean;
 }> {
   const settings = getEditorialSettings();
-  const allSources = [...DEFAULT_EDITORIAL_SOURCES, ...settings.customSources];
+  const deletedSet = new Set(settings.deletedSourceIds || []);
+  const allSources = [...DEFAULT_EDITORIAL_SOURCES, ...settings.customSources].filter(
+    (s) => !deletedSet.has(s.id)
+  );
   const activeSources = allSources.filter((s) => settings.activeSourceIds.includes(s.id));
 
   // Check cached data if not force refresh

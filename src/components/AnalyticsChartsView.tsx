@@ -42,8 +42,20 @@ import {
   Wallet,
   ShieldCheck,
   Compass,
+  SlidersHorizontal,
+  Shirt,
+  Award,
 } from 'lucide-react';
 import { useWardrobe } from '../context/WardrobeContext';
+import {
+  AnalyticsSettings,
+  DEFAULT_ANALYTICS_SETTINGS,
+  THEME_PALETTES,
+} from '../types/analytics';
+import { AnalyticsSettingsModal } from './analytics/AnalyticsSettingsModal';
+import { CpwAndValueSection } from './analytics/CpwAndValueSection';
+import { ColorAndFabricSection } from './analytics/ColorAndFabricSection';
+import { computeCpwAnalysis } from '../utils/analyticsCalculations';
 
 const PALETTE = [
   '#1A1A1A',
@@ -112,34 +124,83 @@ export const AnalyticsChartsView: React.FC<AnalyticsChartsViewProps> = ({ onOpen
 
   const sym = settings.currencySymbol || '£';
 
-  // Sub-tabs
-  const [activeSection, setActiveSection] = useState<'wardrobe' | 'sales' | 'purchases' | 'styling' | 'recommendations'>('wardrobe');
+  // Persistent Analytics Settings
+  const [analyticsSettings, setAnalyticsSettings] = useState<AnalyticsSettings>(() => {
+    try {
+      const saved = localStorage.getItem('wardrobe_analytics_settings_v1');
+      if (saved) return { ...DEFAULT_ANALYTICS_SETTINGS, ...JSON.parse(saved) };
+    } catch (e) {
+      console.error('Failed to load analytics settings', e);
+    }
+    return DEFAULT_ANALYTICS_SETTINGS;
+  });
+
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+
+  const handleUpdateSettings = (newSettings: AnalyticsSettings) => {
+    setAnalyticsSettings(newSettings);
+    try {
+      localStorage.setItem('wardrobe_analytics_settings_v1', JSON.stringify(newSettings));
+    } catch (e) {
+      console.error('Failed to persist analytics settings', e);
+    }
+  };
+
+  // Active theme palette
+  const activePalette =
+    THEME_PALETTES[analyticsSettings.chartTheme] || THEME_PALETTES.sartorial;
+
+  // Sub-tabs including Cost Per Wear & Value Analysis
+  const [activeSection, setActiveSection] = useState<
+    'wardrobe' | 'cpw' | 'sales' | 'purchases' | 'styling' | 'recommendations'
+  >('wardrobe');
 
   // Time filter for sales
   const [salesTimeframe, setSalesTimeframe] = useState<'all' | '6m' | '12m'>('all');
 
-  // Active items (unarchived)
-  const activeItems = useMemo(() => items.filter((i) => !i.isArchived), [items]);
+  // Active items respecting analytics inclusion settings
+  const activeItems = useMemo(() => {
+    let base = items;
+    if (!analyticsSettings.includeArchived) {
+      base = base.filter((i) => !i.isArchived);
+    }
+    return base;
+  }, [items, analyticsSettings.includeArchived]);
+
+  // Helper for computing valuation according to selected metric
+  const getItemValuation = (item: any): number => {
+    if (analyticsSettings.valuationMetric === 'estimatedResale') {
+      return (
+        item.estimatedResalePrice ||
+        (item.purchasePrice ? Math.round(item.purchasePrice * 0.6) : 0)
+      );
+    }
+    return item.purchasePrice || 0;
+  };
 
   // 1. WARDROBE VALUATION & ITEM BREAKDOWN BY CATEGORY
   const categoryData = useMemo(() => {
-    const map: Record<string, { name: string; count: number; totalValuation: number; avgValuation: number }> = {};
+    const map: Record<
+      string,
+      { name: string; count: number; totalValuation: number; avgValuation: number }
+    > = {};
     activeItems.forEach((i) => {
       const cat = i.category || 'Other';
       if (!map[cat]) {
         map[cat] = { name: cat, count: 0, totalValuation: 0, avgValuation: 0 };
       }
       map[cat].count += 1;
-      map[cat].totalValuation += i.purchasePrice || 0;
+      map[cat].totalValuation += getItemValuation(i);
     });
 
     return Object.values(map)
       .map((item) => ({
         ...item,
-        avgValuation: item.count > 0 ? Math.round(item.totalValuation / item.count) : 0,
+        avgValuation:
+          item.count > 0 ? Math.round(item.totalValuation / item.count) : 0,
       }))
       .sort((a, b) => b.totalValuation - a.totalValuation);
-  }, [activeItems]);
+  }, [activeItems, analyticsSettings.valuationMetric]);
 
   // 2. BRAND PORTFOLIO ANALYSIS
   const brandData = useMemo(() => {
@@ -150,13 +211,13 @@ export const AnalyticsChartsView: React.FC<AnalyticsChartsViewProps> = ({ onOpen
         map[b] = { brand: b, count: 0, totalValue: 0 };
       }
       map[b].count += 1;
-      map[b].totalValue += i.purchasePrice || 0;
+      map[b].totalValue += getItemValuation(i);
     });
 
     return Object.values(map)
       .sort((a, b) => b.totalValue - a.totalValue)
       .slice(0, 10);
-  }, [activeItems]);
+  }, [activeItems, analyticsSettings.valuationMetric]);
 
   // 3. SEASONALITY COVERAGE
   const seasonalityData = useMemo(() => {
@@ -173,13 +234,13 @@ export const AnalyticsChartsView: React.FC<AnalyticsChartsViewProps> = ({ onOpen
       seasons.forEach((s) => {
         if (counts[s]) {
           counts[s].count += 1;
-          counts[s].value += i.purchasePrice || 0;
+          counts[s].value += getItemValuation(i);
         }
       });
     });
 
     return Object.values(counts);
-  }, [activeItems]);
+  }, [activeItems, analyticsSettings.valuationMetric]);
 
   // 4. WEAR FREQUENCY HISTOGRAM
   const wearFrequencyBins = useMemo(() => {
@@ -425,80 +486,206 @@ export const AnalyticsChartsView: React.FC<AnalyticsChartsViewProps> = ({ onOpen
     return list;
   }, [activeItems, categoryData, completedSales, shoppingList, monthlyBudget, sym]);
 
+  // Headline KPI calculations for the Header row
+  const totalValuation = useMemo(() => {
+    return activeItems.reduce((s, i) => s + getItemValuation(i), 0);
+  }, [activeItems, analyticsSettings.valuationMetric]);
+
+  const wornItemsCount = useMemo(() => {
+    return activeItems.filter((i) => (i.wearCount || 0) > 0).length;
+  }, [activeItems]);
+
+  const unwornItemsCount = activeItems.length - wornItemsCount;
+
+  const activeRotationPct = useMemo(() => {
+    return activeItems.length > 0
+      ? Math.round((wornItemsCount / activeItems.length) * 100)
+      : 0;
+  }, [activeItems.length, wornItemsCount]);
+
+  const cpwSummary = useMemo(() => {
+    return computeCpwAnalysis(activeItems, analyticsSettings);
+  }, [activeItems, analyticsSettings]);
+
   return (
     <div className="space-y-6">
-      {/* Header Banner */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-5 bg-white border border-[#E5E5E1] shadow-xs">
-        <div>
-          <div className="flex items-center gap-2">
-            <h1 className="text-xl font-serif font-bold text-[#1A1A1A]">
-              Wardrobe Analytics & Intelligence Suite
-            </h1>
-            <span className="px-2 py-0.5 text-[10px] font-mono font-bold bg-[#1A1A1A] text-white uppercase tracking-wider">
-              Live Charts
-            </span>
+      {/* Redesigned Clean Header Layout */}
+      <div className="bg-white border border-[#E5E5E1] rounded-xl p-5 shadow-xs space-y-4">
+        {/* Main Title Row */}
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-[#E5E5E1]">
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 rounded-xl bg-[#1A1A1A] text-white flex items-center justify-center shrink-0 shadow-xs">
+              <BarChart3 className="w-5 h-5 text-[#C2B280]" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2.5 flex-wrap">
+                <h1 className="text-lg sm:text-xl font-serif font-bold text-[#1A1A1A] tracking-tight">
+                  Wardrobe Analytics &amp; Intelligence
+                </h1>
+                <span className="px-2 py-0.5 text-[10px] font-mono font-bold bg-[#FAF9F5] text-[#8C7355] border border-[#E5E5E1] rounded">
+                  {analyticsSettings.valuationMetric === 'estimatedResale'
+                    ? 'Secondary Liquidation Basis'
+                    : 'Purchase Cost Basis'}
+                </span>
+              </div>
+              <p className="text-xs text-[#767670] mt-0.5 font-mono">
+                Interactive portfolio valuation, cost-per-wear metrics, material compositions, and resale performance.
+              </p>
+            </div>
           </div>
-          <p className="text-xs text-[#767670] mt-1 font-mono">
-            Interactive charts, valuation distributions, resale performance, purchase pipelines, and styling connectivity.
-          </p>
+
+          {/* Quick Actions / Settings Trigger */}
+          <div className="flex items-center gap-2 self-start md:self-auto">
+            <button
+              type="button"
+              onClick={() => setIsSettingsOpen(true)}
+              className="flex items-center gap-2 px-3.5 py-2 rounded-lg border border-[#E5E5E1] bg-[#FAF9F5] hover:bg-white text-xs font-mono font-semibold text-[#1A1A1A] transition-all cursor-pointer shadow-2xs hover:border-[#8C7355]"
+            >
+              <SlidersHorizontal className="w-3.5 h-3.5 text-[#8C7355]" />
+              <span>Analytics Settings</span>
+            </button>
+          </div>
         </div>
 
-        {/* Navigation Tabs */}
-        <div className="flex items-center gap-1 bg-[#FAF9F5] p-1 border border-[#E5E5E1] overflow-x-auto w-full sm:w-auto">
+        {/* Live Headline KPI Metrics Row */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="p-3 bg-[#FAF9F5] rounded-lg border border-[#E5E5E1]/80">
+            <span className="text-[10px] font-mono uppercase tracking-wider text-[#767670]">
+              Portfolio Valuation
+            </span>
+            <div className="text-base sm:text-lg font-serif font-bold text-[#1A1A1A] mt-0.5">
+              {formatCurrency(totalValuation)}
+            </div>
+            <span className="text-[10px] font-mono text-[#767670]">
+              {activeItems.length} active pieces
+            </span>
+          </div>
+
+          <div className="p-3 bg-[#FAF9F5] rounded-lg border border-[#E5E5E1]/80">
+            <span className="text-[10px] font-mono uppercase tracking-wider text-[#767670]">
+              Active Rotation
+            </span>
+            <div className="text-base sm:text-lg font-serif font-bold text-emerald-800 mt-0.5">
+              {activeRotationPct}%
+            </div>
+            <span className="text-[10px] font-mono text-[#767670]">
+              {wornItemsCount} worn / {unwornItemsCount} idle
+            </span>
+          </div>
+
+          <div className="p-3 bg-[#FAF9F5] rounded-lg border border-[#E5E5E1]/80">
+            <span className="text-[10px] font-mono uppercase tracking-wider text-[#767670]">
+              Avg Cost Per Wear
+            </span>
+            <div className="text-base sm:text-lg font-serif font-bold text-[#1A1A1A] mt-0.5">
+              {sym}{cpwSummary.averageCpw}{' '}
+              <span className="text-[10px] font-sans font-normal text-[#767670]">
+                / wear
+              </span>
+            </div>
+            <span className="text-[10px] font-mono text-[#767670]">
+              Target: {sym}{analyticsSettings.targetCpw}
+            </span>
+          </div>
+
+          <div className="p-3 bg-[#FAF9F5] rounded-lg border border-[#E5E5E1]/80">
+            <span className="text-[10px] font-mono uppercase tracking-wider text-[#767670]">
+              Monthly Spend
+            </span>
+            <div
+              className={`text-base sm:text-lg font-serif font-bold mt-0.5 ${
+                spentThisMonth > monthlyBudget ? 'text-rose-700' : 'text-[#1A1A1A]'
+              }`}
+            >
+              {formatCurrency(spentThisMonth)}{' '}
+              <span className="text-[10px] font-sans font-normal text-[#767670]">
+                / {formatCurrency(monthlyBudget)}
+              </span>
+            </div>
+            <span className="text-[10px] font-mono text-[#767670]">
+              {((spentThisMonth / Math.max(1, monthlyBudget)) * 100).toFixed(0)}% budget utilized
+            </span>
+          </div>
+        </div>
+
+        {/* Clean Responsive Sub-Tabs Bar */}
+        <div className="flex items-center gap-1.5 p-1 bg-[#FAF9F5] border border-[#E5E5E1] rounded-lg overflow-x-auto text-xs">
           <button
             type="button"
             onClick={() => setActiveSection('wardrobe')}
-            className={`px-3 py-1.5 text-xs font-mono cursor-pointer transition-all whitespace-nowrap ${
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-mono cursor-pointer transition-all whitespace-nowrap ${
               activeSection === 'wardrobe'
                 ? 'bg-[#1A1A1A] text-white font-bold shadow-xs'
                 : 'text-[#767670] hover:text-[#1A1A1A]'
             }`}
           >
-            Wardrobe & Inventory
+            <Shirt className="w-3.5 h-3.5 text-[#C2B280]" />
+            <span>Wardrobe &amp; Inventory</span>
           </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveSection('cpw')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-mono cursor-pointer transition-all whitespace-nowrap ${
+              activeSection === 'cpw'
+                ? 'bg-[#1A1A1A] text-white font-bold shadow-xs'
+                : 'text-[#767670] hover:text-[#1A1A1A]'
+            }`}
+          >
+            <Award className="w-3.5 h-3.5 text-emerald-400" />
+            <span>Cost Per Wear &amp; Value</span>
+          </button>
+
           <button
             type="button"
             onClick={() => setActiveSection('sales')}
-            className={`px-3 py-1.5 text-xs font-mono cursor-pointer transition-all whitespace-nowrap ${
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-mono cursor-pointer transition-all whitespace-nowrap ${
               activeSection === 'sales'
                 ? 'bg-[#1A1A1A] text-white font-bold shadow-xs'
                 : 'text-[#767670] hover:text-[#1A1A1A]'
             }`}
           >
-            Sales & Resale
+            <PoundSterling className="w-3.5 h-3.5 text-[#C2B280]" />
+            <span>Sales &amp; Resale</span>
           </button>
+
           <button
             type="button"
             onClick={() => setActiveSection('purchases')}
-            className={`px-3 py-1.5 text-xs font-mono cursor-pointer transition-all whitespace-nowrap ${
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-mono cursor-pointer transition-all whitespace-nowrap ${
               activeSection === 'purchases'
                 ? 'bg-[#1A1A1A] text-white font-bold shadow-xs'
                 : 'text-[#767670] hover:text-[#1A1A1A]'
             }`}
           >
-            Purchases & Budget
+            <ShoppingBag className="w-3.5 h-3.5 text-[#C2B280]" />
+            <span>Purchases &amp; Budget</span>
           </button>
+
           <button
             type="button"
             onClick={() => setActiveSection('styling')}
-            className={`px-3 py-1.5 text-xs font-mono cursor-pointer transition-all whitespace-nowrap ${
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-mono cursor-pointer transition-all whitespace-nowrap ${
               activeSection === 'styling'
                 ? 'bg-[#1A1A1A] text-white font-bold shadow-xs'
                 : 'text-[#767670] hover:text-[#1A1A1A]'
             }`}
           >
-            Styling & Lookbooks
+            <Layers className="w-3.5 h-3.5 text-[#C2B280]" />
+            <span>Styling &amp; Lookbooks</span>
           </button>
+
           <button
             type="button"
             onClick={() => setActiveSection('recommendations')}
-            className={`px-3 py-1.5 text-xs font-mono cursor-pointer transition-all whitespace-nowrap ${
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-mono cursor-pointer transition-all whitespace-nowrap ${
               activeSection === 'recommendations'
                 ? 'bg-[#1A1A1A] text-white font-bold shadow-xs'
                 : 'text-[#767670] hover:text-[#1A1A1A]'
             }`}
           >
-            Strategic Insights ({strategicInsights.length})
+            <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+            <span>Strategic Insights ({strategicInsights.length})</span>
           </button>
         </div>
       </div>
@@ -594,7 +781,7 @@ export const AnalyticsChartsView: React.FC<AnalyticsChartsViewProps> = ({ onOpen
                       paddingAngle={3}
                     >
                       {categoryData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={PALETTE[index % PALETTE.length]} />
+                        <Cell key={`cell-${index}`} fill={activePalette[index % activePalette.length]} />
                       ))}
                     </Pie>
                     <Tooltip content={<CustomTooltip currencySymbol={sym} />} />
@@ -724,10 +911,28 @@ export const AnalyticsChartsView: React.FC<AnalyticsChartsViewProps> = ({ onOpen
               </div>
             </div>
           </div>
+
+          {/* Color Palette Spectrum & Fabric Material Composition */}
+          <ColorAndFabricSection
+            items={activeItems}
+            settings={analyticsSettings}
+            currencySymbol={sym}
+            formatCurrency={formatCurrency}
+          />
         </div>
       )}
 
-      {/* ===================== 2. SALES & RESALE CHARTS ===================== */}
+      {/* ===================== 2. COST PER WEAR & PORTFOLIO VALUE ===================== */}
+      {activeSection === 'cpw' && (
+        <CpwAndValueSection
+          items={activeItems}
+          settings={analyticsSettings}
+          currencySymbol={sym}
+          formatCurrency={formatCurrency}
+        />
+      )}
+
+      {/* ===================== 3. SALES & RESALE CHARTS ===================== */}
       {activeSection === 'sales' && (
         <div className="space-y-6">
           {/* Key Resale Stats Row */}
@@ -1222,6 +1427,15 @@ export const AnalyticsChartsView: React.FC<AnalyticsChartsViewProps> = ({ onOpen
           </div>
         </div>
       )}
+
+      {/* Analytics Settings Modal */}
+      <AnalyticsSettingsModal
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+        settings={analyticsSettings}
+        onUpdateSettings={handleUpdateSettings}
+        currencySymbol={sym}
+      />
     </div>
   );
 };

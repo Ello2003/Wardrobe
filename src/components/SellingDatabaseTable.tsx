@@ -1,5 +1,10 @@
 import React, { useState, useMemo } from 'react';
 import { SaleItem, SellingStatus, SellingPlatform, ShippingStatus } from '../types';
+import {
+  ALL_SELLING_STATUSES,
+  ALL_SHIPPING_STATUSES,
+  getSellingStatusBadgeClass,
+} from '../utils/statusUtils';
 import { useWardrobe } from '../context/WardrobeContext';
 import { GarmentImage } from './GarmentImage';
 import { ResizableHeaderCell } from './ResizableHeaderCell';
@@ -83,23 +88,8 @@ const PLATFORMS: SellingPlatform[] = [
   'Other',
 ];
 
-const SALE_STATUSES: SellingStatus[] = [
-  'Draft',
-  'Listed',
-  'Reserved',
-  'Sold',
-  'Shipped',
-  'Completed',
-  'Delisted',
-];
-
-const SHIPPING_STATUSES: ShippingStatus[] = [
-  'Not Required',
-  'To Pack',
-  'Shipped',
-  'In Transit',
-  'Delivered',
-];
+const SALE_STATUSES = ALL_SELLING_STATUSES;
+const SHIPPING_STATUSES = ALL_SHIPPING_STATUSES;
 
 export const SellingDatabaseTable: React.FC<SellingDatabaseTableProps> = ({
   items,
@@ -238,23 +228,6 @@ export const SellingDatabaseTable: React.FC<SellingDatabaseTableProps> = ({
     });
   };
 
-  const getStatusBadge = (status: SellingStatus) => {
-    switch (status) {
-      case 'Listed':
-        return 'bg-blue-100 text-blue-800 border-blue-300';
-      case 'Reserved':
-        return 'bg-amber-100 text-amber-800 border-amber-300';
-      case 'Sold':
-      case 'Completed':
-        return 'bg-emerald-100 text-emerald-800 border-emerald-300 font-bold';
-      case 'Shipped':
-        return 'bg-purple-100 text-purple-800 border-purple-300';
-      case 'Delisted':
-        return 'bg-rose-100 text-rose-800 border-rose-300';
-      default:
-        return 'bg-gray-100 text-gray-700 border-gray-300';
-    }
-  };
 
   const SortIcon: React.FC<{ field: SortField }> = ({ field }) => {
     if (sortField !== field) {
@@ -710,7 +683,7 @@ export const SellingDatabaseTable: React.FC<SellingDatabaseTableProps> = ({
                           status: e.target.value as SellingStatus,
                         })
                       }
-                      className={`text-[10px] font-mono px-2 py-0.5 rounded-full border cursor-pointer w-full truncate ${getStatusBadge(
+                      className={`text-[10px] font-mono px-2 py-0.5 rounded-full border cursor-pointer w-full truncate ${getSellingStatusBadgeClass(
                         item.status
                       )}`}
                     >

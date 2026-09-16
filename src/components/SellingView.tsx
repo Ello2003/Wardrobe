@@ -66,82 +66,15 @@ import {
   SellingDisplaySettings,
   DEFAULT_SELLING_DISPLAY_SETTINGS,
 } from './SellingDisplaySettingsModal';
+import {
+  SalesPipelineStage,
+  getSaleItemPipelineStage,
+  ALL_SELLING_STATUSES,
+  getSellingStatusBadgeClass,
+} from '../utils/statusUtils';
 
-export type SalesPipelineStage =
-  | 'All'
-  | 'Draft'
-  | 'Listed'
-  | 'Reserved'
-  | 'Awaiting Dispatch'
-  | 'In Transit'
-  | 'Completed'
-  | 'Cancelled';
-
-export const getSaleItemPipelineStage = (item: SaleItem): SalesPipelineStage => {
-  const status = item.status;
-  const shipping = item.shippingStatus;
-  const tags = (item.tags || []).map((t) => t.toLowerCase());
-  const notes = (item.notes || '').toLowerCase();
-
-  // Cancelled check
-  if (
-    status === 'Delisted' ||
-    tags.includes('cancelled') ||
-    tags.includes('canceled') ||
-    notes.includes('cancelled') ||
-    notes.includes('order cancelled')
-  ) {
-    return 'Cancelled';
-  }
-
-  // Completed check
-  if (
-    status === 'Completed' ||
-    shipping === 'Delivered' ||
-    tags.includes('completed') ||
-    tags.includes('delivered')
-  ) {
-    return 'Completed';
-  }
-
-  // In Transit check
-  if (
-    status === 'Shipped' ||
-    shipping === 'In Transit' ||
-    shipping === 'Shipped' ||
-    tags.includes('in transit') ||
-    tags.includes('shipped')
-  ) {
-    return 'In Transit';
-  }
-
-  // Awaiting Dispatch check
-  if (
-    shipping === 'To Pack' ||
-    tags.includes('awaiting dispatch') ||
-    tags.includes('to pack') ||
-    status === 'Sold'
-  ) {
-    return 'Awaiting Dispatch';
-  }
-
-  // Reserved check
-  if (status === 'Reserved' || tags.includes('reserved')) {
-    return 'Reserved';
-  }
-
-  // Listed check
-  if (status === 'Listed' || tags.includes('listed')) {
-    return 'Listed';
-  }
-
-  // Draft check
-  if (status === 'Draft' || tags.includes('draft')) {
-    return 'Draft';
-  }
-
-  return 'Draft';
-};
+export type { SalesPipelineStage };
+export { getSaleItemPipelineStage };
 
 export const SellingView: React.FC = () => {
   const {
@@ -162,13 +95,13 @@ export const SellingView: React.FC = () => {
 
   // Display Settings
   const [displaySettings, setDisplaySettings] = useState<SellingDisplaySettings>(() => {
-    const saved = localStorage.getItem('selling_display_settings');
-    if (saved) {
-      try {
+    try {
+      const saved = typeof window !== 'undefined' ? localStorage.getItem('selling_display_settings') : null;
+      if (saved) {
         return { ...DEFAULT_SELLING_DISPLAY_SETTINGS, ...JSON.parse(saved) };
-      } catch (e) {
-        console.error('Failed to parse selling display settings', e);
       }
+    } catch (e) {
+      console.error('Failed to parse selling display settings', e);
     }
     return DEFAULT_SELLING_DISPLAY_SETTINGS;
   });
@@ -176,7 +109,11 @@ export const SellingView: React.FC = () => {
 
   const handleUpdateDisplaySettings = useCallback((newSettings: SellingDisplaySettings) => {
     setDisplaySettings(newSettings);
-    localStorage.setItem('selling_display_settings', JSON.stringify(newSettings));
+    try {
+      localStorage.setItem('selling_display_settings', JSON.stringify(newSettings));
+    } catch (e) {
+      console.error('Failed to save selling display settings', e);
+    }
     window.dispatchEvent(new Event('storage'));
   }, []);
 
@@ -406,6 +343,8 @@ export const SellingView: React.FC = () => {
           return false;
       } else if (selectedStatusTab === 'Draft') {
         if (item.status !== 'Draft') return false;
+      } else if (selectedStatusTab === 'Cancelled') {
+        if (item.status !== 'Cancelled' && item.status !== 'Delisted') return false;
       }
 
       // Platform filter
@@ -991,6 +930,7 @@ export const SellingView: React.FC = () => {
                 <option value="Active">Active / Listed</option>
                 <option value="Sold">Sold / Shipped</option>
                 <option value="Draft">Drafts</option>
+                <option value="Cancelled">Cancelled / Delisted</option>
               </select>
 
               <select
@@ -1191,6 +1131,32 @@ export const SellingView: React.FC = () => {
         onMoveToWishlist={handleBulkMoveToShopping}
         onBulkEdit={() => setIsBulkEditOpen(true)}
         onBulkDelete={handleBulkDelete}
+        customActions={[
+          {
+            label: 'Mark Listed',
+            onClick: () => {
+              batchUpdateSaleItemsStatus(Array.from(selectedSaleIds), 'Listed');
+              setSelectedSaleIds(new Set());
+            },
+            variant: 'vinted',
+          },
+          {
+            label: 'Mark Reserved',
+            onClick: () => {
+              batchUpdateSaleItemsStatus(Array.from(selectedSaleIds), 'Reserved');
+              setSelectedSaleIds(new Set());
+            },
+            variant: 'secondary',
+          },
+          {
+            label: 'Mark Cancelled',
+            onClick: () => {
+              batchUpdateSaleItemsStatus(Array.from(selectedSaleIds), 'Cancelled');
+              setSelectedSaleIds(new Set());
+            },
+            variant: 'danger',
+          },
+        ]}
       />
 
       {/* Content View: Grid or Database Table */}
@@ -1248,32 +1214,30 @@ export const SellingView: React.FC = () => {
                       </span>
                     </div>
 
-                    {/* Bottom Right: Pipeline Stage Badge */}
-                    <div className="absolute bottom-2 right-2 z-10 flex items-center gap-1">
-                      {(() => {
-                        const stage = getSaleItemPipelineStage(item);
-                        return (
-                          <span
-                            className={`text-[10px] font-mono px-2 py-0.5 bg-white/95 border shadow-xs font-semibold uppercase tracking-wider ${
-                              stage === 'Listed'
-                                ? 'text-emerald-700 border-emerald-300'
-                                : stage === 'Completed'
-                                ? 'text-teal-700 border-teal-300'
-                                : stage === 'In Transit'
-                                ? 'text-blue-700 border-blue-300'
-                                : stage === 'Awaiting Dispatch'
-                                ? 'text-amber-700 border-amber-300'
-                                : stage === 'Reserved'
-                                ? 'text-indigo-700 border-indigo-300'
-                                : stage === 'Cancelled'
-                                ? 'text-rose-700 border-rose-300'
-                                : 'text-[#767670] border-[#D5D5D0]'
-                            }`}
-                          >
-                            {stage}
-                          </span>
-                        );
-                      })()}
+                    {/* Bottom Right: Pipeline Stage & Status Selector */}
+                    <div
+                      className="absolute bottom-2 right-2 z-10 flex items-center gap-1"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <select
+                        value={item.status}
+                        onChange={(e) => {
+                          e.stopPropagation();
+                          updateSaleItem(item.id, {
+                            status: e.target.value as SellingStatus,
+                          });
+                        }}
+                        className={`text-[10px] font-mono px-1.5 py-0.5 border shadow-xs font-semibold uppercase tracking-wider cursor-pointer rounded-xs focus:outline-none ${getSellingStatusBadgeClass(
+                          item.status
+                        )}`}
+                        title="Change item status"
+                      >
+                        {ALL_SELLING_STATUSES.map((s) => (
+                          <option key={s} value={s}>
+                            {s}
+                          </option>
+                        ))}
+                      </select>
                     </div>
                   </div>
 

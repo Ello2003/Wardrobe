@@ -34,12 +34,66 @@ export interface AppReleaseIteration {
 
 export const APP_ITERATIONS_LOG: AppReleaseIteration[] = [
   {
+    version: 'v4.8',
+    releaseDate: 'September 2026',
+    title: 'DRY Status Architecture & Single Source of Truth Refactoring',
+    summary:
+      'Eliminated duplicated status definitions, hardcoded select options, redundant switch-case badge styles, and fragmented tag reconciliation across the application into a unified statusUtils architecture.',
+    isLatest: true,
+    tags: ['DRY REFACTORING', 'ARCHITECTURE', 'SINGLE SOURCE OF TRUTH', 'STATUS UTILS', 'CODE QUALITY'],
+    changes: {
+      features: [
+        'Centralized status constants: ALL_SELLING_STATUSES, ALL_SHIPPING_STATUSES, and ALL_SHOPPING_STATUSES in src/utils/statusUtils.ts.',
+        'Extracted universal badge stylers (getSellingStatusBadgeClass, getShippingStatusBadgeClass, getShoppingStatusBadgeClass, getPipelineStageBadgeClass) eliminating scattered switch statements.',
+        'Unified lifecycle tag reconciliation in reconcileSaleItemTagsForStatus, replacing duplicated tag-filtering logic across updateSaleItem, batchUpdateSaleItemsStatus, and initial garment cleaners.',
+      ],
+      fixes: [
+        'Eliminated discrepancy where SaleFormModal lacked shipping statuses (like "Returned" / "Issue") present in database tables.',
+        'Replaced repetitive 35-line switch statements across SellingDatabaseTable, ShoppingDatabaseTable, and SellingView with single-line invocations.',
+        'Unified pipeline stage classification across views, preventing status desynchronization.',
+      ],
+      improvements: [
+        'Single Source of Truth: Modifying, adding, or restyling any workflow status now propagates automatically across all tables, modal forms, batch editors, and filter bars.',
+        'Zero lint or type errors with 100% strict TypeScript typing.',
+      ],
+    },
+    affectedModules: ['statusUtils.ts', 'SellingDatabaseTable', 'ShoppingDatabaseTable', 'SaleFormModal', 'BulkEditModal', 'SellingView', 'WardrobeContext'],
+  },
+  {
+    version: 'v4.7',
+    releaseDate: 'September 2026',
+    title: 'Selling Status Reactivity & Cancelled Lifecycle State Synchronization',
+    summary:
+      'Resolved selling status update synchronization across the Selling view, database table, card grid, and bulk actions. Added full support for the "Cancelled" status across types, tag reconciliation, pipeline stage detection, status filter dropdowns, and automated local persistence.',
+    isLatest: false,
+    tags: ['SELLING VIEW', 'STATE SYNCHRONIZATION', 'CANCELLED STATUS', 'TAG RECONCILIATION', 'REACTIVE UI'],
+    changes: {
+      features: [
+        'Added "Cancelled" to the core SellingStatus type definition across types.ts, SaleFormModal, BulkEditModal, and SellingDatabaseTable.',
+        'Interactive Quick-Status Selector: Added direct reactive status selector dropdown to individual garment cards in the Selling grid view with live color-coded pipeline indicators.',
+        'Bulk Status Actions: Integrated quick "Mark Listed", "Mark Reserved", and "Mark Cancelled" action buttons into the Selling view BulkActionBar.',
+        'Cancelled Status Filter: Added Cancelled / Delisted option to the status filter dropdown in the Selling filter toolbar.',
+      ],
+      fixes: [
+        'Fixed state synchronization bug where selecting "Cancelled" in the Selling table dropdown was missing from SellingStatus and SALE_STATUSES options.',
+        'Updated getSaleItemPipelineStage to explicitly evaluate status === "Cancelled", correctly classifying items without requiring manual notes or tags.',
+        'Refactored updateSaleItem and batchUpdateSaleItemsStatus in WardrobeContext to move change log recording outside state setters and synchronize lifecycle tags automatically.',
+        'Updated cleanInitialGarmentTags, buildMarketplaceSaleItem, and syncVintedOrderStatuses to accurately preserve and set Cancelled status.',
+      ],
+      improvements: [
+        'Immediate reactive UI re-render on any single or batch status change, automatically reflected in the pipeline stage bar, cards, and database table.',
+        'Seamless persistence to localStorage via storageQuotaService with undo history recording on every status modification.',
+      ],
+    },
+    affectedModules: ['SellingView', 'SellingDatabaseTable', 'WardrobeContext', 'SaleFormModal', 'BulkEditModal', 'tagUtils', 'types.ts'],
+  },
+  {
     version: 'v4.6',
     releaseDate: 'September 2026',
     title: 'React Deduplication & Build Pipeline Stability',
     summary:
       'Configures strict single-instance React and React DOM resolution across Vite plugins and build outputs, eliminating runtime hook dispatcher conflicts and ensuring rock-solid WardrobeProvider initialization.',
-    isLatest: true,
+    isLatest: false,
     tags: ['RUNTIME STABILITY', 'VITE DEDUPLICATION', 'REACT 19', 'BUILD VERIFICATION'],
     changes: {
       features: [

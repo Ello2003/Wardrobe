@@ -22,12 +22,14 @@ import {
   Search,
   FileText,
   RotateCcw,
+  Type,
 } from 'lucide-react';
 import { useWardrobe } from '../context/WardrobeContext';
 import { VersionHistoryView } from './VersionHistoryView';
 import { DuplicateMergeModal } from './DuplicateMergeModal';
 import { AutoImportModal } from './AutoImportModal';
 import { EbayImportModal } from './EbayImportModal';
+import { ProperCaseTool } from './ProperCaseTool';
 import {
   buildDuplicateItemRefs,
   computeDuplicateClusters,
@@ -37,7 +39,7 @@ import { getDefaultPresetConfig } from './duplicateMerge/duplicateUtils';
 
 interface ToolsViewProps {
   onOpenCreateSnapshot: () => void;
-  defaultSubTab?: 'duplicates' | 'import' | 'audit';
+  defaultSubTab?: 'duplicates' | 'import' | 'casing' | 'audit';
 }
 
 export const ToolsView: React.FC<ToolsViewProps> = ({
@@ -54,9 +56,9 @@ export const ToolsView: React.FC<ToolsViewProps> = ({
     formatCurrency,
   } = useWardrobe();
 
-  const [activeSubTab, setActiveSubTab] = useState<'duplicates' | 'import' | 'audit'>(
-    defaultSubTab
-  );
+  const [activeSubTab, setActiveSubTab] = useState<
+    'duplicates' | 'import' | 'casing' | 'audit'
+  >(defaultSubTab);
 
   // Duplicate Merge Modal State
   const [isDuplicateMergeOpen, setIsDuplicateMergeOpen] = useState(false);
@@ -202,6 +204,19 @@ export const ToolsView: React.FC<ToolsViewProps> = ({
             >
               <FileUp className="w-3.5 h-3.5 text-[#8C7355]" />
               <span>Import Toolbox</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveSubTab('casing')}
+              className={`flex items-center gap-2 px-3.5 py-1.5 text-xs font-mono font-medium transition-all cursor-pointer ${
+                activeSubTab === 'casing'
+                  ? 'bg-white text-[#1A1A1A] shadow-xs font-bold'
+                  : 'text-[#767670] hover:text-[#1A1A1A]'
+              }`}
+            >
+              <Type className="w-3.5 h-3.5 text-[#8C7355]" />
+              <span>Proper Case</span>
             </button>
 
             <button
@@ -706,7 +721,14 @@ export const ToolsView: React.FC<ToolsViewProps> = ({
         </div>
       )}
 
-      {/* ===================== SECTION 3: AUDIT & VERSIONS ===================== */}
+      {/* ===================== SECTION 3: PROPER CASE NORMALIZER ===================== */}
+      {activeSubTab === 'casing' && (
+        <div className="space-y-4">
+          <ProperCaseTool />
+        </div>
+      )}
+
+      {/* ===================== SECTION 4: AUDIT & VERSIONS ===================== */}
       {activeSubTab === 'audit' && (
         <div className="space-y-4">
           <VersionHistoryView onOpenCreateSnapshot={onOpenCreateSnapshot} />

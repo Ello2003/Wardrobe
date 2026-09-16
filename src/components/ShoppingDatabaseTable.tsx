@@ -4,6 +4,7 @@ import {
   ShoppingPriority,
   ShoppingStatus,
 } from '../types';
+import { getShoppingStatusBadgeClass } from '../utils/statusUtils';
 import { useWardrobe } from '../context/WardrobeContext';
 import { GarmentImage } from './GarmentImage';
 import { ResizableHeaderCell } from './ResizableHeaderCell';
@@ -216,26 +217,7 @@ export const ShoppingDatabaseTable: React.FC<ShoppingDatabaseTableProps> = ({
     });
   };
 
-  const getStatusBadgeClass = (status: ShoppingStatus) => {
-    switch (status) {
-      case 'In Basket':
-        return 'bg-amber-100 text-amber-900 border-amber-300';
-      case 'To Buy':
-        return 'bg-blue-100 text-blue-900 border-blue-300';
-      case 'Researching':
-        return 'bg-purple-100 text-purple-900 border-purple-300';
-      case 'Purchased':
-        return 'bg-emerald-100 text-emerald-900 border-emerald-300';
-      case 'Sold':
-        return 'bg-teal-100 text-teal-900 border-teal-300';
-      case 'Cancelled':
-        return 'bg-rose-100 text-rose-900 border-rose-300';
-      case 'Passed':
-        return 'bg-gray-100 text-gray-800 border-gray-300';
-      default:
-        return 'bg-gray-100 text-gray-800 border-gray-300';
-    }
-  };
+  const getStatusBadgeClass = getShoppingStatusBadgeClass;
 
   const getPriorityBadgeClass = (priority: ShoppingPriority) => {
     switch (priority) {

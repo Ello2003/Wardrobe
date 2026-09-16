@@ -142,7 +142,8 @@ export function determineLifecycleTags(params: DetermineLifecycleTagsParams): st
   // 1. CANCELLED CHECK (highest priority status exception)
   const isCancelled =
     isCancelledStatus(orderStatus) ||
-    shoppingStatus === 'Cancelled';
+    shoppingStatus === 'Cancelled' ||
+    sellingStatus === 'Cancelled';
 
   if (isCancelled) {
     tagSet.add('Cancelled');

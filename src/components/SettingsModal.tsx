@@ -93,39 +93,39 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
 
   // Inventory Table Settings
   const [invSettings, setInvSettings] = useState<InventoryDisplaySettings>(() => {
-    const saved = localStorage.getItem('inventory_display_settings');
-    if (saved) {
-      try {
+    try {
+      const saved = typeof window !== 'undefined' ? localStorage.getItem('inventory_display_settings') : null;
+      if (saved) {
         return { ...DEFAULT_INVENTORY_DISPLAY_SETTINGS, ...JSON.parse(saved) };
-      } catch (e) {
-        console.error(e);
       }
+    } catch (e) {
+      console.error(e);
     }
     return DEFAULT_INVENTORY_DISPLAY_SETTINGS;
   });
 
   // Shopping Table Settings
   const [shopSettings, setShopSettings] = useState<ShoppingDisplaySettings>(() => {
-    const saved = localStorage.getItem('shopping_display_settings');
-    if (saved) {
-      try {
+    try {
+      const saved = typeof window !== 'undefined' ? localStorage.getItem('shopping_display_settings') : null;
+      if (saved) {
         return { ...DEFAULT_SHOPPING_DISPLAY_SETTINGS, ...JSON.parse(saved) };
-      } catch (e) {
-        console.error(e);
       }
+    } catch (e) {
+      console.error(e);
     }
     return DEFAULT_SHOPPING_DISPLAY_SETTINGS;
   });
 
   // Selling Table Settings
   const [sellSettings, setSellSettings] = useState<SellingDisplaySettings>(() => {
-    const saved = localStorage.getItem('selling_display_settings');
-    if (saved) {
-      try {
+    try {
+      const saved = typeof window !== 'undefined' ? localStorage.getItem('selling_display_settings') : null;
+      if (saved) {
         return { ...DEFAULT_SELLING_DISPLAY_SETTINGS, ...JSON.parse(saved) };
-      } catch (e) {
-        console.error(e);
       }
+    } catch (e) {
+      console.error(e);
     }
     return DEFAULT_SELLING_DISPLAY_SETTINGS;
   });

@@ -342,7 +342,8 @@ export type SellingStatus =
   | 'Sold'
   | 'Shipped'
   | 'Completed'
-  | 'Delisted';
+  | 'Delisted'
+  | 'Cancelled';
 
 export type ShippingStatus =
   | 'Not Required'
@@ -542,6 +543,7 @@ export interface EditorialArticle {
 export interface EditorialFeedSettings {
   activeSourceIds: string[];
   customSources: EditorialFeedSource[];
+  deletedSourceIds?: string[];
   savedArticleIds: string[];
   autoRefreshMinutes: number;
   lastRefreshedAt?: string;

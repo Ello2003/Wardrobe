@@ -119,7 +119,7 @@ export function buildMarketplaceSaleItem(
 
   const tags = determineLifecycleTags({
     destination: 'selling',
-    sellingStatus: f.isActiveListing ? 'Listed' : f.isCancelled ? 'Draft' : 'Sold',
+    sellingStatus: f.isActiveListing ? 'Listed' : f.isCancelled ? 'Cancelled' : 'Sold',
     orderStatus: order.transactionStatus || order.status,
     transactionType: 'Sale',
     isVinted: platform.isVinted,
@@ -139,7 +139,7 @@ export function buildMarketplaceSaleItem(
     soldPrice: f.isActiveListing ? undefined : f.orderPrice,
     rrp: f.orderRrp,
     platform: platform.platformLabel as SaleItem['platform'],
-    status: f.isActiveListing ? 'Listed' : f.isCancelled ? 'Draft' : 'Sold',
+    status: f.isActiveListing ? 'Listed' : f.isCancelled ? 'Cancelled' : 'Sold',
     shippingStatus: f.isActiveListing || f.isCancelled ? 'Not Required' : 'Delivered',
     imageUrl: order.image || '',
     description: order.notes || `${platform.platformLabel} order #${f.orderId}`,

@@ -51,6 +51,7 @@ import {
   normalizeTags,
   canonicalizeTag,
 } from '../utils/tagUtils';
+import { reconcileSaleItemTagsForStatus } from '../utils/statusUtils';
 import {
   saveLogsSafely,
   saveSnapshotsSafely,
@@ -467,13 +468,7 @@ export const normalizeShoppingItem = (item: ShoppingItem): ShoppingItem => {
 
 // Utility to normalize tags and reconcile conflicting lifecycle markers
 const cleanInitialGarmentTags = (rawTags?: string[], status?: string): string[] => {
-  let tags = normalizeTags(rawTags || []);
-  if (status === 'Purchased') {
-    tags = tags.filter((t) => t !== 'Cancelled');
-  } else if (status === 'Sold') {
-    tags = tags.filter((t) => t !== 'Cancelled' && t !== 'Listed');
-  }
-  return tags;
+  return reconcileSaleItemTagsForStatus(rawTags || [], status as SellingStatus);
 };
 
 const WardrobeContext = createContext<WardrobeContextType | undefined>(undefined);
@@ -1868,32 +1863,47 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (targetSale) {
         captureUndoState(`Updated sale "${targetSale.brand} ${targetSale.name}"`);
       }
+      const now = new Date().toISOString();
+      let updatedEntity: SaleItem | undefined;
+
       setSaleItems((prev) => {
         const existing = prev.find((s) => s.id === id);
         if (!existing) return prev;
         const normalizedCategory = updates.category
           ? (normalizeCategoryName(updates.category) as Category)
           : existing.category;
-        const updated = {
+
+        let nextTags = updates.tags !== undefined ? updates.tags : existing.tags;
+        if (updates.status) {
+          nextTags = reconcileSaleItemTagsForStatus(nextTags, updates.status);
+        }
+
+        const updated: SaleItem = {
           ...existing,
           ...updates,
+          tags: nextTags,
           category: normalizedCategory,
-          updatedAt: new Date().toISOString(),
+          updatedAt: now,
         };
 
+        updatedEntity = updated;
+        return prev.map((s) => (s.id === id ? updated : s));
+      });
+
+      if (targetSale) {
+        const itemToRecord = updatedEntity || { ...targetSale, ...updates };
         recordChange(
           'SALE_UPDATED',
           'sale_item',
-          `${updated.brand} ${updated.name}`,
-          `Updated sale listing details for "${updated.brand} ${updated.name}".`,
+          `${itemToRecord.brand} ${itemToRecord.name}`,
+          `Updated sale listing details for "${itemToRecord.brand} ${itemToRecord.name}" (status: ${itemToRecord.status || 'Updated'}).`,
           id,
           {
-            newValue: updated,
+            oldValue: targetSale,
+            newValue: itemToRecord,
           }
         );
-
-        return prev.map((s) => (s.id === id ? updated : s));
-      });
+      }
     },
     [saleItems, captureUndoState, recordChange]
   );
@@ -2115,9 +2125,14 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const batchUpdateSaleItemsStatus = useCallback(
     (ids: string[], newStatus: SellingStatus) => {
       if (!ids || ids.length === 0) return;
+      captureUndoState(`Updated status to "${newStatus}" for ${ids.length} sale listings`);
       const now = new Date().toISOString();
       setSaleItems((prev) =>
-        prev.map((s) => (ids.includes(s.id) ? { ...s, status: newStatus, updatedAt: now } : s))
+        prev.map((s) => {
+          if (!ids.includes(s.id)) return s;
+          const nextTags = reconcileSaleItemTagsForStatus(s.tags || [], newStatus);
+          return { ...s, status: newStatus, tags: nextTags, updatedAt: now };
+        })
       );
       recordChange(
         'SALE_UPDATED',
@@ -2127,7 +2142,7 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         undefined
       );
     },
-    [recordChange]
+    [captureUndoState, recordChange]
   );
 
   // 16. CROSS-COLLECTION MOBILITY & MOVE FUNCTIONS
@@ -4016,7 +4031,7 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
           const saleTags = determineLifecycleTags({
             destination: 'selling',
-            sellingStatus: isActiveListing ? 'Listed' : (isCancelled ? 'Draft' : 'Sold'),
+            sellingStatus: isActiveListing ? 'Listed' : (isCancelled ? 'Cancelled' : 'Sold'),
             orderStatus: order.transactionStatus || order.status,
             transactionType: 'Sale',
             isVinted: true,
@@ -4035,7 +4050,7 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             listingPrice: orderPrice,
             soldPrice: isActiveListing ? undefined : orderPrice,
             platform: 'Vinted',
-            status: isActiveListing ? 'Listed' : (isCancelled ? 'Draft' : 'Sold'),
+            status: isActiveListing ? 'Listed' : (isCancelled ? 'Cancelled' : 'Sold'),
             shippingStatus: isActiveListing ? 'Not Required' : (isCancelled ? 'Not Required' : 'Delivered'),
             imageUrl: order.image || '',
             tags: saleTags,

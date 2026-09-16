@@ -890,6 +890,34 @@ export const INITIAL_VERSION_LOGS: VersionChangeLog[] = [
       monthlyBudget: 350,
     },
     author: 'Graeme (System)'
+  },
+  {
+    id: 'log-8',
+    versionNumber: 8,
+    timestamp: new Date().toISOString(),
+    actionType: 'SALE_UPDATED',
+    entityType: 'sale_item',
+    entityTitle: 'Selling Status Reactivity & Cancelled Lifecycle v4.7',
+    summary: 'Resolved selling status update synchronization, added Cancelled status across pipeline, table, card grid, and bulk actions with immediate persistence.',
+    details: {
+      field: 'sellingStatusReactivity',
+      newValue: 'Synchronized & Persistent'
+    },
+    author: 'Graeme (System)'
+  },
+  {
+    id: 'log-9',
+    versionNumber: 9,
+    timestamp: new Date().toISOString(),
+    actionType: 'SALE_UPDATED',
+    entityType: 'sale_item',
+    entityTitle: 'DRY Status Architecture & Single Source of Truth v4.8',
+    summary: 'Centralized all workflow statuses, pipeline classifiers, badge styling classes, and lifecycle tag reconcilers into a unified statusUtils module across the platform.',
+    details: {
+      field: 'statusArchitecture',
+      newValue: 'Unified & DRY Single Source of Truth'
+    },
+    author: 'Graeme (System)'
   }
 ];
 

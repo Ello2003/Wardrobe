@@ -43,6 +43,7 @@ import {
 } from '../types';
 import { GarmentImage } from './GarmentImage';
 import { canonicalizeTag } from '../utils/tagUtils';
+import { ALL_SELLING_STATUSES, ALL_SHIPPING_STATUSES } from '../utils/statusUtils';
 
 export type BulkEditTargetType = 'wardrobe' | 'shopping' | 'sales' | 'selling' | 'lookbook';
 
@@ -85,22 +86,8 @@ const SELLING_PLATFORMS: SellingPlatform[] = [
   'Direct / Private',
   'Other',
 ];
-const SELLING_STATUSES: SellingStatus[] = [
-  'Draft',
-  'Listed',
-  'Reserved',
-  'Sold',
-  'Shipped',
-  'Completed',
-  'Delisted',
-];
-const SHIPPING_STATUSES: ShippingStatus[] = [
-  'Not Required',
-  'To Pack',
-  'Shipped',
-  'In Transit',
-  'Delivered',
-];
+const SELLING_STATUSES = ALL_SELLING_STATUSES;
+const SHIPPING_STATUSES = ALL_SHIPPING_STATUSES;
 
 export const BulkEditModal: React.FC<BulkEditModalProps> = ({
   isOpen,

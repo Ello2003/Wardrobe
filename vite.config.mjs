@@ -9,9 +9,9 @@ export default defineConfig({
   base,
   plugins: [react(), tailwindcss()],
   resolve: {
-    dedupe: ['react', 'react-dom', 'react-dom/client'],
+    dedupe: ['react', 'react-dom'],
   },
   optimizeDeps: {
-    include: ['react', 'react-dom', 'react-dom/client'],
+    include: ['react', 'react-dom'],
   },
 });
