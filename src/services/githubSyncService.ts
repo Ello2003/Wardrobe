@@ -1,15 +1,15 @@
 /**
  * GitHub Cloud Sync Service
- * Enables automatic and manual lossless synchronization of the wardrobe database to a GitHub repository.
+ * Lossless wardrobe backup with safe push/pull handling.
  */
 
 export interface GithubSyncConfig {
   token: string;
-  repo: string; // "owner/repo" format
-  branch: string; // e.g. "main"
-  filePath: string; // e.g. "closet-backup.json"
+  repo: string;
+  branch: string;
+  filePath: string;
   autoSync: boolean;
-  stripImages?: boolean; // Strips large embedded data URI photos to fit under GitHub 1MB API limit
+  stripImages?: boolean;
   lastSyncTime: string | null;
   lastSyncStatus: 'idle' | 'syncing' | 'success' | 'error';
   lastSyncMessage: string | null;
@@ -29,10 +29,32 @@ export const DEFAULT_GITHUB_SYNC_CONFIG: GithubSyncConfig = {
   lastCommitSha: null,
 };
 
-/**
- * Recursively strips oversized base64 data URIs so the JSON payload fits within GitHub's API payload limit (<1MB).
- * External URLs (e.g. https://...) are preserved untouched.
- */
+const STORAGE_KEY = 'wardrobe_github_sync_config_v1';
+const API_ACCEPT = 'application/vnd.github+json';
+
+function normaliseRepo(repo: string): string {
+  return repo.trim()
+    .replace(/^https?:\/\/github\.com\//i, '')
+    .replace(/\.git\/?$/, '')
+    .replace(/^\/+|\/+$/g, '');
+}
+
+function normaliseBranch(branch: string): string {
+  return branch.trim() || 'main';
+}
+
+function normalisePath(filePath: string): string {
+  return (filePath.trim().replace(/^\/+/, '') || 'wardrobe-database-backup.json');
+}
+
+function githubHeaders(token: string, raw = false): HeadersInit {
+  return {
+    Authorization: `Bearer ${token.trim()}`,
+    Accept: raw ? 'application/vnd.github.raw+json' : API_ACCEPT,
+    'X-GitHub-Api-Version': '2022-11-28',
+  };
+}
+
 export function stripEmbeddedImages<T>(value: T): T {
   if (typeof value === 'string') {
     if (value.startsWith('data:image/') || (value.length > 500 && value.includes(';base64,'))) {
@@ -40,12 +62,10 @@ export function stripEmbeddedImages<T>(value: T): T {
     }
     return value;
   }
-  if (Array.isArray(value)) {
-    return value.map((item) => stripEmbeddedImages(item)) as unknown as T;
-  }
+  if (Array.isArray(value)) return value.map(stripEmbeddedImages) as unknown as T;
   if (value && typeof value === 'object') {
-    const result: Record<string, any> = {};
-    for (const [key, val] of Object.entries(value as Record<string, any>)) {
+    const result: Record<string, unknown> = {};
+    for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
       result[key] = stripEmbeddedImages(val);
     }
     return result as T;
@@ -53,55 +73,31 @@ export function stripEmbeddedImages<T>(value: T): T {
   return value;
 }
 
-/**
- * Encodes a string to Base64 safely supporting full UTF-8 (emojis, currency signs, diacritics)
- * without exceeding JavaScript stack limits on large strings.
- */
 export function safeUtf8ToBase64(str: string): string {
-  try {
-    const encoder = new TextEncoder();
-    const bytes = encoder.encode(str);
-    let binary = '';
-    const len = bytes.byteLength;
-    const chunkSize = 8192;
-    for (let i = 0; i < len; i += chunkSize) {
-      const chunk = bytes.subarray(i, Math.min(i + chunkSize, len));
-      binary += String.fromCharCode.apply(null, Array.from(chunk));
-    }
-    return btoa(binary);
-  } catch {
-    return btoa(unescape(encodeURIComponent(str)));
+  const bytes = new TextEncoder().encode(str);
+  let binary = '';
+  const chunkSize = 8192;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, Math.min(i + chunkSize, bytes.length)));
   }
+  return btoa(binary);
 }
 
-/**
- * Decodes a Base64 string to a UTF-8 string safely handling non-ASCII and large strings.
- */
 export function safeBase64DecodeUtf8(base64: string): string {
   const clean = base64.replace(/\s/g, '');
   if (!clean) return '';
-  try {
-    const binary = atob(clean);
-    const len = binary.length;
-    const bytes = new Uint8Array(len);
-    for (let i = 0; i < len; i++) {
-      bytes[i] = binary.charCodeAt(i);
-    }
-    return new TextDecoder('utf-8').decode(bytes);
-  } catch {
-    return decodeURIComponent(escape(atob(clean)));
-  }
+  const binary = atob(clean);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return new TextDecoder('utf-8').decode(bytes);
 }
-
-const STORAGE_KEY = 'wardrobe_github_sync_config_v1';
 
 export function loadGithubSyncConfig(): GithubSyncConfig {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return { ...DEFAULT_GITHUB_SYNC_CONFIG };
-    return { ...DEFAULT_GITHUB_SYNC_CONFIG, ...JSON.parse(raw) };
+    return raw ? { ...DEFAULT_GITHUB_SYNC_CONFIG, ...JSON.parse(raw) } : { ...DEFAULT_GITHUB_SYNC_CONFIG };
   } catch (err) {
-    console.error('Failed to load GitHub sync config from localStorage', err);
+    console.error('Failed to load GitHub sync config', err);
     return { ...DEFAULT_GITHUB_SYNC_CONFIG };
   }
 }
@@ -110,13 +106,10 @@ export function saveGithubSyncConfig(config: GithubSyncConfig): void {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
   } catch (err) {
-    console.error('Failed to save GitHub sync config to localStorage', err);
+    console.error('Failed to save GitHub sync config', err);
   }
 }
 
-/**
- * Validates a GitHub Personal Access Token and verifies repository permissions
- */
 export async function validateGithubCredentials(token: string, repo: string): Promise<{
   success: boolean;
   message: string;
@@ -124,346 +117,206 @@ export async function validateGithubCredentials(token: string, repo: string): Pr
   repoDetails?: { fullName: string; defaultBranch: string; isPrivate: boolean; canPush: boolean };
 }> {
   const cleanToken = token.trim();
-  if (!cleanToken) {
-    return { success: false, message: 'GitHub Personal Access Token is required.' };
-  }
+  if (!cleanToken) return { success: false, message: 'GitHub Personal Access Token is required.' };
 
   try {
-    // 1. Verify User Token
-    const userRes = await fetch('https://api.github.com/user', {
-      headers: {
-        Authorization: `Bearer ${cleanToken}`,
-        Accept: 'application/vnd.github.v3+json',
-      },
-    });
-
+    const userRes = await fetch('https://api.github.com/user', { headers: githubHeaders(cleanToken) });
     if (!userRes.ok) {
-      if (userRes.status === 401) {
-        return { success: false, message: 'Invalid or expired GitHub Personal Access Token.' };
-      }
-      return { success: false, message: `GitHub authentication failed: HTTP ${userRes.status}` };
+      return {
+        success: false,
+        message: userRes.status === 401 ? 'Invalid or expired GitHub Personal Access Token.' : `GitHub authentication failed: HTTP ${userRes.status}`,
+      };
     }
 
     const userData = await userRes.json();
+    const user = { login: userData.login, name: userData.name || userData.login, avatarUrl: userData.avatar_url };
+    const cleanRepo = normaliseRepo(repo);
+    if (!cleanRepo) return { success: true, message: 'GitHub credentials verified successfully.', user };
 
-    // 2. If repo specified, check repo access and write permissions
-    const cleanRepo = repo.trim().replace(/^https?:\/\/github\.com\//, '').replace(/\.git$/, '');
-    let repoDetails = undefined;
-
-    if (cleanRepo) {
-      const repoRes = await fetch(`https://api.github.com/repos/${cleanRepo}`, {
-        headers: {
-          Authorization: `Bearer ${cleanToken}`,
-          Accept: 'application/vnd.github.v3+json',
-        },
-      });
-
-      if (!repoRes.ok) {
-        if (repoRes.status === 404) {
-          return {
-            success: false,
-            message: `Repository "${cleanRepo}" not found. Ensure the repository exists and your token has "repo" scope.`,
-            user: { login: userData.login, name: userData.name || userData.login, avatarUrl: userData.avatar_url },
-          };
-        }
-        return {
-          success: false,
-          message: `Failed to access repository: HTTP ${repoRes.status}`,
-          user: { login: userData.login, name: userData.name || userData.login, avatarUrl: userData.avatar_url },
-        };
-      }
-
-      const repoData = await repoRes.json();
-      const canPush = Boolean(repoData.permissions?.push || repoData.permissions?.admin);
-
-      if (!canPush) {
-        return {
-          success: false,
-          message: `Your token does not have write (push) permissions to "${cleanRepo}".`,
-          user: { login: userData.login, name: userData.name || userData.login, avatarUrl: userData.avatar_url },
-        };
-      }
-
-      repoDetails = {
-        fullName: repoData.full_name,
-        defaultBranch: repoData.default_branch || 'main',
-        isPrivate: repoData.private,
-        canPush,
+    const repoRes = await fetch(`https://api.github.com/repos/${cleanRepo}`, { headers: githubHeaders(cleanToken) });
+    if (!repoRes.ok) {
+      return {
+        success: false,
+        message: repoRes.status === 404
+          ? `Repository "${cleanRepo}" not found or the token cannot access it.`
+          : `Failed to access repository: HTTP ${repoRes.status}`,
+        user,
       };
     }
+
+    const repoData = await repoRes.json();
+    const canPush = Boolean(repoData.permissions?.push || repoData.permissions?.admin);
+    if (!canPush) return { success: false, message: `Your token does not have write (push) permissions to "${cleanRepo}".`, user };
 
     return {
       success: true,
       message: 'GitHub credentials verified successfully.',
-      user: {
-        login: userData.login,
-        name: userData.name || userData.login,
-        avatarUrl: userData.avatar_url,
+      user,
+      repoDetails: {
+        fullName: repoData.full_name,
+        defaultBranch: repoData.default_branch || 'main',
+        isPrivate: Boolean(repoData.private),
+        canPush,
       },
-      repoDetails,
     };
   } catch (err: any) {
     return { success: false, message: err?.message || 'Network error connecting to GitHub API.' };
   }
 }
 
+async function getFileMetadata(token: string, repo: string, branch: string, filePath: string): Promise<{
+  exists: boolean;
+  sha?: string;
+  size?: number;
+  downloadUrl?: string;
+  error?: string;
+}> {
+  const url = `https://api.github.com/repos/${repo}/contents/${filePath}?ref=${encodeURIComponent(branch)}`;
+  const res = await fetch(url, { headers: githubHeaders(token) });
+  if (res.status === 404) return { exists: false };
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    return { exists: false, error: `GitHub file lookup failed: HTTP ${res.status}${body ? ` — ${body.slice(0, 180)}` : ''}` };
+  }
+  const data = await res.json();
+  if (data.type !== 'file') return { exists: false, error: `GitHub path "${filePath}" is not a file.` };
+  return { exists: true, sha: data.sha, size: data.size, downloadUrl: data.download_url };
+}
+
 /**
- * Pushes the full wardrobe database payload to GitHub
+ * Pushes the complete wardrobe payload. If the file changes between the initial
+ * read and PUT, a 409 is retried once using the new blob SHA instead of failing.
  */
 export async function pushDatabaseToGithub(
   config: GithubSyncConfig,
   databasePayload: Record<string, any>,
-  customMessage?: string
-): Promise<{
-  success: boolean;
-  message: string;
-  commitSha?: string;
-  fileUrl?: string;
-}> {
-  const { token, repo, branch, filePath } = config;
-
-  if (!token || !repo) {
-    return { success: false, message: 'GitHub token and repository must be configured.' };
-  }
-
-  const cleanRepo = repo.trim().replace(/^https?:\/\/github\.com\//, '').replace(/\.git$/, '');
-  const cleanBranch = branch.trim() || 'main';
-  const cleanPath = filePath.trim().replace(/^\//, '') || 'wardrobe-backup.json';
+  customMessage?: string,
+): Promise<{ success: boolean; message: string; commitSha?: string; fileUrl?: string }> {
+  const token = config.token?.trim();
+  const repo = normaliseRepo(config.repo || '');
+  const branch = normaliseBranch(config.branch || '');
+  const filePath = normalisePath(config.filePath || '');
+  if (!token || !repo) return { success: false, message: 'GitHub token and repository must be configured.' };
 
   try {
-    // 1. Check if the file already exists on GitHub to obtain its current blob SHA (required by GitHub API for updates)
-    let currentSha: string | undefined = undefined;
-    const getFileUrl = `https://api.github.com/repos/${cleanRepo}/contents/${cleanPath}?ref=${encodeURIComponent(cleanBranch)}`;
-
-    const checkRes = await fetch(getFileUrl, {
-      headers: {
-        Authorization: `Bearer ${token.trim()}`,
-        Accept: 'application/vnd.github.v3+json',
-      },
-    });
-
-    if (checkRes.ok) {
-      const fileMeta = await checkRes.json();
-      currentSha = fileMeta.sha;
-    }
-
-    // 2. Prepare JSON string and Base64 encoding (strip oversized embedded base64 photos if enabled)
     const shouldStrip = config.stripImages !== false;
-    const sanitizedPayload = shouldStrip ? stripEmbeddedImages(databasePayload) : databasePayload;
-    const jsonString = JSON.stringify(sanitizedPayload, null, 2);
-    // Use UTF-8 and memory-safe base64 encoding
-    const base64Content = safeUtf8ToBase64(jsonString);
+    const payload = shouldStrip ? stripEmbeddedImages(databasePayload) : databasePayload;
+    const jsonString = JSON.stringify(payload, null, 2);
+    const encoded = safeUtf8ToBase64(jsonString);
 
-    const timestampStr = new Date().toISOString();
-    const commitMessage =
-      customMessage ||
-      `Wardrobe Data Sync · ${timestampStr.slice(0, 10)} ${timestampStr.slice(11, 19)} UTC [auto-sync]`;
-
-    // 3. Put File Contents
-    const putUrl = `https://api.github.com/repos/${cleanRepo}/contents/${cleanPath}`;
-    const putBody: Record<string, any> = {
-      message: commitMessage,
-      content: base64Content,
-      branch: cleanBranch,
-    };
-    if (currentSha) {
-      putBody.sha = currentSha;
+    // GitHub Contents API accepts files up to 100 MB, but recommends the API for
+    // smaller files. Warn early if the backup is unusually large rather than
+    // producing an opaque 4xx response.
+    const byteLength = new TextEncoder().encode(jsonString).byteLength;
+    if (byteLength >= 100 * 1024 * 1024) {
+      return { success: false, message: `Backup is ${(byteLength / 1024 / 1024).toFixed(1)} MB; GitHub Contents API has a 100 MB file limit.` };
     }
 
-    const putRes = await fetch(putUrl, {
+    let metadata = await getFileMetadata(token, repo, branch, filePath);
+    if (metadata.error) return { success: false, message: metadata.error };
+
+    const commitMessage = customMessage?.trim() || (() => {
+      const now = new Date().toISOString();
+      return `Wardrobe Data Sync · ${now.slice(0, 10)} ${now.slice(11, 19)} UTC [auto-sync]`;
+    })();
+
+    const putUrl = `https://api.github.com/repos/${repo}/contents/${filePath}`;
+    const put = async (sha?: string) => fetch(putUrl, {
       method: 'PUT',
-      headers: {
-        Authorization: `Bearer ${token.trim()}`,
-        Accept: 'application/vnd.github.v3+json',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(putBody),
+      headers: { ...githubHeaders(token), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: commitMessage, content: encoded, branch, ...(sha ? { sha } : {}) }),
     });
+
+    let putRes = await put(metadata.sha);
+
+    // 409 means another sync committed the file after our GET. Refresh the SHA
+    // and retry once; never overwrite a newer commit with a stale SHA.
+    if (putRes.status === 409) {
+      metadata = await getFileMetadata(token, repo, branch, filePath);
+      if (metadata.error) return { success: false, message: metadata.error };
+      putRes = await put(metadata.sha);
+    }
 
     if (!putRes.ok) {
-      const errData = await putRes.json().catch(() => ({}));
-      return {
-        success: false,
-        message: `GitHub commit failed: ${errData.message || `HTTP ${putRes.status}`}`,
-      };
+      const errText = await putRes.text().catch(() => '');
+      let message = `HTTP ${putRes.status}`;
+      try {
+        const parsed = JSON.parse(errText);
+        message = parsed.message || message;
+      } catch {
+        if (errText) message = errText.slice(0, 300);
+      }
+      return { success: false, message: `GitHub commit failed: ${message}` };
     }
 
-    const putData = await putRes.json();
-    const commitSha = putData.commit?.sha || putData.content?.sha;
-    const fileHtmlUrl = putData.content?.html_url || `https://github.com/${cleanRepo}/blob/${cleanBranch}/${cleanPath}`;
-
-    return {
-      success: true,
-      message: `Successfully synchronized wardrobe data to GitHub (${cleanRepo}/${cleanPath})!`,
-      commitSha,
-      fileUrl: fileHtmlUrl,
-    };
+    const result = await putRes.json();
+    const commitSha = result.commit?.sha;
+    const fileUrl = result.content?.html_url || `https://github.com/${repo}/blob/${branch}/${filePath}`;
+    return { success: true, message: `Successfully synchronized wardrobe data to GitHub (${repo}/${filePath}).`, commitSha, fileUrl };
   } catch (err: any) {
     console.error('GitHub push error:', err);
     return { success: false, message: err?.message || 'Failed to push data to GitHub.' };
   }
 }
 
-/**
- * Pulls the latest backup from the configured GitHub repository.
- * Robust against GitHub's 1MB API limit, empty content responses,
- * and base64 parsing EOF truncations.
- */
-export async function pullDatabaseFromGithub(
-  config: GithubSyncConfig
-): Promise<{
-  success: boolean;
-  message: string;
-  data?: Record<string, any>;
-  sha?: string;
-}> {
-  const { token, repo, branch, filePath } = config;
+async function fetchRawBackup(token: string, repo: string, branch: string, filePath: string, downloadUrl?: string): Promise<string> {
+  const contentsUrl = `https://api.github.com/repos/${repo}/contents/${filePath}?ref=${encodeURIComponent(branch)}`;
+  const rawRes = await fetch(contentsUrl, { headers: githubHeaders(token, true) });
+  if (rawRes.ok) return await rawRes.text();
 
-  if (!token || !repo) {
-    return { success: false, message: 'GitHub token and repository must be configured.' };
+  // Fallback for GitHub API responses where raw media negotiation is unavailable.
+  const metaRes = await fetch(contentsUrl, { headers: githubHeaders(token) });
+  if (!metaRes.ok) {
+    if (metaRes.status === 404) throw new Error(`Backup file "${filePath}" was not found on branch "${branch}" of repository "${repo}".`);
+    throw new Error(`Failed to pull file from GitHub: HTTP ${metaRes.status}`);
   }
 
-  const cleanRepo = repo.trim().replace(/^https?:\/\/github\.com\//, '').replace(/\.git$/, '');
-  const cleanBranch = branch.trim() || 'main';
-  const cleanPath = filePath.trim().replace(/^\//, '') || 'wardrobe-backup.json';
+  const meta = await metaRes.json();
+  if (meta.content) return safeBase64DecodeUtf8(meta.content);
 
-  const authHeader = `Bearer ${token.trim()}`;
-  const getFileUrl = `https://api.github.com/repos/${cleanRepo}/contents/${cleanPath}?ref=${encodeURIComponent(cleanBranch)}`;
+  if (meta.sha) {
+    const blobUrl = `https://api.github.com/repos/${repo}/git/blobs/${meta.sha}`;
+    const blobRes = await fetch(blobUrl, { headers: githubHeaders(token) });
+    if (blobRes.ok) {
+      const blob = await blobRes.json();
+      if (blob.encoding === 'base64' && blob.content) return safeBase64DecodeUtf8(blob.content);
+    }
+  }
+
+  if (downloadUrl) {
+    const dlRes = await fetch(downloadUrl, { headers: githubHeaders(token, true) });
+    if (dlRes.ok) return await dlRes.text();
+  }
+  throw new Error(`Backup file "${filePath}" exists on GitHub but its contents could not be downloaded.`);
+}
+
+export async function pullDatabaseFromGithub(
+  config: GithubSyncConfig,
+): Promise<{ success: boolean; message: string; data?: Record<string, any>; sha?: string }> {
+  const token = config.token?.trim();
+  const repo = normaliseRepo(config.repo || '');
+  const branch = normaliseBranch(config.branch || '');
+  const filePath = normalisePath(config.filePath || '');
+  if (!token || !repo) return { success: false, message: 'GitHub token and repository must be configured.' };
 
   try {
-    let rawJsonText: string | null = null;
-    let fileSha: string | undefined = undefined;
+    const metadata = await getFileMetadata(token, repo, branch, filePath);
+    if (metadata.error) return { success: false, message: metadata.error };
+    if (!metadata.exists) return { success: false, message: `Backup file "${filePath}" was not found on branch "${branch}" of repository "${repo}".` };
 
-    // Strategy 1: Direct Raw Contents Fetch (application/vnd.github.v3.raw)
-    // This allows downloading raw file contents up to 100MB directly without base64 truncation or 1MB limits.
-    try {
-      const rawRes = await fetch(getFileUrl, {
-        headers: {
-          Authorization: authHeader,
-          Accept: 'application/vnd.github.v3.raw',
-        },
-      });
-
-      if (rawRes.ok) {
-        const text = await rawRes.text();
-        if (text && text.trim().length > 0) {
-          rawJsonText = text;
-          fileSha = rawRes.headers.get('etag')?.replace(/"/g, '') || undefined;
-        }
-      } else if (rawRes.status === 404) {
-        return {
-          success: false,
-          message: `Backup file "${cleanPath}" was not found on branch "${cleanBranch}" of repository "${cleanRepo}".`,
-        };
-      }
-    } catch (rawErr) {
-      console.warn('Direct raw fetch from GitHub contents API encountered an issue, trying metadata API fallback:', rawErr);
+    const rawJsonText = await fetchRawBackup(token, repo, branch, filePath, metadata.downloadUrl);
+    if (!rawJsonText || !rawJsonText.trim()) {
+      return { success: false, message: `Backup file "${filePath}" exists on GitHub but contains 0 bytes.` };
     }
 
-    // Strategy 2: Contents Metadata API + Git Blobs API fallback (handles >1MB files where contents.content is empty)
-    if (!rawJsonText) {
-      const metaRes = await fetch(getFileUrl, {
-        headers: {
-          Authorization: authHeader,
-          Accept: 'application/vnd.github.v3+json',
-        },
-      });
-
-      if (!metaRes.ok) {
-        if (metaRes.status === 404) {
-          return {
-            success: false,
-            message: `Backup file "${cleanPath}" was not found on branch "${cleanBranch}" of repository "${cleanRepo}".`,
-          };
-        }
-        return { success: false, message: `Failed to pull file from GitHub: HTTP ${metaRes.status}` };
-      }
-
-      const fileMeta = await metaRes.json();
-      fileSha = fileMeta.sha;
-
-      // If content is embedded directly in file metadata (< 1MB)
-      if (fileMeta.content && typeof fileMeta.content === 'string' && fileMeta.content.trim().length > 0) {
-        rawJsonText = safeBase64DecodeUtf8(fileMeta.content);
-      }
-      // If content is empty because file >= 1MB, fetch from Git Blobs API (supports up to 100MB)
-      else if (fileMeta.sha) {
-        const blobUrl = `https://api.github.com/repos/${cleanRepo}/git/blobs/${fileMeta.sha}`;
-
-        // Try raw blob first
-        const rawBlobRes = await fetch(blobUrl, {
-          headers: {
-            Authorization: authHeader,
-            Accept: 'application/vnd.github.v3.raw',
-          },
-        });
-
-        if (rawBlobRes.ok) {
-          const blobText = await rawBlobRes.text();
-          if (blobText && blobText.trim().length > 0) {
-            rawJsonText = blobText;
-          }
-        }
-
-        // Try JSON blob (contains base64 content up to 100MB)
-        if (!rawJsonText) {
-          const jsonBlobRes = await fetch(blobUrl, {
-            headers: {
-              Authorization: authHeader,
-              Accept: 'application/vnd.github.v3+json',
-            },
-          });
-          if (jsonBlobRes.ok) {
-            const blobMeta = await jsonBlobRes.json();
-            if (blobMeta.content) {
-              rawJsonText = safeBase64DecodeUtf8(blobMeta.content);
-            }
-          }
-        }
-
-        // Try download_url as third fallback
-        if (!rawJsonText && fileMeta.download_url) {
-          const dlRes = await fetch(fileMeta.download_url, {
-            headers: {
-              Authorization: authHeader,
-            },
-          });
-          if (dlRes.ok) {
-            const dlText = await dlRes.text();
-            if (dlText && dlText.trim().length > 0) {
-              rawJsonText = dlText;
-            }
-          }
-        }
-      }
-    }
-
-    // Explicit check for empty content to prevent "JSON Parse error: Unexpected EOF"
-    if (!rawJsonText || rawJsonText.trim().length === 0) {
-      return {
-        success: false,
-        message: `Backup file "${cleanPath}" exists on GitHub but contains 0 bytes (empty content). Please verify your GitHub repository or commit a fresh sync.`,
-      };
-    }
-
-    // Safely parse JSON with rich diagnostic reporting
-    let parsedData: any;
+    let parsedData: Record<string, any>;
     try {
       parsedData = JSON.parse(rawJsonText);
-    } catch (parseErr: any) {
-      console.error('Failed to parse pulled GitHub JSON:', parseErr, rawJsonText.slice(0, 200));
-      return {
-        success: false,
-        message: `GitHub backup file "${cleanPath}" is incomplete or corrupted: ${parseErr?.message || 'JSON Parse error: Unexpected EOF'}. Ensure the repository file has valid JSON.`,
-      };
+    } catch (err: any) {
+      return { success: false, message: `GitHub backup file "${filePath}" contains invalid or incomplete JSON: ${err?.message || 'JSON parse error'}.` };
     }
 
-    return {
-      success: true,
-      message: `Successfully fetched and decoded backup from GitHub (${cleanRepo}/${cleanPath}).`,
-      data: parsedData,
-      sha: fileSha,
-    };
+    return { success: true, message: `Successfully fetched backup from GitHub (${repo}/${filePath}).`, data: parsedData, sha: metadata.sha };
   } catch (err: any) {
     console.error('GitHub pull error:', err);
     return { success: false, message: err?.message || 'Failed to pull or parse GitHub backup data.' };
