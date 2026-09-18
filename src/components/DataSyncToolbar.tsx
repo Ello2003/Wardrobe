@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Github, Printer, X } from 'lucide-react';
 import { useWardrobe } from '../context/WardrobeContext';
-import { GitHubSyncModal } from './GitHubSyncModal';
+import { GithubSyncPanel } from './GithubSyncPanel';
 
 const escapeHtml = (value: unknown): string =>
   String(value ?? '')
@@ -22,6 +22,7 @@ const formatGbp = (value: number): string =>
 export const DataSyncToolbar: React.FC = () => {
   const { shoppingList } = useWardrobe();
   const [isGitHubOpen, setIsGitHubOpen] = useState(false);
+  const [githubNotice, setGithubNotice] = useState<string | null>(null);
   const [printError, setPrintError] = useState<string | null>(null);
 
   const printBasket = () => {
@@ -175,7 +176,20 @@ export const DataSyncToolbar: React.FC = () => {
         </div>
       </div>
 
-      <GitHubSyncModal isOpen={isGitHubOpen} onClose={() => setIsGitHubOpen(false)} />
+      {isGitHubOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true" aria-labelledby="github-sync-dialog-title">
+          <div className="w-full max-w-5xl max-h-[92vh] overflow-y-auto rounded-lg bg-[#F8F7F4] shadow-2xl">
+            <div className="sticky top-0 z-10 flex items-center justify-between border-b border-[#E5E5E1] bg-white px-5 py-3">
+              <h2 id="github-sync-dialog-title" className="font-serif text-lg font-bold">GitHub Sync</h2>
+              <button type="button" onClick={() => setIsGitHubOpen(false)} aria-label="Close GitHub Sync" className="rounded-md p-1.5 text-[#767670] hover:bg-[#F3F2EE]"><X className="h-5 w-5" /></button>
+            </div>
+            <div className="p-5">
+              {githubNotice && <div className="mb-4 rounded-md border border-[#E5E5E1] bg-white px-3 py-2 text-xs text-[#5A5A55]">{githubNotice}</div>}
+              <GithubSyncPanel onNotify={(type, msg) => setGithubNotice(msg)} />
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 };
