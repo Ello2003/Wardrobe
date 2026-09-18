@@ -17,6 +17,7 @@ import { CreateSnapshotModal } from './components/CreateSnapshotModal';
 import { SettingsModal } from './components/SettingsModal';
 import { DuplicateMergeModal } from './components/DuplicateMergeModal';
 import { GlobalSearchModal } from './components/common/GlobalSearchModal';
+import { DataSyncToolbar } from './components/DataSyncToolbar';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { WardrobeItem, LookbookOutfit, ShoppingItem } from './types';
 import { History, Undo2, X } from 'lucide-react';
@@ -110,6 +111,8 @@ const MainAppContent: React.FC = () => {
         onOpenDuplicateMerge={() => setIsDuplicateMergeOpen(true)}
         onOpenGlobalSearch={() => setIsGlobalSearchOpen(true)}
       />
+
+      <DataSyncToolbar />
 
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
         {activeTab === 'dashboard' && (
