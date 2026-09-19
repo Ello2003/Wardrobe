@@ -5,6 +5,7 @@ import {
   ALL_SHIPPING_STATUSES,
   getSellingStatusBadgeClass,
 } from '../utils/statusUtils';
+import { getColorHex } from '../utils/colorUtils';
 import { useWardrobe } from '../context/WardrobeContext';
 import { GarmentImage } from './GarmentImage';
 import { ResizableHeaderCell } from './ResizableHeaderCell';
@@ -122,6 +123,7 @@ export const SellingDatabaseTable: React.FC<SellingDatabaseTableProps> = ({
     startResize,
     resetColumnWidth,
     getWidth,
+    getCellStyle,
   } = useResizableColumns({
     storageKey: 'selling_table_widths_v2',
     defaultWidths: DEFAULT_SELLING_COLUMN_WIDTHS,
@@ -195,6 +197,8 @@ export const SellingDatabaseTable: React.FC<SellingDatabaseTableProps> = ({
     } else if (
       field === 'name' ||
       field === 'brand' ||
+      field === 'color' ||
+      field === 'size' ||
       field === 'buyerUsername' ||
       field === 'trackingNumber' ||
       field === 'courier'
@@ -260,7 +264,7 @@ export const SellingDatabaseTable: React.FC<SellingDatabaseTableProps> = ({
         isResizing ? 'select-none' : ''
       }`}
     >
-      <table className={`w-full min-w-max text-left border-collapse ${textSize} text-[#1A1A1A]`}>
+      <table className={`w-full min-w-full text-left border-collapse ${textSize} text-[#1A1A1A] table-fixed`}>
         {/* Table Header */}
         <thead
           className={`bg-[#F8F7F4] text-[#5A5A55] font-mono text-[10px] uppercase tracking-wider border-b border-[#E5E5E1] select-none ${
@@ -538,6 +542,8 @@ export const SellingDatabaseTable: React.FC<SellingDatabaseTableProps> = ({
             const isEditingBuyer = editingCellId === `${item.id}_buyerUsername`;
             const isEditingTracking = editingCellId === `${item.id}_trackingNumber`;
             const isEditingCourier = editingCellId === `${item.id}_courier`;
+            const isEditingColor = editingCellId === `${item.id}_color`;
+            const isEditingSize = editingCellId === `${item.id}_size`;
             const isSelected = selectedItemIds.has(item.id);
 
             const displayTitle = item.name;
@@ -555,8 +561,8 @@ export const SellingDatabaseTable: React.FC<SellingDatabaseTableProps> = ({
               <tr key={item.id} className={`${rowBg} transition-colors group/row`}>
                 {/* Multi-Select Checkbox */}
                 <td
-                  style={{ width: `${getWidth('select')}px` }}
-                  className={`${densityPadding} text-center`}
+                  style={getCellStyle('select')}
+                  className={`${densityPadding} text-center overflow-hidden`}
                   onClick={(e) => e.stopPropagation()}
                 >
                   <button
@@ -577,8 +583,8 @@ export const SellingDatabaseTable: React.FC<SellingDatabaseTableProps> = ({
                 {/* Thumbnail Image */}
                 {tableSettings.showImage && (
                   <td
-                    style={{ width: `${getWidth('image')}px` }}
-                    className={`${densityPadding} text-center`}
+                    style={getCellStyle('image')}
+                    className={`${densityPadding} text-center overflow-hidden`}
                   >
                     <div
                       onClick={() => onEditItem(item)}
@@ -599,11 +605,8 @@ export const SellingDatabaseTable: React.FC<SellingDatabaseTableProps> = ({
                 {/* Item Title & Brand (Draggable width & Editable) */}
                 {tableSettings.showItem && (
                   <td
-                    style={{
-                      width: `${getWidth('item')}px`,
-                      maxWidth: `${getWidth('item')}px`,
-                    }}
-                    className={`${densityPadding}`}
+                    style={getCellStyle('item')}
+                    className={`${densityPadding} overflow-hidden`}
                   >
                     {isEditingTitle ? (
                       <input
@@ -620,7 +623,7 @@ export const SellingDatabaseTable: React.FC<SellingDatabaseTableProps> = ({
                         className="w-full min-w-[140px] max-w-[500px] resize-x font-serif font-bold text-[#1A1A1A] border border-[#8C7355] px-1.5 py-0.5 bg-white shadow-2xs rounded-xs"
                       />
                     ) : (
-                      <div className="space-y-0.5">
+                      <div className="space-y-1">
                         <div
                           onClick={() => {
                             setEditingCellId(`${item.id}_title`);
@@ -636,11 +639,107 @@ export const SellingDatabaseTable: React.FC<SellingDatabaseTableProps> = ({
                           </span>
                           <Pencil className="w-2.5 h-2.5 opacity-0 group-hover/field:opacity-60 shrink-0 text-[#8C7355]" />
                         </div>
-                        {item.brand && (
-                          <div className="text-[10px] font-mono text-[#8C7355] font-semibold truncate">
-                            {item.brand}
-                          </div>
-                        )}
+
+                        {/* Brand, Color, Size sub-row with inline editing */}
+                        <div className="flex flex-wrap items-center gap-1.5 text-[10px] font-mono">
+                          {/* Brand inline */}
+                          {isEditingBrand ? (
+                            <input
+                              type="text"
+                              value={editingValue}
+                              placeholder="Brand..."
+                              onChange={(e) => setEditingValue(e.target.value)}
+                              onBlur={() => handleSaveInline(item.id, 'brand')}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') handleSaveInline(item.id, 'brand');
+                                if (e.key === 'Escape') setEditingCellId(null);
+                              }}
+                              autoFocus
+                              className="w-20 px-1 py-0.5 border border-[#8C7355] bg-white text-[#8C7355] font-bold text-[10px] rounded-xs"
+                            />
+                          ) : (
+                            <div
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setEditingCellId(`${item.id}_brand`);
+                                setEditingValue(item.brand || '');
+                              }}
+                              className="text-[#8C7355] font-bold hover:underline cursor-pointer flex items-center gap-0.5 group/br"
+                              title="Click to edit brand inline"
+                            >
+                              <span>{item.brand || 'Set Brand'}</span>
+                              <Pencil className="w-2 h-2 opacity-0 group-hover/br:opacity-60 shrink-0" />
+                            </div>
+                          )}
+
+                          <span className="text-[#A5A59E]">•</span>
+
+                          {/* Color inline */}
+                          {isEditingColor ? (
+                            <input
+                              type="text"
+                              value={editingValue}
+                              placeholder="Color..."
+                              onChange={(e) => setEditingValue(e.target.value)}
+                              onBlur={() => handleSaveInline(item.id, 'color')}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') handleSaveInline(item.id, 'color');
+                                if (e.key === 'Escape') setEditingCellId(null);
+                              }}
+                              autoFocus
+                              className="w-18 px-1 py-0.5 border border-[#8C7355] bg-white text-[#1A1A1A] text-[10px] rounded-xs"
+                            />
+                          ) : (
+                            <div
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setEditingCellId(`${item.id}_color`);
+                                setEditingValue(item.color || '');
+                              }}
+                              className="flex items-center gap-1 text-[#767670] hover:text-[#1A1A1A] cursor-pointer group/col"
+                              title="Click to edit color inline"
+                            >
+                              <span
+                                className="w-2 h-2 rounded-full border border-black/20 shrink-0"
+                                style={{ backgroundColor: getColorHex(item.color) || '#D4D4D0' }}
+                              />
+                              <span className="group-hover/col:underline">{item.color || 'Set Color'}</span>
+                              <Pencil className="w-2 h-2 opacity-0 group-hover/col:opacity-60 shrink-0 text-[#8C7355]" />
+                            </div>
+                          )}
+
+                          <span className="text-[#A5A59E]">•</span>
+
+                          {/* Size inline */}
+                          {isEditingSize ? (
+                            <input
+                              type="text"
+                              value={editingValue}
+                              placeholder="Size..."
+                              onChange={(e) => setEditingValue(e.target.value)}
+                              onBlur={() => handleSaveInline(item.id, 'size')}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') handleSaveInline(item.id, 'size');
+                                if (e.key === 'Escape') setEditingCellId(null);
+                              }}
+                              autoFocus
+                              className="w-14 px-1 py-0.5 border border-[#8C7355] bg-white text-[#1A1A1A] text-[10px] rounded-xs"
+                            />
+                          ) : (
+                            <div
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setEditingCellId(`${item.id}_size`);
+                                setEditingValue(item.size || '');
+                              }}
+                              className="text-[#767670] hover:text-[#1A1A1A] cursor-pointer group/sz flex items-center gap-0.5"
+                              title="Click to edit size inline"
+                            >
+                              <span className="group-hover/sz:underline">{item.size ? `Size ${item.size}` : 'Set Size'}</span>
+                              <Pencil className="w-2 h-2 opacity-0 group-hover/sz:opacity-60 shrink-0 text-[#8C7355]" />
+                            </div>
+                          )}
+                        </div>
                       </div>
                     )}
                   </td>
@@ -649,8 +748,8 @@ export const SellingDatabaseTable: React.FC<SellingDatabaseTableProps> = ({
                 {/* Platform */}
                 {tableSettings.showPlatform && (
                   <td
-                    style={{ width: `${getWidth('platform')}px` }}
-                    className={`${densityPadding}`}
+                    style={getCellStyle('platform')}
+                    className={`${densityPadding} overflow-hidden`}
                   >
                     <select
                       value={item.platform}
@@ -673,8 +772,8 @@ export const SellingDatabaseTable: React.FC<SellingDatabaseTableProps> = ({
                 {/* Status */}
                 {tableSettings.showStatus && (
                   <td
-                    style={{ width: `${getWidth('status')}px` }}
-                    className={`${densityPadding}`}
+                    style={getCellStyle('status')}
+                    className={`${densityPadding} overflow-hidden`}
                   >
                     <select
                       value={item.status}
@@ -699,8 +798,8 @@ export const SellingDatabaseTable: React.FC<SellingDatabaseTableProps> = ({
                 {/* Category */}
                 {tableSettings.showCategory && (
                   <td
-                    style={{ width: `${getWidth('category')}px` }}
-                    className={`${densityPadding} text-[11px] text-[#5A5A55] truncate`}
+                    style={getCellStyle('category')}
+                    className={`${densityPadding} text-[11px] text-[#5A5A55] truncate overflow-hidden`}
                   >
                     <span
                       onClick={() => onSelectCategory?.(item.category)}
@@ -719,8 +818,8 @@ export const SellingDatabaseTable: React.FC<SellingDatabaseTableProps> = ({
                 {/* Original Cost */}
                 {tableSettings.showOriginalPrice && (
                   <td
-                    style={{ width: `${getWidth('originalPrice')}px` }}
-                    className={`${densityPadding}`}
+                    style={getCellStyle('originalPrice')}
+                    className={`${densityPadding} overflow-hidden`}
                   >
                     {isEditingCost ? (
                       <input
@@ -754,8 +853,8 @@ export const SellingDatabaseTable: React.FC<SellingDatabaseTableProps> = ({
                 {/* Listing Price */}
                 {tableSettings.showListingPrice && (
                   <td
-                    style={{ width: `${getWidth('listingPrice')}px` }}
-                    className={`${densityPadding}`}
+                    style={getCellStyle('listingPrice')}
+                    className={`${densityPadding} overflow-hidden`}
                   >
                     {isEditingListing ? (
                       <input
@@ -789,8 +888,8 @@ export const SellingDatabaseTable: React.FC<SellingDatabaseTableProps> = ({
                 {/* Sold Price */}
                 {tableSettings.showSoldPrice && (
                   <td
-                    style={{ width: `${getWidth('soldPrice')}px` }}
-                    className={`${densityPadding}`}
+                    style={getCellStyle('soldPrice')}
+                    className={`${densityPadding} overflow-hidden`}
                   >
                     {isEditingSold ? (
                       <input
@@ -824,8 +923,8 @@ export const SellingDatabaseTable: React.FC<SellingDatabaseTableProps> = ({
                 {/* Net Profit P&L */}
                 {tableSettings.showNetProfit && (
                   <td
-                    style={{ width: `${getWidth('netProfit')}px` }}
-                    className={`${densityPadding} font-mono font-bold text-xs`}
+                    style={getCellStyle('netProfit')}
+                    className={`${densityPadding} font-mono font-bold text-xs overflow-hidden`}
                   >
                     <span className={isProfitable ? 'text-emerald-700' : 'text-rose-600'}>
                       {isProfitable ? '+' : ''}
@@ -837,11 +936,8 @@ export const SellingDatabaseTable: React.FC<SellingDatabaseTableProps> = ({
                 {/* Buyer & Tracking Ref (Draggable width & Editable) */}
                 {tableSettings.showBuyerTracking && (
                   <td
-                    style={{
-                      width: `${getWidth('buyerTracking')}px`,
-                      maxWidth: `${getWidth('buyerTracking')}px`,
-                    }}
-                    className={`${densityPadding}`}
+                    style={getCellStyle('buyerTracking')}
+                    className={`${densityPadding} overflow-hidden`}
                   >
                     {isEditingBuyer ? (
                       <input
@@ -911,11 +1007,8 @@ export const SellingDatabaseTable: React.FC<SellingDatabaseTableProps> = ({
                 {/* Courier */}
                 {tableSettings.showCourier && (
                   <td
-                    style={{
-                      width: `${getWidth('courier')}px`,
-                      maxWidth: `${getWidth('courier')}px`,
-                    }}
-                    className={`${densityPadding}`}
+                    style={getCellStyle('courier')}
+                    className={`${densityPadding} overflow-hidden`}
                   >
                     {isEditingCourier ? (
                       <input
@@ -951,8 +1044,8 @@ export const SellingDatabaseTable: React.FC<SellingDatabaseTableProps> = ({
                 {/* Shipping Status */}
                 {tableSettings.showShippingStatus && (
                   <td
-                    style={{ width: `${getWidth('shippingStatus')}px` }}
-                    className={`${densityPadding}`}
+                    style={getCellStyle('shippingStatus')}
+                    className={`${densityPadding} overflow-hidden`}
                   >
                     <select
                       value={item.shippingStatus || 'Pending Label'}
@@ -975,11 +1068,8 @@ export const SellingDatabaseTable: React.FC<SellingDatabaseTableProps> = ({
                 {/* Tags */}
                 {tableSettings.showTags && (
                   <td
-                    style={{
-                      width: `${getWidth('tags')}px`,
-                      maxWidth: `${getWidth('tags')}px`,
-                    }}
-                    className={`${densityPadding}`}
+                    style={getCellStyle('tags')}
+                    className={`${densityPadding} overflow-hidden`}
                   >
                     <div className="flex flex-wrap items-center gap-1">
                       {(item.tags || []).map((t) => (
@@ -1037,8 +1127,8 @@ export const SellingDatabaseTable: React.FC<SellingDatabaseTableProps> = ({
                 {/* Actions */}
                 {tableSettings.showActions && (
                   <td
-                    style={{ width: `${getWidth('actions')}px` }}
-                    className={`${densityPadding} text-right`}
+                    style={getCellStyle('actions')}
+                    className={`${densityPadding} text-right overflow-hidden`}
                   >
                     <div className="flex items-center justify-end gap-1">
                       {item.status !== 'Sold' && item.status !== 'Completed' && (

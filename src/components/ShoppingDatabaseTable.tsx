@@ -3,7 +3,9 @@ import {
   ShoppingItem,
   ShoppingPriority,
   ShoppingStatus,
+  Season,
 } from '../types';
+import { getColorHex } from '../utils/colorUtils';
 import { getShoppingStatusBadgeClass } from '../utils/statusUtils';
 import { useWardrobe } from '../context/WardrobeContext';
 import { GarmentImage } from './GarmentImage';
@@ -106,6 +108,7 @@ export const ShoppingDatabaseTable: React.FC<ShoppingDatabaseTableProps> = ({
     startResize,
     resetColumnWidth,
     getWidth,
+    getCellStyle,
   } = useResizableColumns({
     storageKey: 'shopping_table_widths_v2',
     defaultWidths: DEFAULT_SHOPPING_COLUMN_WIDTHS,
@@ -185,10 +188,16 @@ export const ShoppingDatabaseTable: React.FC<ShoppingDatabaseTableProps> = ({
       if (!isNaN(num) && num >= 0) {
         updateShoppingItem(id, { [field]: num });
       }
-    } else if (field === 'name' || field === 'brand' || field === 'reasonOrGap' || field === 'retailerName') {
-      if (editingValue.trim()) {
-        updateShoppingItem(id, { [field]: editingValue.trim() });
-      }
+    } else if (
+      field === 'name' ||
+      field === 'brand' ||
+      field === 'reasonOrGap' ||
+      field === 'retailerName' ||
+      field === 'color' ||
+      field === 'size' ||
+      field === 'season'
+    ) {
+      updateShoppingItem(id, { [field]: editingValue.trim() });
     }
     setEditingCellId(null);
   };
@@ -265,7 +274,7 @@ export const ShoppingDatabaseTable: React.FC<ShoppingDatabaseTableProps> = ({
         isResizing ? 'select-none' : ''
       }`}
     >
-      <table className={`w-full min-w-max text-left border-collapse ${textSize} text-[#1A1A1A]`}>
+      <table className={`w-full min-w-full text-left border-collapse ${textSize} text-[#1A1A1A] table-fixed`}>
         {/* Table Header */}
         <thead
           className={`bg-[#F8F7F4] text-[#5A5A55] font-mono text-[10px] uppercase tracking-wider border-b border-[#E5E5E1] select-none ${
@@ -599,6 +608,8 @@ export const ShoppingDatabaseTable: React.FC<ShoppingDatabaseTableProps> = ({
             const isEditingActPrice = editingCellId === `${item.id}_actualPricePaid`;
             const isEditingUsage = editingCellId === `${item.id}_reasonOrGap`;
             const isEditingRetailer = editingCellId === `${item.id}_retailerName`;
+            const isEditingColor = editingCellId === `${item.id}_color`;
+            const isEditingSize = editingCellId === `${item.id}_size`;
             const isSelected = selectedItemIds.has(item.id);
 
             const rowBg = isSelected
@@ -611,8 +622,8 @@ export const ShoppingDatabaseTable: React.FC<ShoppingDatabaseTableProps> = ({
               <tr key={item.id} className={`${rowBg} transition-colors group/row`}>
                 {/* Multi-Select Checkbox */}
                 <td
-                  style={{ width: `${getWidth('select')}px` }}
-                  className={`${densityPadding} text-center`}
+                  style={getCellStyle('select')}
+                  className={`${densityPadding} text-center overflow-hidden`}
                   onClick={(e) => e.stopPropagation()}
                 >
                   <button
@@ -633,8 +644,8 @@ export const ShoppingDatabaseTable: React.FC<ShoppingDatabaseTableProps> = ({
                 {/* Thumbnail Image */}
                 {tableSettings.showImage && (
                   <td
-                    style={{ width: `${getWidth('image')}px` }}
-                    className={`${densityPadding} text-center`}
+                    style={getCellStyle('image')}
+                    className={`${densityPadding} text-center overflow-hidden`}
                   >
                     <div
                       onClick={() => onEditItem(item)}
@@ -655,11 +666,8 @@ export const ShoppingDatabaseTable: React.FC<ShoppingDatabaseTableProps> = ({
                 {/* Item Name (Editable & Draggable width) */}
                 {tableSettings.showName && (
                   <td
-                    style={{
-                      width: `${getWidth('name')}px`,
-                      maxWidth: `${getWidth('name')}px`,
-                    }}
-                    className={`${densityPadding}`}
+                    style={getCellStyle('name')}
+                    className={`${densityPadding} overflow-hidden`}
                   >
                     {isEditingName ? (
                       <input
@@ -676,20 +684,91 @@ export const ShoppingDatabaseTable: React.FC<ShoppingDatabaseTableProps> = ({
                         className="w-full min-w-[140px] max-w-[500px] resize-x font-serif font-bold text-[#1A1A1A] border border-[#8C7355] px-1.5 py-0.5 bg-white shadow-2xs rounded-xs"
                       />
                     ) : (
-                      <div
-                        onClick={() => {
-                          setEditingCellId(`${item.id}_name`);
-                          setEditingValue(item.name);
-                        }}
-                        className={`font-serif font-semibold text-[#1A1A1A] hover:text-[#8C7355] cursor-pointer flex items-center justify-between gap-1 group/field ${
-                          tableSettings.textWrap ? 'whitespace-normal' : 'truncate'
-                        }`}
-                        title="Click to edit name inline"
-                      >
-                        <span className={tableSettings.textWrap ? '' : 'truncate'}>
-                          {item.name}
-                        </span>
-                        <Pencil className="w-2.5 h-2.5 opacity-0 group-hover/field:opacity-60 shrink-0 text-[#8C7355]" />
+                      <div className="space-y-1">
+                        <div
+                          onClick={() => {
+                            setEditingCellId(`${item.id}_name`);
+                            setEditingValue(item.name);
+                          }}
+                          className={`font-serif font-semibold text-[#1A1A1A] hover:text-[#8C7355] cursor-pointer flex items-center justify-between gap-1 group/field ${
+                            tableSettings.textWrap ? 'whitespace-normal' : 'truncate'
+                          }`}
+                          title="Click to edit name inline"
+                        >
+                          <span className={tableSettings.textWrap ? '' : 'truncate'}>
+                            {item.name}
+                          </span>
+                          <Pencil className="w-2.5 h-2.5 opacity-0 group-hover/field:opacity-60 shrink-0 text-[#8C7355]" />
+                        </div>
+
+                        {/* Inline Color and Size editors */}
+                        <div className="flex items-center gap-2 text-[10px] font-mono text-[#767670]">
+                          {/* Color */}
+                          {isEditingColor ? (
+                            <input
+                              type="text"
+                              value={editingValue}
+                              placeholder="Color..."
+                              onChange={(e) => setEditingValue(e.target.value)}
+                              onBlur={() => handleSaveInline(item.id, 'color')}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') handleSaveInline(item.id, 'color');
+                                if (e.key === 'Escape') setEditingCellId(null);
+                              }}
+                              autoFocus
+                              className="w-20 px-1 py-0.5 border border-[#8C7355] bg-white text-[#1A1A1A] text-[10px] rounded-xs"
+                            />
+                          ) : (
+                            <div
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setEditingCellId(`${item.id}_color`);
+                                setEditingValue(item.color || '');
+                              }}
+                              className="flex items-center gap-1 hover:text-[#1A1A1A] cursor-pointer group/col"
+                              title="Click to edit color inline"
+                            >
+                              <span
+                                className="w-2 h-2 rounded-full border border-black/20 shrink-0"
+                                style={{ backgroundColor: getColorHex(item.color) || '#D4D4D0' }}
+                              />
+                              <span className="group-hover/col:underline">{item.color || 'Set Color'}</span>
+                              <Pencil className="w-2 h-2 opacity-0 group-hover/col:opacity-60 shrink-0 text-[#8C7355]" />
+                            </div>
+                          )}
+
+                          <span>•</span>
+
+                          {/* Size */}
+                          {isEditingSize ? (
+                            <input
+                              type="text"
+                              value={editingValue}
+                              placeholder="Size..."
+                              onChange={(e) => setEditingValue(e.target.value)}
+                              onBlur={() => handleSaveInline(item.id, 'size')}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') handleSaveInline(item.id, 'size');
+                                if (e.key === 'Escape') setEditingCellId(null);
+                              }}
+                              autoFocus
+                              className="w-14 px-1 py-0.5 border border-[#8C7355] bg-white text-[#1A1A1A] text-[10px] rounded-xs"
+                            />
+                          ) : (
+                            <div
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setEditingCellId(`${item.id}_size`);
+                                setEditingValue(item.size || '');
+                              }}
+                              className="hover:text-[#1A1A1A] cursor-pointer group/sz flex items-center gap-0.5"
+                              title="Click to edit size inline"
+                            >
+                              <span className="group-hover/sz:underline">{item.size ? `Size ${item.size}` : 'Set Size'}</span>
+                              <Pencil className="w-2 h-2 opacity-0 group-hover/sz:opacity-60 shrink-0 text-[#8C7355]" />
+                            </div>
+                          )}
+                        </div>
                       </div>
                     )}
                   </td>
@@ -698,11 +777,8 @@ export const ShoppingDatabaseTable: React.FC<ShoppingDatabaseTableProps> = ({
                 {/* Brand */}
                 {tableSettings.showBrand && (
                   <td
-                    style={{
-                      width: `${getWidth('brand')}px`,
-                      maxWidth: `${getWidth('brand')}px`,
-                    }}
-                    className={`${densityPadding}`}
+                    style={getCellStyle('brand')}
+                    className={`${densityPadding} overflow-hidden`}
                   >
                     {isEditingBrand ? (
                       <input
@@ -739,8 +815,8 @@ export const ShoppingDatabaseTable: React.FC<ShoppingDatabaseTableProps> = ({
                 {/* Category */}
                 {tableSettings.showCategory && (
                   <td
-                    style={{ width: `${getWidth('category')}px` }}
-                    className={`${densityPadding}`}
+                    style={getCellStyle('category')}
+                    className={`${densityPadding} overflow-hidden`}
                   >
                     <select
                       value={item.category}
@@ -761,8 +837,8 @@ export const ShoppingDatabaseTable: React.FC<ShoppingDatabaseTableProps> = ({
                 {/* Estimated Price */}
                 {tableSettings.showEstimatedPrice && (
                   <td
-                    style={{ width: `${getWidth('estimatedPrice')}px` }}
-                    className={`${densityPadding}`}
+                    style={getCellStyle('estimatedPrice')}
+                    className={`${densityPadding} overflow-hidden`}
                   >
                     {isEditingEstPrice ? (
                       <div className="flex items-center gap-0.5 w-full">
@@ -800,8 +876,8 @@ export const ShoppingDatabaseTable: React.FC<ShoppingDatabaseTableProps> = ({
                 {/* Actual Price */}
                 {tableSettings.showActualPrice && (
                   <td
-                    style={{ width: `${getWidth('actualPrice')}px` }}
-                    className={`${densityPadding}`}
+                    style={getCellStyle('actualPrice')}
+                    className={`${densityPadding} overflow-hidden`}
                   >
                     {isEditingActPrice ? (
                       <div className="flex items-center gap-0.5 w-full">
@@ -841,8 +917,8 @@ export const ShoppingDatabaseTable: React.FC<ShoppingDatabaseTableProps> = ({
                 {/* Status */}
                 {tableSettings.showStatus && (
                   <td
-                    style={{ width: `${getWidth('status')}px` }}
-                    className={`${densityPadding}`}
+                    style={getCellStyle('status')}
+                    className={`${densityPadding} overflow-hidden`}
                   >
                     <select
                       value={item.status}
@@ -867,8 +943,8 @@ export const ShoppingDatabaseTable: React.FC<ShoppingDatabaseTableProps> = ({
                 {/* Priority */}
                 {tableSettings.showPriority && (
                   <td
-                    style={{ width: `${getWidth('priority')}px` }}
-                    className={`${densityPadding}`}
+                    style={getCellStyle('priority')}
+                    className={`${densityPadding} overflow-hidden`}
                   >
                     <select
                       value={item.priority}
@@ -890,11 +966,8 @@ export const ShoppingDatabaseTable: React.FC<ShoppingDatabaseTableProps> = ({
                 {/* Planned Usage / Gap Justification (Draggable & Expandable) */}
                 {tableSettings.showPlannedUsage && (
                   <td
-                    style={{
-                      width: `${getWidth('plannedUsage')}px`,
-                      maxWidth: `${getWidth('plannedUsage')}px`,
-                    }}
-                    className={`${densityPadding}`}
+                    style={getCellStyle('plannedUsage')}
+                    className={`${densityPadding} overflow-hidden`}
                   >
                     {isEditingUsage ? (
                       <textarea
@@ -936,11 +1009,8 @@ export const ShoppingDatabaseTable: React.FC<ShoppingDatabaseTableProps> = ({
                 {/* Tags */}
                 {tableSettings.showTags && (
                   <td
-                    style={{
-                      width: `${getWidth('tags')}px`,
-                      maxWidth: `${getWidth('tags')}px`,
-                    }}
-                    className={`${densityPadding}`}
+                    style={getCellStyle('tags')}
+                    className={`${densityPadding} overflow-hidden`}
                   >
                     <div className="flex flex-wrap items-center gap-1">
                       {(item.tags || []).map((t) => (
@@ -992,11 +1062,8 @@ export const ShoppingDatabaseTable: React.FC<ShoppingDatabaseTableProps> = ({
                 {/* Retailer */}
                 {tableSettings.showRetailer && (
                   <td
-                    style={{
-                      width: `${getWidth('retailer')}px`,
-                      maxWidth: `${getWidth('retailer')}px`,
-                    }}
-                    className={`${densityPadding}`}
+                    style={getCellStyle('retailer')}
+                    className={`${densityPadding} overflow-hidden`}
                   >
                     {isEditingRetailer ? (
                       <input
@@ -1033,20 +1100,29 @@ export const ShoppingDatabaseTable: React.FC<ShoppingDatabaseTableProps> = ({
                 {/* Season */}
                 {tableSettings.showSeason && (
                   <td
-                    style={{ width: `${getWidth('season')}px` }}
-                    className={`${densityPadding} text-xs text-[#767670]`}
+                    style={getCellStyle('season')}
+                    className={`${densityPadding} overflow-hidden`}
                   >
-                    <span className={tableSettings.textWrap ? '' : 'truncate block'}>
-                      {item.season || 'All-Season'}
-                    </span>
+                    <select
+                      value={item.season || 'All-Season'}
+                      onChange={(e) => updateShoppingItem(item.id, { season: e.target.value as Season })}
+                      className="w-full bg-[#F8F7F4] border border-[#E5E5E1] text-[#1A1A1A] px-1.5 py-0.5 focus:outline-none focus:border-[#8C7355] cursor-pointer rounded-xs truncate font-mono text-[10px]"
+                      title="Change season"
+                    >
+                      {['All-Season', 'Spring', 'Summer', 'Autumn', 'Winter'].map((s) => (
+                        <option key={s} value={s}>
+                          {s}
+                        </option>
+                      ))}
+                    </select>
                   </td>
                 )}
 
                 {/* Store URL */}
                 {tableSettings.showUrl && (
                   <td
-                    style={{ width: `${getWidth('url')}px` }}
-                    className={`${densityPadding}`}
+                    style={getCellStyle('url')}
+                    className={`${densityPadding} overflow-hidden`}
                   >
                     {item.storeUrl ? (
                       <a
@@ -1067,11 +1143,8 @@ export const ShoppingDatabaseTable: React.FC<ShoppingDatabaseTableProps> = ({
                 {/* Vinted Reference */}
                 {tableSettings.showVintedDetails && (
                   <td
-                    style={{
-                      width: `${getWidth('vinted')}px`,
-                      maxWidth: `${getWidth('vinted')}px`,
-                    }}
-                    className={`${densityPadding} text-xs font-mono text-[#007782]`}
+                    style={getCellStyle('vinted')}
+                    className={`${densityPadding} text-xs font-mono text-[#007782] overflow-hidden`}
                   >
                     {item.vintedUrl ? (
                       <a
@@ -1096,8 +1169,8 @@ export const ShoppingDatabaseTable: React.FC<ShoppingDatabaseTableProps> = ({
                 {/* Matching Items */}
                 {tableSettings.showMatchingItems && (
                   <td
-                    style={{ width: `${getWidth('matching')}px` }}
-                    className={`${densityPadding} text-xs font-mono text-center`}
+                    style={getCellStyle('matching')}
+                    className={`${densityPadding} text-xs font-mono text-center overflow-hidden`}
                   >
                     <span className="px-1.5 py-0.5 bg-[#FAF9F6] border border-[#E5E5E1] rounded-xs font-semibold">
                       {item.matchingWardrobeItemIds?.length || 0}
@@ -1108,8 +1181,8 @@ export const ShoppingDatabaseTable: React.FC<ShoppingDatabaseTableProps> = ({
                 {/* CPW */}
                 {tableSettings.showCostPerWear && (
                   <td
-                    style={{ width: `${getWidth('cpw')}px` }}
-                    className={`${densityPadding} text-xs font-mono`}
+                    style={getCellStyle('cpw')}
+                    className={`${densityPadding} text-xs font-mono overflow-hidden`}
                   >
                     {item.projectedWears && item.estimatedPrice ? (
                       <span>{formatCurrency(item.estimatedPrice / item.projectedWears)}</span>
@@ -1122,8 +1195,8 @@ export const ShoppingDatabaseTable: React.FC<ShoppingDatabaseTableProps> = ({
                 {/* Added Date */}
                 {tableSettings.showDates && (
                   <td
-                    style={{ width: `${getWidth('date')}px` }}
-                    className={`${densityPadding} text-xs font-mono text-[#767670]`}
+                    style={getCellStyle('date')}
+                    className={`${densityPadding} text-xs font-mono text-[#767670] overflow-hidden`}
                   >
                     {item.createdAt ? new Date(item.createdAt).toLocaleDateString() : '—'}
                   </td>
@@ -1132,8 +1205,8 @@ export const ShoppingDatabaseTable: React.FC<ShoppingDatabaseTableProps> = ({
                 {/* Actions */}
                 {tableSettings.showActions && (
                   <td
-                    style={{ width: `${getWidth('actions')}px` }}
-                    className={`${densityPadding} text-right`}
+                    style={getCellStyle('actions')}
+                    className={`${densityPadding} text-right overflow-hidden`}
                   >
                     <div className="flex items-center justify-end gap-1">
                       {item.status !== 'Purchased' && (

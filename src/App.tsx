@@ -17,6 +17,7 @@ import { CreateSnapshotModal } from './components/CreateSnapshotModal';
 import { SettingsModal } from './components/SettingsModal';
 import { DuplicateMergeModal } from './components/DuplicateMergeModal';
 import { GlobalSearchModal } from './components/common/GlobalSearchModal';
+import { QuickNoteWidget } from './components/QuickNoteWidget';
 import { DataSyncToolbar } from './components/DataSyncToolbar';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { WardrobeItem, LookbookOutfit, ShoppingItem } from './types';
@@ -221,8 +222,11 @@ const MainAppContent: React.FC = () => {
         />
       </ErrorBoundary>
 
+      {/* Floating Hover Quick Note Capture Widget */}
+      <QuickNoteWidget />
+
       {undoToast && (
-        <div className="fixed bottom-4 right-4 bg-zinc-900 text-white px-4 py-3 rounded-lg shadow-xl flex items-center gap-3 animate-fade-in z-50 text-sm">
+        <div className="fixed bottom-20 right-4 sm:right-6 bg-zinc-900 text-white px-4 py-3 rounded-lg shadow-xl flex items-center gap-3 animate-fade-in z-50 text-sm">
           <span>{undoToast.message || undoToast.actionTitle}</span>
           <button type="button" onClick={undoLastAction} className="flex items-center gap-1 text-amber-400 hover:text-amber-300 font-medium transition cursor-pointer">
             <Undo2 className="w-4 h-4" />

@@ -34,11 +34,13 @@ import {
   Shirt,
 } from 'lucide-react';
 import { useWardrobe } from '../context/WardrobeContext';
-import { ShoppingItem, ShoppingPriority, ShoppingStatus, Category } from '../types';
+import { ShoppingItem, ShoppingPriority, ShoppingStatus, Category, Season } from '../types';
+import { getColorHex } from '../utils/colorUtils';
 import { safeConfirm } from '../utils/safeConfirm';
 import { AutoImportModal } from './AutoImportModal';
 import { GarmentImage } from './GarmentImage';
 import { BulkEditModal } from './BulkEditModal';
+import { InlineEditableTitle } from './common/InlineEditableTitle';
 import {
   ShoppingDisplaySettingsModal,
   ShoppingDisplaySettings,
@@ -49,6 +51,15 @@ import { DuplicateMergeModal } from './DuplicateMergeModal';
 import { BulkActionBar } from './common/BulkActionBar';
 import { EmptyState } from './common/EmptyState';
 import { formatGbp } from '../utils/formatters';
+import {
+  ShoppingPipelineStage,
+  ALL_SHOPPING_PIPELINE_STAGES,
+  SHOPPING_PIPELINE_STAGE_LABELS,
+  getShoppingItemPipelineStage,
+  matchesShoppingPipelineStage,
+  getShoppingStatusBadgeClass,
+  getShoppingPipelineStageBadgeClass,
+} from '../utils/statusUtils';
 
 interface ShoppingViewProps {
   onOpenAddShoppingItem: () => void;
@@ -100,12 +111,31 @@ export const ShoppingView: React.FC<ShoppingViewProps> = ({
     searchQuery,
     setSearchQuery,
     formatCurrency,
+    customLabels,
+    updateCustomLabel,
   } = useWardrobe();
 
   // Persistent filters & view options with lazy local storage initializers
-  const [pipelineTab, setPipelineTab] = useState<string>(() => {
+  // Unified Single Source of Truth for Shopping Pipeline Stage
+  const [shoppingPipelineStage, setShoppingPipelineStage] = useState<ShoppingPipelineStage>(() => {
     try {
-      return localStorage.getItem('shopping_pipeline_tab') || 'All';
+      const savedStage = (localStorage.getItem('shopping_pipeline_stage') ||
+        localStorage.getItem('shopping_pipeline_tab') ||
+        localStorage.getItem('shopping_selected_status')) as any;
+      if (
+        savedStage &&
+        (savedStage === 'All' ||
+          savedStage === 'Planned' ||
+          savedStage === 'To Buy' ||
+          savedStage === 'In Basket' ||
+          savedStage === 'Researching' ||
+          savedStage === 'Purchased' ||
+          savedStage === 'Sold' ||
+          savedStage === 'Cancelled')
+      ) {
+        return savedStage;
+      }
+      return 'All';
     } catch {
       return 'All';
     }
@@ -114,14 +144,6 @@ export const ShoppingView: React.FC<ShoppingViewProps> = ({
   const [selectedTag, setSelectedTag] = useState<string>(() => {
     try {
       return localStorage.getItem('shopping_selected_tag') || 'All';
-    } catch {
-      return 'All';
-    }
-  });
-
-  const [selectedStatus, setSelectedStatus] = useState<ShoppingStatus | 'All'>(() => {
-    try {
-      return (localStorage.getItem('shopping_selected_status') as any) || 'All';
     } catch {
       return 'All';
     }
@@ -159,17 +181,13 @@ export const ShoppingView: React.FC<ShoppingViewProps> = ({
     }
   });
 
-  // Persistent setters
-  const handleSetPipelineTab = useCallback((tab: string) => {
-    setPipelineTab(tab);
-    if (tab !== 'All') {
-      setSelectedStatus('All');
-    }
+  // Persistent setters with Single Source of Truth (SSOT) synchronization
+  const handleSetShoppingPipelineStage = useCallback((stage: ShoppingPipelineStage) => {
+    setShoppingPipelineStage(stage);
     try {
-      localStorage.setItem('shopping_pipeline_tab', tab);
-      if (tab !== 'All') {
-        localStorage.setItem('shopping_selected_status', 'All');
-      }
+      localStorage.setItem('shopping_pipeline_stage', stage);
+      localStorage.setItem('shopping_pipeline_tab', stage);
+      localStorage.setItem('shopping_selected_status', stage);
     } catch {}
   }, []);
 
@@ -177,13 +195,6 @@ export const ShoppingView: React.FC<ShoppingViewProps> = ({
     setSelectedTag(tag);
     try {
       localStorage.setItem('shopping_selected_tag', tag);
-    } catch {}
-  }, []);
-
-  const handleSetSelectedStatus = useCallback((status: ShoppingStatus | 'All') => {
-    setSelectedStatus(status);
-    try {
-      localStorage.setItem('shopping_selected_status', status);
     } catch {}
   }, []);
 
@@ -333,92 +344,59 @@ export const ShoppingView: React.FC<ShoppingViewProps> = ({
       .map(([tag, count]) => ({ tag, count }));
   }, [shoppingList]);
 
-  // Helper to reliably classify pipeline stage
-  const getShoppingPipelineStage = useCallback((it: ShoppingItem): 'Purchased' | 'Sold' | 'Cancelled' | 'Planned' => {
-    const status = it.status;
-    const statusLower = (status || '').toLowerCase();
-    const orderStatusLower = (it.orderStatus || '').toLowerCase();
-    const txTypeLower = (it.transactionType || '').toLowerCase();
-    const tags = Array.isArray(it.tags)
-      ? it.tags.map((t) => (typeof t === 'string' ? t.toLowerCase().replace(/^#/, '') : ''))
-      : [];
-
-    // 1. Explicit Purchased Status takes highest priority
-    if (
-      status === 'Purchased' ||
-      txTypeLower === 'purchase' ||
-      it.actualPricePaid != null ||
-      Boolean(it.purchasedDate)
-    ) {
-      return 'Purchased';
-    }
-
-    // 2. Explicit Sold Status
-    if (
-      status === 'Sold' ||
-      txTypeLower === 'sale' ||
-      tags.includes('sold') ||
-      orderStatusLower.includes('sold')
-    ) {
-      return 'Sold';
-    }
-
-    // 3. Explicit Cancelled / Passed Status
-    if (
-      status === 'Cancelled' ||
-      status === 'Passed' ||
-      orderStatusLower.includes('cancel') ||
-      orderStatusLower.includes('refund') ||
-      orderStatusLower.includes('void') ||
-      tags.includes('cancelled') ||
-      tags.includes('passed')
-    ) {
-      return 'Cancelled';
-    }
-
-    // 4. Secondary heuristics for purchased
-    if (
-      tags.includes('bought') ||
-      tags.includes('purchased') ||
-      orderStatusLower.includes('delivered') ||
-      orderStatusLower.includes('received') ||
-      orderStatusLower.includes('completed')
-    ) {
-      return 'Purchased';
-    }
-
-    // 5. Default Planned / Wishlist
-    return 'Planned';
-  }, []);
-
-  // Shopping Pipeline Stats: All, Planned, Purchased, Sold, Cancelled
+  // Shopping Pipeline Stats: Single Source of Truth
   const pipelineStats = useMemo(() => {
     let all = shoppingList.length;
     let planned = 0;
+    let toBuy = 0;
+    let inBasket = 0;
+    let researching = 0;
     let purchased = 0;
     let sold = 0;
     let cancelled = 0;
 
     for (const it of shoppingList) {
-      const stage = getShoppingPipelineStage(it);
-      if (stage === 'Purchased') purchased++;
-      else if (stage === 'Sold') sold++;
-      else if (stage === 'Cancelled') cancelled++;
-      else planned++;
+      const stage = getShoppingItemPipelineStage(it);
+      if (stage === 'To Buy') {
+        toBuy++;
+        planned++;
+      } else if (stage === 'In Basket') {
+        inBasket++;
+        planned++;
+      } else if (stage === 'Researching') {
+        researching++;
+        planned++;
+      } else if (stage === 'Purchased') {
+        purchased++;
+      } else if (stage === 'Sold') {
+        sold++;
+      } else if (stage === 'Cancelled') {
+        cancelled++;
+      } else {
+        toBuy++;
+        planned++;
+      }
     }
 
-    return { all, planned, purchased, sold, cancelled };
-  }, [shoppingList, getShoppingPipelineStage]);
+    return {
+      All: all,
+      Planned: planned,
+      'To Buy': toBuy,
+      'In Basket': inBasket,
+      Researching: researching,
+      Purchased: purchased,
+      Sold: sold,
+      Cancelled: cancelled,
+    };
+  }, [shoppingList]);
 
   const filteredItems = useMemo(() => {
     const matched = shoppingList.filter((item) => {
-      // Pipeline status tab filter
-      if (pipelineTab !== 'All') {
-        const stage = getShoppingPipelineStage(item);
-        if (pipelineTab === 'Purchased' && stage !== 'Purchased') return false;
-        if (pipelineTab === 'Sold' && stage !== 'Sold') return false;
-        if (pipelineTab === 'Cancelled' && stage !== 'Cancelled') return false;
-        if ((pipelineTab === 'Planned' || pipelineTab === 'Wishlist') && stage !== 'Planned') return false;
+      // Unified Pipeline Stage & Status Filter (Single Source of Truth)
+      if (shoppingPipelineStage !== 'All') {
+        if (!matchesShoppingPipelineStage(item, shoppingPipelineStage)) {
+          return false;
+        }
       }
 
       // Tag filter
@@ -432,7 +410,6 @@ export const ShoppingView: React.FC<ShoppingViewProps> = ({
         if (!itemTags.includes(targetTag)) return false;
       }
 
-      if (selectedStatus !== 'All' && item.status !== selectedStatus) return false;
       if (selectedBrand !== 'All' && item.brand !== selectedBrand) return false;
       if (selectedPriority !== 'All' && item.priority !== selectedPriority) return false;
       if (
@@ -517,9 +494,8 @@ export const ShoppingView: React.FC<ShoppingViewProps> = ({
     });
   }, [
     shoppingList,
-    pipelineTab,
+    shoppingPipelineStage,
     selectedTag,
-    selectedStatus,
     selectedBrand,
     selectedPriority,
     selectedCategory,
@@ -791,9 +767,13 @@ export const ShoppingView: React.FC<ShoppingViewProps> = ({
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
             <div className="flex items-center gap-2">
-              <h1 className="text-xl font-serif font-bold text-[#1A1A1A]">
-                Shopping &amp; Wishlist Manager
-              </h1>
+              <InlineEditableTitle
+                value={customLabels.shoppingPageTitle || 'Shopping & Wishlist Manager'}
+                onSave={(val) => updateCustomLabel('shoppingPageTitle', val)}
+                as="h1"
+                className="text-xl font-serif font-bold text-[#1A1A1A]"
+                tooltip="Click or pencil to rename Shopping page inline"
+              />
               <span className="font-mono text-xs px-2 py-0.5 bg-[#F2F1ED] border border-[#E5E5E1] text-[#5A5A55]">
                 {shoppingList.length} items planned
               </span>
@@ -1092,75 +1072,124 @@ export const ShoppingView: React.FC<ShoppingViewProps> = ({
           {/* All */}
           <button
             type="button"
-            onClick={() => handleSetPipelineTab('All')}
+            onClick={() => handleSetShoppingPipelineStage('All')}
             className={`px-2.5 py-1 text-xs font-mono transition-all cursor-pointer border flex items-center gap-1.5 ${
-              pipelineTab === 'All'
+              shoppingPipelineStage === 'All'
                 ? 'bg-[#1A1A1A] text-white border-[#1A1A1A] shadow-xs font-bold'
                 : 'bg-white text-[#4A4A45] border-[#D5D5D0] hover:border-[#8C7355]'
             }`}
           >
             <span>All</span>
-            <span className="opacity-75">({pipelineStats.all})</span>
+            <span className="opacity-75">({pipelineStats.All})</span>
           </button>
 
           {/* Planned / Wishlist */}
           <button
             type="button"
-            onClick={() => handleSetPipelineTab('Planned')}
+            onClick={() => handleSetShoppingPipelineStage('Planned')}
             className={`px-2.5 py-1 text-xs font-mono transition-all cursor-pointer border flex items-center gap-1.5 ${
-              pipelineTab === 'Planned' || pipelineTab === 'Wishlist'
+              shoppingPipelineStage === 'Planned'
                 ? 'bg-[#8C7355] text-white border-[#8C7355] shadow-xs font-bold'
                 : 'bg-white text-[#4A4A45] border-[#D5D5D0] hover:border-[#8C7355]'
             }`}
+            title="All active wishlist / planned items"
           >
             <ShoppingBag className="w-3 h-3" />
             <span>Wishlist / Planned</span>
-            <span className="opacity-75">({pipelineStats.planned})</span>
+            <span className="opacity-75">({pipelineStats.Planned})</span>
+          </button>
+
+          {/* To Buy */}
+          <button
+            type="button"
+            onClick={() => handleSetShoppingPipelineStage('To Buy')}
+            className={`px-2.5 py-1 text-xs font-mono transition-all cursor-pointer border flex items-center gap-1.5 ${
+              shoppingPipelineStage === 'To Buy'
+                ? 'bg-blue-800 text-white border-blue-800 shadow-xs font-bold'
+                : 'bg-white text-[#4A4A45] border-[#D5D5D0] hover:border-blue-700 hover:text-blue-800'
+            }`}
+            title="High-priority prospective pieces ready to buy"
+          >
+            <span>To Buy</span>
+            <span className="opacity-75">({pipelineStats['To Buy']})</span>
+          </button>
+
+          {/* In Basket */}
+          <button
+            type="button"
+            onClick={() => handleSetShoppingPipelineStage('In Basket')}
+            className={`px-2.5 py-1 text-xs font-mono transition-all cursor-pointer border flex items-center gap-1.5 ${
+              shoppingPipelineStage === 'In Basket'
+                ? 'bg-indigo-800 text-white border-indigo-800 shadow-xs font-bold'
+                : 'bg-white text-[#4A4A45] border-[#D5D5D0] hover:border-indigo-700 hover:text-indigo-800'
+            }`}
+            title="Items ready in shopping cart or checkout basket"
+          >
+            <span>In Basket</span>
+            <span className="opacity-75">({pipelineStats['In Basket']})</span>
+          </button>
+
+          {/* Researching */}
+          <button
+            type="button"
+            onClick={() => handleSetShoppingPipelineStage('Researching')}
+            className={`px-2.5 py-1 text-xs font-mono transition-all cursor-pointer border flex items-center gap-1.5 ${
+              shoppingPipelineStage === 'Researching'
+                ? 'bg-purple-800 text-white border-purple-800 shadow-xs font-bold'
+                : 'bg-white text-[#4A4A45] border-[#D5D5D0] hover:border-purple-700 hover:text-purple-800'
+            }`}
+            title="Prospective pieces currently being researched"
+          >
+            <span>Researching</span>
+            <span className="opacity-75">({pipelineStats.Researching})</span>
           </button>
 
           {/* Purchased */}
           <button
             type="button"
-            onClick={() => handleSetPipelineTab('Purchased')}
+            onClick={() => handleSetShoppingPipelineStage('Purchased')}
             className={`px-2.5 py-1 text-xs font-mono transition-all cursor-pointer border flex items-center gap-1.5 ${
-              pipelineTab === 'Purchased'
+              shoppingPipelineStage === 'Purchased'
                 ? 'bg-emerald-800 text-white border-emerald-800 shadow-xs font-bold'
                 : 'bg-white text-[#4A4A45] border-[#D5D5D0] hover:border-emerald-700 hover:text-emerald-800'
             }`}
+            title="Purchased pieces acquired into wardrobe"
           >
             <CheckCircle className="w-3 h-3 text-emerald-300" />
             <span>Purchased</span>
-            <span className="opacity-75">({pipelineStats.purchased})</span>
+            <span className="opacity-75">({pipelineStats.Purchased})</span>
           </button>
 
           {/* Sold */}
           <button
             type="button"
-            onClick={() => handleSetPipelineTab('Sold')}
+            onClick={() => handleSetShoppingPipelineStage('Sold')}
             className={`px-2.5 py-1 text-xs font-mono transition-all cursor-pointer border flex items-center gap-1.5 ${
-              pipelineTab === 'Sold'
+              shoppingPipelineStage === 'Sold'
                 ? 'bg-teal-800 text-white border-teal-800 shadow-xs font-bold'
                 : 'bg-white text-[#4A4A45] border-[#D5D5D0] hover:border-teal-700 hover:text-teal-800'
             }`}
+            title="Pieces sold or re-sold"
           >
             <Tag className="w-3 h-3 text-teal-300" />
             <span>Sold</span>
-            <span className="opacity-75">({pipelineStats.sold})</span>
+            <span className="opacity-75">({pipelineStats.Sold})</span>
           </button>
 
           {/* Cancelled */}
           <button
             type="button"
-            onClick={() => handleSetPipelineTab('Cancelled')}
+            onClick={() => handleSetShoppingPipelineStage('Cancelled')}
             className={`px-2.5 py-1 text-xs font-mono transition-all cursor-pointer border flex items-center gap-1.5 ${
-              pipelineTab === 'Cancelled'
+              shoppingPipelineStage === 'Cancelled'
                 ? 'bg-rose-800 text-white border-rose-800 shadow-xs font-bold'
                 : 'bg-white text-[#4A4A45] border-[#D5D5D0] hover:border-rose-700 hover:text-rose-800'
             }`}
+            title="Passed on or cancelled items"
           >
             <Ban className="w-3 h-3 text-rose-300" />
             <span>Cancelled</span>
-            <span className="opacity-75">({pipelineStats.cancelled})</span>
+            <span className="opacity-75">({pipelineStats.Cancelled})</span>
           </button>
         </div>
       </div>
@@ -1432,28 +1461,31 @@ export const ShoppingView: React.FC<ShoppingViewProps> = ({
         {/* Secondary Priority, Brand, Status & Sort Filters */}
         <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-[#E5E5E1]">
           <div className="flex flex-wrap items-center gap-3">
-            {/* Status Dropdown */}
+            {/* Pipeline / Status Dropdown */}
             <div className="flex items-center gap-1 text-xs">
-              <span className="text-[#767670] font-mono text-[11px]">Status:</span>
+              <span className="text-[#767670] font-mono text-[11px]">Pipeline:</span>
               <div className="relative">
                 <select
-                  value={selectedStatus}
-                  onChange={(e) => handleSetSelectedStatus(e.target.value as any)}
-                  className="bg-[#F8F7F4] border border-[#E5E5E1] text-[#1A1A1A] text-xs px-2 py-1 pr-6 focus:outline-none focus:border-[#8C7355] appearance-none max-w-[140px] truncate font-medium"
+                  value={shoppingPipelineStage}
+                  onChange={(e) => handleSetShoppingPipelineStage(e.target.value as ShoppingPipelineStage)}
+                  className="bg-[#F8F7F4] border border-[#E5E5E1] text-[#1A1A1A] text-xs px-2 py-1 pr-6 focus:outline-none focus:border-[#8C7355] appearance-none max-w-[170px] truncate font-medium"
                 >
-                  {STATUSES.map((st) => (
-                    <option key={st} value={st}>
-                      {st}
-                    </option>
-                  ))}
+                  <option value="All">All Pipeline ({pipelineStats.All})</option>
+                  <option value="Planned">Wishlist / Planned ({pipelineStats.Planned})</option>
+                  <option value="To Buy">To Buy ({pipelineStats['To Buy']})</option>
+                  <option value="In Basket">In Basket ({pipelineStats['In Basket']})</option>
+                  <option value="Researching">Researching ({pipelineStats.Researching})</option>
+                  <option value="Purchased">Purchased ({pipelineStats.Purchased})</option>
+                  <option value="Sold">Sold ({pipelineStats.Sold})</option>
+                  <option value="Cancelled">Cancelled / Passed ({pipelineStats.Cancelled})</option>
                 </select>
                 <ChevronDown className="w-3 h-3 text-[#767670] absolute right-1.5 top-2 pointer-events-none" />
               </div>
-              {selectedStatus !== 'All' && (
+              {shoppingPipelineStage !== 'All' && (
                 <button
-                  onClick={() => handleSetSelectedStatus('All')}
+                  onClick={() => handleSetShoppingPipelineStage('All')}
                   className="text-[#767670] hover:text-rose-600 p-0.5 cursor-pointer"
-                  title="Clear status filter (✕)"
+                  title="Clear pipeline filter (✕)"
                 >
                   <X className="w-3 h-3" />
                 </button>
@@ -1537,18 +1569,16 @@ export const ShoppingView: React.FC<ShoppingViewProps> = ({
             </div>
           </div>
 
-          {(pipelineTab !== 'All' ||
+          {(shoppingPipelineStage !== 'All' ||
             selectedTag !== 'All' ||
-            selectedStatus !== 'All' ||
             selectedBrand !== 'All' ||
             selectedPriority !== 'All' ||
             selectedCategory !== 'All' ||
             searchQuery) && (
             <button
               onClick={() => {
-                handleSetPipelineTab('All');
+                handleSetShoppingPipelineStage('All');
                 handleSetSelectedTag('All');
-                handleSetSelectedStatus('All');
                 handleSetSelectedBrand('All');
                 handleSetSelectedPriority('All');
                 handleSetSelectedCategory('All');
@@ -1563,38 +1593,23 @@ export const ShoppingView: React.FC<ShoppingViewProps> = ({
         </div>
 
         {/* Active Filters Pills Bar */}
-        {(pipelineTab !== 'All' ||
+        {(shoppingPipelineStage !== 'All' ||
           selectedTag !== 'All' ||
           selectedCategory !== 'All' ||
           selectedBrand !== 'All' ||
           selectedPriority !== 'All' ||
-          selectedStatus !== 'All' ||
           searchQuery.trim() !== '') && (
           <div className="flex flex-wrap items-center gap-1.5 pt-2 border-t border-[#F2F1ED] text-[11px] font-mono">
             <span className="text-[#767670] font-semibold">Active Filters:</span>
 
-            {pipelineTab !== 'All' && (
+            {shoppingPipelineStage !== 'All' && (
               <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-[#FAF9F6] border border-[#E5E5E1] text-[#1A1A1A] rounded-xs">
-                Pipeline: {pipelineTab}
+                Pipeline: {SHOPPING_PIPELINE_STAGE_LABELS[shoppingPipelineStage] || shoppingPipelineStage}
                 <button
                   type="button"
-                  onClick={() => handleSetPipelineTab('All')}
+                  onClick={() => handleSetShoppingPipelineStage('All')}
                   className="hover:text-rose-600 cursor-pointer"
                   title="Remove pipeline filter"
-                >
-                  <X className="w-3 h-3" />
-                </button>
-              </span>
-            )}
-
-            {selectedStatus !== 'All' && (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-[#FAF9F6] border border-[#E5E5E1] text-[#1A1A1A] rounded-xs">
-                Status: {selectedStatus}
-                <button
-                  type="button"
-                  onClick={() => handleSetSelectedStatus('All')}
-                  className="hover:text-rose-600 cursor-pointer"
-                  title="Remove status filter"
                 >
                   <X className="w-3 h-3" />
                 </button>
@@ -1706,9 +1721,8 @@ export const ShoppingView: React.FC<ShoppingViewProps> = ({
           title="No wishlist items found"
           description="Add items you are researching or auto-import them from a retailer link to plan your acquisition pipeline."
           onResetFilters={() => {
-            handleSetPipelineTab('All');
+            handleSetShoppingPipelineStage('All');
             handleSetSelectedTag('All');
-            handleSetSelectedStatus('All');
             handleSetSelectedBrand('All');
             handleSetSelectedPriority('All');
             handleSetSelectedCategory('All');
@@ -1757,6 +1771,8 @@ export const ShoppingView: React.FC<ShoppingViewProps> = ({
             const isEditingName = editingFieldId === `${item.id}_name`;
             const isEditingPrice = editingFieldId === `${item.id}_estimatedPrice`;
             const isEditingReason = editingFieldId === `${item.id}_reasonOrGap`;
+            const isEditingColor = editingFieldId === `${item.id}_color`;
+            const isEditingSize = editingFieldId === `${item.id}_size`;
 
             const isVintedItem =
               Boolean(item.seller) ||
@@ -1830,7 +1846,9 @@ export const ShoppingView: React.FC<ShoppingViewProps> = ({
                                 status: e.target.value as ShoppingStatus,
                               })
                             }
-                            className="text-[10px] font-mono px-2 py-0.5 bg-white/95 text-[#767670] border border-[#D5D5D0] shadow-xs focus:outline-none"
+                            className={`text-[10px] font-mono px-2 py-0.5 rounded-full border shadow-xs focus:outline-none cursor-pointer ${getShoppingStatusBadgeClass(
+                              item.status
+                            )}`}
                           >
                             <option value="To Buy">To Buy</option>
                             <option value="In Basket">In Basket</option>
@@ -1986,6 +2004,101 @@ export const ShoppingView: React.FC<ShoppingViewProps> = ({
                         <PencilIcon />
                       </h3>
                     )}
+
+                    {/* Garment Sub-details (Color, Size, Season) with inline editing */}
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-[#767670] font-sans pt-0.5">
+                      {/* Color with Color Swatch and Inline Editing */}
+                      <div className="flex items-center gap-1">
+                        {isEditingColor ? (
+                          <input
+                            type="text"
+                            placeholder="e.g. Navy, Black..."
+                            value={editingValue}
+                            onChange={(e) => setEditingValue(e.target.value)}
+                            onBlur={() => handleSaveInline(item.id, 'color')}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') handleSaveInline(item.id, 'color');
+                              if (e.key === 'Escape') setEditingFieldId(null);
+                            }}
+                            autoFocus
+                            className="w-24 text-[10px] font-mono border border-[#8C7355] px-1 py-0.5 bg-white shadow-2xs rounded-xs"
+                          />
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingFieldId(`${item.id}_color`);
+                              setEditingValue(item.color || '');
+                            }}
+                            className="flex items-center gap-1 hover:text-[#1A1A1A] cursor-pointer group/col py-0.5"
+                            title="Click to edit color inline"
+                          >
+                            <span
+                              className="w-2.5 h-2.5 rounded-full border border-black/20 shrink-0 shadow-2xs"
+                              style={{ backgroundColor: getColorHex(item.color) || '#D4D4D0' }}
+                            />
+                            <span className="font-medium text-[#4A4A45] group-hover/col:underline">
+                              {item.color || 'Set Color'}
+                            </span>
+                            <Edit2 className="w-2 h-2 opacity-0 group-hover/col:opacity-70 text-[#8C7355]" />
+                          </button>
+                        )}
+                      </div>
+
+                      <span>•</span>
+
+                      {/* Size with Inline Editing */}
+                      <div className="flex items-center gap-1">
+                        {isEditingSize ? (
+                          <input
+                            type="text"
+                            placeholder="Size..."
+                            value={editingValue}
+                            onChange={(e) => setEditingValue(e.target.value)}
+                            onBlur={() => handleSaveInline(item.id, 'size')}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') handleSaveInline(item.id, 'size');
+                              if (e.key === 'Escape') setEditingFieldId(null);
+                            }}
+                            autoFocus
+                            className="w-16 text-[10px] font-mono border border-[#8C7355] px-1 py-0.5 bg-white shadow-2xs rounded-xs"
+                          />
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingFieldId(`${item.id}_size`);
+                              setEditingValue(item.size || '');
+                            }}
+                            className="hover:text-[#1A1A1A] cursor-pointer group/size py-0.5 flex items-center gap-1"
+                            title="Click to edit size inline"
+                          >
+                            <span className="text-[#4A4A45] group-hover/size:underline">
+                              {item.size ? `Size ${item.size}` : 'Set Size'}
+                            </span>
+                            <Edit2 className="w-2 h-2 opacity-0 group-hover/size:opacity-70 text-[#8C7355]" />
+                          </button>
+                        )}
+                      </div>
+
+                      <span>•</span>
+
+                      {/* Season Dropdown */}
+                      <div className="flex items-center gap-1">
+                        <select
+                          value={item.season || 'All-Season'}
+                          onChange={(e) => updateShoppingItem(item.id, { season: e.target.value as Season })}
+                          className="bg-[#F8F7F4] border border-[#E5E5E1] text-[10px] font-mono text-[#4A4A45] px-1.5 py-0.5 rounded-xs hover:border-[#8C7355] focus:outline-none focus:border-[#8C7355] cursor-pointer"
+                          title="Change season"
+                        >
+                          <option value="All-Season">All-Season</option>
+                          <option value="Spring">Spring</option>
+                          <option value="Summer">Summer</option>
+                          <option value="Autumn">Autumn</option>
+                          <option value="Winter">Winter</option>
+                        </select>
+                      </div>
+                    </div>
 
                     {/* Reason / Notes */}
                     {isEditingReason ? (

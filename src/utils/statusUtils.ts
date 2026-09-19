@@ -173,6 +173,114 @@ export function getSaleItemPipelineStage(item: {
 }
 
 // ==========================================
+// 4B. SHOPPING PIPELINE STAGES & CLASSIFICATION (SSOT)
+// ==========================================
+
+export type ShoppingPipelineStage =
+  | 'All'
+  | 'Planned'
+  | 'To Buy'
+  | 'In Basket'
+  | 'Researching'
+  | 'Purchased'
+  | 'Sold'
+  | 'Cancelled';
+
+export const ALL_SHOPPING_PIPELINE_STAGES: readonly ShoppingPipelineStage[] = [
+  'Planned',
+  'To Buy',
+  'In Basket',
+  'Researching',
+  'Purchased',
+  'Sold',
+  'Cancelled',
+] as const;
+
+export const SHOPPING_PIPELINE_STAGE_LABELS: Record<ShoppingPipelineStage, string> = {
+  All: 'All Pipeline Stages',
+  Planned: 'Wishlist / Planned (All Active)',
+  'To Buy': 'To Buy (Priority Wishlist)',
+  'In Basket': 'In Basket (Checkout Ready)',
+  Researching: 'Researching (Evaluating)',
+  Purchased: 'Purchased (In Wardrobe)',
+  Sold: 'Sold / Re-sold',
+  Cancelled: 'Cancelled / Passed',
+};
+
+/**
+ * Single source of truth for classifying a shopping item into its active stage.
+ */
+export function getShoppingItemPipelineStage(item: {
+  status?: ShoppingStatus | string;
+  tags?: string[] | string;
+  orderStatus?: string;
+  purchasedDate?: string;
+}): 'To Buy' | 'In Basket' | 'Researching' | 'Purchased' | 'Sold' | 'Cancelled' {
+  const status = item.status;
+  const orderStatusLower = (item.orderStatus || '').toLowerCase();
+  const tags = Array.isArray(item.tags)
+    ? item.tags.map((t) => (typeof t === 'string' ? t.toLowerCase().replace(/^#/, '') : ''))
+    : typeof item.tags === 'string'
+    ? [(item.tags as string).toLowerCase().replace(/^#/, '')]
+    : [];
+
+  // 1. Explicit status takes absolute top priority
+  if (status === 'To Buy') return 'To Buy';
+  if (status === 'In Basket') return 'In Basket';
+  if (status === 'Researching') return 'Researching';
+  if (status === 'Purchased') return 'Purchased';
+  if (status === 'Sold') return 'Sold';
+  if (status === 'Cancelled' || status === 'Passed') return 'Cancelled';
+
+  // 2. Secondary heuristic fallbacks ONLY if status is unset or unknown
+  if (tags.includes('sold') || orderStatusLower.includes('sold')) {
+    return 'Sold';
+  }
+  if (
+    tags.includes('cancelled') ||
+    tags.includes('passed') ||
+    orderStatusLower.includes('cancel') ||
+    orderStatusLower.includes('refund') ||
+    orderStatusLower.includes('void')
+  ) {
+    return 'Cancelled';
+  }
+  if (
+    tags.includes('bought') ||
+    tags.includes('purchased') ||
+    orderStatusLower.includes('delivered') ||
+    orderStatusLower.includes('received') ||
+    orderStatusLower.includes('completed') ||
+    Boolean(item.purchasedDate)
+  ) {
+    return 'Purchased';
+  }
+
+  // Default to To Buy
+  return 'To Buy';
+}
+
+/**
+ * Checks if a shopping item matches the requested pipeline stage.
+ */
+export function matchesShoppingPipelineStage(
+  item: {
+    status?: ShoppingStatus | string;
+    tags?: string[] | string;
+    orderStatus?: string;
+    purchasedDate?: string;
+  },
+  stage: ShoppingPipelineStage
+): boolean {
+  if (stage === 'All') return true;
+  const itemStage = getShoppingItemPipelineStage(item);
+  if (stage === 'Planned') {
+    return itemStage === 'To Buy' || itemStage === 'In Basket' || itemStage === 'Researching';
+  }
+  return itemStage === stage;
+}
+
+// ==========================================
 // 5. BADGE COLOR & STYLING CLASSES (DRY)
 // ==========================================
 
@@ -218,6 +326,31 @@ export function getPipelineStageBadgeClass(stage: SalesPipelineStage): string {
     case 'Cancelled':
       return 'text-rose-700 border-rose-300 bg-rose-50/60';
     case 'Draft':
+    default:
+      return 'text-[#767670] border-[#D5D5D0] bg-[#FAF9F6]';
+  }
+}
+
+/**
+ * Tailwind styling for shopping pipeline stage badges
+ */
+export function getShoppingPipelineStageBadgeClass(stage: ShoppingPipelineStage): string {
+  switch (stage) {
+    case 'Planned':
+      return 'text-amber-700 border-amber-300 bg-amber-50/60 font-medium';
+    case 'To Buy':
+      return 'text-blue-700 border-blue-300 bg-blue-50/60 font-medium';
+    case 'In Basket':
+      return 'text-indigo-700 border-indigo-300 bg-indigo-50/60 font-medium';
+    case 'Researching':
+      return 'text-purple-700 border-purple-300 bg-purple-50/60 font-medium';
+    case 'Purchased':
+      return 'text-emerald-700 border-emerald-300 bg-emerald-50/60 font-semibold';
+    case 'Sold':
+      return 'text-teal-700 border-teal-300 bg-teal-50/60 font-medium';
+    case 'Cancelled':
+      return 'text-rose-700 border-rose-300 bg-rose-50/60 font-medium';
+    case 'All':
     default:
       return 'text-[#767670] border-[#D5D5D0] bg-[#FAF9F6]';
   }

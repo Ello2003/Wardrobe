@@ -47,6 +47,7 @@ import {
   Award,
 } from 'lucide-react';
 import { useWardrobe } from '../context/WardrobeContext';
+import { InlineEditableTitle } from './common/InlineEditableTitle';
 import {
   AnalyticsSettings,
   DEFAULT_ANALYTICS_SETTINGS,
@@ -119,7 +120,7 @@ interface AnalyticsChartsViewProps {
 }
 
 export const AnalyticsChartsView: React.FC<AnalyticsChartsViewProps> = ({ onOpenAddItem }) => {
-  const { items, shoppingList, saleItems, outfits, monthlyBudget, spentThisMonth, settings, formatCurrency } =
+  const { items, shoppingList, saleItems, outfits, monthlyBudget, spentThisMonth, settings, formatCurrency, customLabels, updateCustomLabel } =
     useWardrobe();
 
   const sym = settings.currencySymbol || '£';
@@ -519,18 +520,29 @@ export const AnalyticsChartsView: React.FC<AnalyticsChartsViewProps> = ({ onOpen
             </div>
             <div>
               <div className="flex items-center gap-2.5 flex-wrap">
-                <h1 className="text-lg sm:text-xl font-serif font-bold text-[#1A1A1A] tracking-tight">
-                  Wardrobe Analytics &amp; Intelligence
-                </h1>
+                <InlineEditableTitle
+                  value={customLabels.analyticsPageTitle || 'Wardrobe Analytics & Intelligence'}
+                  onSave={(val) => updateCustomLabel('analyticsPageTitle', val)}
+                  as="h1"
+                  className="text-lg sm:text-xl font-serif font-bold text-[#1A1A1A] tracking-tight"
+                  tooltip="Click or pencil to rename Analytics title inline"
+                />
                 <span className="px-2 py-0.5 text-[10px] font-mono font-bold bg-[#FAF9F5] text-[#8C7355] border border-[#E5E5E1] rounded">
                   {analyticsSettings.valuationMetric === 'estimatedResale'
                     ? 'Secondary Liquidation Basis'
                     : 'Purchase Cost Basis'}
                 </span>
               </div>
-              <p className="text-xs text-[#767670] mt-0.5 font-mono">
-                Interactive portfolio valuation, cost-per-wear metrics, material compositions, and resale performance.
-              </p>
+              <InlineEditableTitle
+                value={
+                  customLabels.analyticsPageSubtitle ||
+                  'Interactive portfolio valuation, cost-per-wear metrics, material compositions, and resale performance.'
+                }
+                onSave={(val) => updateCustomLabel('analyticsPageSubtitle', val)}
+                as="p"
+                className="text-xs text-[#767670] mt-0.5 font-mono"
+                tooltip="Click or pencil to rename Analytics subtitle inline"
+              />
             </div>
           </div>
 

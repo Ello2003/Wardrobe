@@ -1,4 +1,16 @@
-import { WardrobeItem, LookbookOutfit, ShoppingItem, SaleItem, VersionChangeLog, WardrobeSnapshot, TrendInspiration } from '../types';
+import {
+  WardrobeItem,
+  LookbookOutfit,
+  ShoppingItem,
+  SaleItem,
+  VersionChangeLog,
+  WardrobeSnapshot,
+  TrendInspiration,
+  DEFAULT_CATEGORIES,
+  DEFAULT_GARMENT_CATEGORIES,
+  DEFAULT_HOMEWARE_CATEGORIES,
+  isHomewareCategory,
+} from '../types';
 import backupPayload from '../../wardrobe-database-backup.json';
 
 const DEFAULT_WARDROBE_ITEMS: WardrobeItem[] = [
@@ -508,6 +520,38 @@ export const INITIAL_WARDROBE_ITEMS: WardrobeItem[] = (
     : DEFAULT_WARDROBE_ITEMS
 );
 
+export const INITIAL_GARMENT_CATEGORIES: string[] = Array.from(
+  new Set([
+    ...DEFAULT_GARMENT_CATEGORIES,
+    ...(Array.isArray(backupPayload?.data?.items)
+      ? (backupPayload.data.items as unknown as { category?: string }[])
+          .map((it) => it.category)
+          .filter((c): c is string => !!c && !isHomewareCategory(c))
+      : []),
+    ...(Array.isArray(backupPayload?.data?.categories)
+      ? (backupPayload.data.categories as string[]).filter((c) => !isHomewareCategory(c))
+      : []),
+  ])
+);
+
+export const INITIAL_HOMEWARE_CATEGORIES: string[] = Array.from(
+  new Set([
+    ...DEFAULT_HOMEWARE_CATEGORIES,
+    ...(Array.isArray(backupPayload?.data?.items)
+      ? (backupPayload.data.items as unknown as { category?: string }[])
+          .map((it) => it.category)
+          .filter((c): c is string => !!c && isHomewareCategory(c))
+      : []),
+    ...(Array.isArray(backupPayload?.data?.categories)
+      ? (backupPayload.data.categories as string[]).filter((c) => isHomewareCategory(c))
+      : []),
+  ])
+);
+
+export const INITIAL_CATEGORIES: string[] = Array.from(
+  new Set([...INITIAL_GARMENT_CATEGORIES, ...INITIAL_HOMEWARE_CATEGORIES])
+);
+
 const DEFAULT_SHOPPING_LIST: ShoppingItem[] = [
   {
     id: 'shop-1',
@@ -916,6 +960,62 @@ export const INITIAL_VERSION_LOGS: VersionChangeLog[] = [
     details: {
       field: 'statusArchitecture',
       newValue: 'Unified & DRY Single Source of Truth'
+    },
+    author: 'Graeme (System)'
+  },
+  {
+    id: 'log-10',
+    versionNumber: 10,
+    timestamp: new Date().toISOString(),
+    actionType: 'SALE_UPDATED',
+    entityType: 'sale_item',
+    entityTitle: 'Pipeline State Sync & Universal Inline Editing v4.9',
+    summary: 'Synchronized pipeline states with filtering dropdowns across Shopping & Wishlist and Sales & Resale Studio under a unified SSOT with localStorage persistence. Added universal inline editing across cards and tables for Brand, Price, Name, Color (with swatch), Size, and Notes.',
+    details: {
+      field: 'pipelineSyncAndInlineEditing',
+      newValue: 'SSOT Synchronized & Full Inline Editing Enabled'
+    },
+    author: 'Graeme (System)'
+  },
+  {
+    id: 'log-11',
+    versionNumber: 11,
+    timestamp: new Date().toISOString(),
+    actionType: 'CATEGORY_ADDED',
+    entityType: 'wardrobe_item',
+    entityTitle: 'Wardrobe to Inventory Evolution & Homeware Taxonomy v5.0',
+    summary: 'Elevated platform terminology from Wardrobe to Inventory across navigation and interfaces. Integrated first-class Homeware & Lifestyle category taxonomy with dual-segment filtering (Apparel vs Homeware & Lifestyle), grouped selection optgroups, and adaptive usage tracking.',
+    details: {
+      field: 'inventoryAndHomewareTaxonomy',
+      newValue: 'First-Class Homeware System & Universal Inventory Terminology'
+    },
+    author: 'Graeme (System)'
+  },
+  {
+    id: 'log-12',
+    versionNumber: 12,
+    timestamp: new Date().toISOString(),
+    actionType: 'CATEGORY_ADDED',
+    entityType: 'wardrobe_item',
+    entityTitle: 'Duplicated Garment & Homeware Category Sections v5.1',
+    summary: 'Maintained the existing Garment categories and collections filter bar while establishing a duplicated, dedicated Homeware Categories & Collections section with independent category tags, custom category addition, deletion, and filter reset controls.',
+    details: {
+      field: 'garmentAndHomewareSplitUI',
+      newValue: 'Duplicated Independent Garment & Homeware Category Headers and Filters'
+    },
+    author: 'Graeme (System)'
+  },
+  {
+    id: 'log-13',
+    versionNumber: 13,
+    timestamp: new Date().toISOString(),
+    actionType: 'CATEGORY_UPDATED',
+    entityType: 'system',
+    entityTitle: 'Customizable Section Names, Inline Page Titles & Resizable Non-Overlapping Tables v5.2',
+    summary: 'Enabled customizable naming for Wardrobe/Inventory, Shopping, Selling, and Header Brand in Settings; introduced site-wide inline editable page titles; and implemented fixed-layout resizable tables with per-column width controls and content clipping across Inventory, Shopping, and Selling tables to prevent text overlap.',
+    details: {
+      field: 'customLabelsAndResizableTables',
+      newValue: 'Configurable Studio Labels, Inline Editable Titles, and Resizable Table Layouts'
     },
     author: 'Graeme (System)'
   }

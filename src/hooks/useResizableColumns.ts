@@ -115,6 +115,18 @@ export function useResizableColumns({
     [columnWidths, defaultWidths]
   );
 
+  const getCellStyle = useCallback(
+    (colKey: string, fallback?: number): React.CSSProperties => {
+      const w = columnWidths[colKey] || fallback || defaultWidths[colKey] || 120;
+      return {
+        width: `${w}px`,
+        minWidth: `${w}px`,
+        maxWidth: `${w}px`,
+      };
+    },
+    [columnWidths, defaultWidths]
+  );
+
   return {
     columnWidths,
     isResizing,
@@ -123,5 +135,6 @@ export function useResizableColumns({
     resetWidths,
     resetColumnWidth,
     getWidth,
+    getCellStyle,
   };
 }

@@ -21,6 +21,7 @@ import {
   Info,
 } from 'lucide-react';
 import { useWardrobe } from '../context/WardrobeContext';
+import { InlineEditableTitle } from './common/InlineEditableTitle';
 import {
   EditorialArticle,
   EditorialFeedSource,
@@ -41,7 +42,7 @@ import { TREND_RESEARCH_DATA } from '../data/initialData';
 interface EditorialFeedViewProps {}
 
 export const EditorialFeedView: React.FC<EditorialFeedViewProps> = () => {
-  const { addShoppingItem, items } = useWardrobe();
+  const { addShoppingItem, items, customLabels, updateCustomLabel } = useWardrobe();
 
   // Settings & Feed State
   const [settings, setSettings] = useState<EditorialFeedSettings>(getEditorialSettings());
@@ -258,9 +259,13 @@ export const EditorialFeedView: React.FC<EditorialFeedViewProps> = () => {
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-white border border-[#E5E5E1] rounded-xl p-4 shadow-xs">
         <div className="space-y-1">
           <div className="flex items-center gap-2 flex-wrap">
-            <h1 className="text-xl font-serif font-bold text-[#1A1A1A]">
-              Brand Editorials &amp; Sartorial Dispatches
-            </h1>
+            <InlineEditableTitle
+              value={customLabels.editorialPageTitle || 'Brand Editorials & Sartorial Dispatches'}
+              onSave={(val) => updateCustomLabel('editorialPageTitle', val)}
+              as="h1"
+              className="text-xl font-serif font-bold text-[#1A1A1A]"
+              tooltip="Click or pencil to rename Editorials title inline"
+            />
             <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold bg-[#FAF9F5] border border-[#E5E5E1] text-[#767670]">
               <span
                 className={`w-2 h-2 rounded-full ${
@@ -275,9 +280,16 @@ export const EditorialFeedView: React.FC<EditorialFeedViewProps> = () => {
               )}
             </div>
           </div>
-          <p className="text-xs text-[#767670]">
-            Continuous live updates, craft journals, and seasonal lookbooks from Drake's, Suitsupply, The Rake, and Permanent Style.
-          </p>
+          <InlineEditableTitle
+            value={
+              customLabels.editorialPageSubtitle ||
+              "Continuous live updates, craft journals, and seasonal lookbooks from Drake's, Suitsupply, The Rake, and Permanent Style."
+            }
+            onSave={(val) => updateCustomLabel('editorialPageSubtitle', val)}
+            as="p"
+            className="text-xs text-[#767670]"
+            tooltip="Click or pencil to rename Editorials subtitle inline"
+          />
         </div>
 
         {/* Header Actions */}

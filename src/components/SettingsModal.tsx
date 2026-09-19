@@ -77,10 +77,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     importDataJSON,
     resetToDefaultData,
     clearDatabase,
+    customLabels,
+    updateCustomLabel,
+    resetCustomLabels,
   } = useWardrobe();
 
   const [activeTab, setActiveTab] = useState<
     | 'general'
+    | 'labels'
     | 'wardrobe_table'
     | 'wishlist_table'
     | 'resale_table'
@@ -345,6 +349,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
             }`}
           >
             Display & Currency
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('labels')}
+            className={`px-3 py-2 text-xs font-mono font-medium border-b-2 cursor-pointer transition-colors whitespace-nowrap flex items-center gap-1.5 ${
+              activeTab === 'labels'
+                ? 'border-[#8C7355] text-[#8C7355] font-bold'
+                : 'border-transparent text-[#767670] hover:text-[#1A1A1A]'
+            }`}
+          >
+            <Edit3 className="w-3.5 h-3.5" />
+            <span>Nomenclature &amp; Titles</span>
           </button>
           <button
             type="button"
@@ -649,6 +665,313 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                     {apiSavedNotice}
                   </p>
                 )}
+              </div>
+            </div>
+          )}
+
+          {/* TAB: Titles & Nomenclature Customization */}
+          {activeTab === 'labels' && (
+            <div className="space-y-6">
+              <div className="flex items-start justify-between bg-[#FAF9F5] p-4 border border-[#E5E5E1]">
+                <div>
+                  <h3 className="text-sm font-serif font-bold text-[#1A1A1A] flex items-center gap-1.5">
+                    <Edit3 className="w-4 h-4 text-[#8C7355]" />
+                    Site-Wide Titles &amp; Nomenclature Customization
+                  </h3>
+                  <p className="text-xs text-[#767670] mt-0.5">
+                    Customize navigation tab names, global header title, studio view titles, and collection headers. Changes take effect instantly across all pages and persist in storage.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    resetCustomLabels();
+                  }}
+                  className="px-3 py-1.5 text-xs font-mono bg-white border border-[#E5E5E1] text-[#767670] hover:text-[#1A1A1A] hover:bg-[#F2F1ED] transition-colors cursor-pointer flex items-center gap-1.5 shrink-0"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>Reset Defaults</span>
+                </button>
+              </div>
+
+              {/* Section 1: Global App Header & Branding */}
+              <div className="border border-[#E5E5E1] p-4 space-y-3 bg-white">
+                <h4 className="text-xs font-mono font-bold uppercase tracking-wider text-[#1A1A1A] flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-[#8C7355]" />
+                  Global Header Branding
+                </h4>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-mono font-semibold text-[#5A5A55] mb-1">
+                      Site Header Title
+                    </label>
+                    <input
+                      type="text"
+                      value={customLabels.headerTitle}
+                      onChange={(e) => updateCustomLabel('headerTitle', e.target.value)}
+                      placeholder="Wardrobe & Style Studio"
+                      className="w-full text-xs font-mono bg-[#FAF9F5] border border-[#CCCCCC] p-2 focus:border-[#1A1A1A] focus:bg-white focus:outline-hidden"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-mono font-semibold text-[#5A5A55] mb-1">
+                      Site Header Subtitle
+                    </label>
+                    <input
+                      type="text"
+                      value={customLabels.headerSubtitle}
+                      onChange={(e) => updateCustomLabel('headerSubtitle', e.target.value)}
+                      placeholder="Wardrobe, lookbook, shopping, selling and style analytics."
+                      className="w-full text-xs font-mono bg-[#FAF9F5] border border-[#CCCCCC] p-2 focus:border-[#1A1A1A] focus:bg-white focus:outline-hidden"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Section 2: Navigation Bar Tabs */}
+              <div className="border border-[#E5E5E1] p-4 space-y-3 bg-white">
+                <h4 className="text-xs font-mono font-bold uppercase tracking-wider text-[#1A1A1A] flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-[#1A1A1A]" />
+                  Navigation Bar Tabs
+                </h4>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-mono font-semibold text-[#5A5A55] mb-1">
+                      Dashboard Tab
+                    </label>
+                    <input
+                      type="text"
+                      value={customLabels.tabDashboard}
+                      onChange={(e) => updateCustomLabel('tabDashboard', e.target.value)}
+                      placeholder="Dashboard"
+                      className="w-full text-xs font-mono bg-[#FAF9F5] border border-[#CCCCCC] p-2 focus:border-[#1A1A1A] focus:bg-white focus:outline-hidden"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-mono font-semibold text-[#5A5A55] mb-1">
+                      Wardrobe Tab
+                    </label>
+                    <input
+                      type="text"
+                      value={customLabels.tabWardrobe}
+                      onChange={(e) => updateCustomLabel('tabWardrobe', e.target.value)}
+                      placeholder="Wardrobe"
+                      className="w-full text-xs font-mono bg-[#FAF9F5] border border-[#CCCCCC] p-2 focus:border-[#1A1A1A] focus:bg-white focus:outline-hidden"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-mono font-semibold text-[#5A5A55] mb-1">
+                      Shopping Tab
+                    </label>
+                    <input
+                      type="text"
+                      value={customLabels.tabShopping}
+                      onChange={(e) => updateCustomLabel('tabShopping', e.target.value)}
+                      placeholder="Shopping"
+                      className="w-full text-xs font-mono bg-[#FAF9F5] border border-[#CCCCCC] p-2 focus:border-[#1A1A1A] focus:bg-white focus:outline-hidden"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-mono font-semibold text-[#5A5A55] mb-1">
+                      Selling Tab
+                    </label>
+                    <input
+                      type="text"
+                      value={customLabels.tabSelling}
+                      onChange={(e) => updateCustomLabel('tabSelling', e.target.value)}
+                      placeholder="Selling"
+                      className="w-full text-xs font-mono bg-[#FAF9F5] border border-[#CCCCCC] p-2 focus:border-[#1A1A1A] focus:bg-white focus:outline-hidden"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-mono font-semibold text-[#5A5A55] mb-1">
+                      Analytics Tab
+                    </label>
+                    <input
+                      type="text"
+                      value={customLabels.tabAnalytics}
+                      onChange={(e) => updateCustomLabel('tabAnalytics', e.target.value)}
+                      placeholder="Analytics"
+                      className="w-full text-xs font-mono bg-[#FAF9F5] border border-[#CCCCCC] p-2 focus:border-[#1A1A1A] focus:bg-white focus:outline-hidden"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-mono font-semibold text-[#5A5A55] mb-1">
+                      Lookbook Tab
+                    </label>
+                    <input
+                      type="text"
+                      value={customLabels.tabLookbook}
+                      onChange={(e) => updateCustomLabel('tabLookbook', e.target.value)}
+                      placeholder="Lookbook"
+                      className="w-full text-xs font-mono bg-[#FAF9F5] border border-[#CCCCCC] p-2 focus:border-[#1A1A1A] focus:bg-white focus:outline-hidden"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-mono font-semibold text-[#5A5A55] mb-1">
+                      Trends / Feed Tab
+                    </label>
+                    <input
+                      type="text"
+                      value={customLabels.tabTrends}
+                      onChange={(e) => updateCustomLabel('tabTrends', e.target.value)}
+                      placeholder="Trends & Style"
+                      className="w-full text-xs font-mono bg-[#FAF9F5] border border-[#CCCCCC] p-2 focus:border-[#1A1A1A] focus:bg-white focus:outline-hidden"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-mono font-semibold text-[#5A5A55] mb-1">
+                      Tools Tab
+                    </label>
+                    <input
+                      type="text"
+                      value={customLabels.tabTools}
+                      onChange={(e) => updateCustomLabel('tabTools', e.target.value)}
+                      placeholder="Studio Tools"
+                      className="w-full text-xs font-mono bg-[#FAF9F5] border border-[#CCCCCC] p-2 focus:border-[#1A1A1A] focus:bg-white focus:outline-hidden"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Section 3: Studio Page Titles */}
+              <div className="border border-[#E5E5E1] p-4 space-y-3 bg-white">
+                <h4 className="text-xs font-mono font-bold uppercase tracking-wider text-[#1A1A1A] flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-[#8C7355]" />
+                  Studio Page Titles &amp; Headings
+                </h4>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-mono font-semibold text-[#5A5A55] mb-1">
+                      Wardrobe Page Title
+                    </label>
+                    <input
+                      type="text"
+                      value={customLabels.wardrobePageTitle}
+                      onChange={(e) => updateCustomLabel('wardrobePageTitle', e.target.value)}
+                      placeholder="Inventory Studio"
+                      className="w-full text-xs font-mono bg-[#FAF9F5] border border-[#CCCCCC] p-2 focus:border-[#1A1A1A] focus:bg-white focus:outline-hidden"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-mono font-semibold text-[#5A5A55] mb-1">
+                      Shopping Page Title
+                    </label>
+                    <input
+                      type="text"
+                      value={customLabels.shoppingPageTitle}
+                      onChange={(e) => updateCustomLabel('shoppingPageTitle', e.target.value)}
+                      placeholder="Shopping & Wishlist Manager"
+                      className="w-full text-xs font-mono bg-[#FAF9F5] border border-[#CCCCCC] p-2 focus:border-[#1A1A1A] focus:bg-white focus:outline-hidden"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-mono font-semibold text-[#5A5A55] mb-1">
+                      Selling Page Title
+                    </label>
+                    <input
+                      type="text"
+                      value={customLabels.sellingPageTitle}
+                      onChange={(e) => updateCustomLabel('sellingPageTitle', e.target.value)}
+                      placeholder="Sales & Resale Studio"
+                      className="w-full text-xs font-mono bg-[#FAF9F5] border border-[#CCCCCC] p-2 focus:border-[#1A1A1A] focus:bg-white focus:outline-hidden"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-mono font-semibold text-[#5A5A55] mb-1">
+                      Dashboard Page Title
+                    </label>
+                    <input
+                      type="text"
+                      value={customLabels.dashboardPageTitle}
+                      onChange={(e) => updateCustomLabel('dashboardPageTitle', e.target.value)}
+                      placeholder="Executive Wardrobe & Acquisition Dashboard"
+                      className="w-full text-xs font-mono bg-[#FAF9F5] border border-[#CCCCCC] p-2 focus:border-[#1A1A1A] focus:bg-white focus:outline-hidden"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-mono font-semibold text-[#5A5A55] mb-1">
+                      Analytics Page Title
+                    </label>
+                    <input
+                      type="text"
+                      value={customLabels.analyticsPageTitle}
+                      onChange={(e) => updateCustomLabel('analyticsPageTitle', e.target.value)}
+                      placeholder="Wardrobe Analytics & Intelligence"
+                      className="w-full text-xs font-mono bg-[#FAF9F5] border border-[#CCCCCC] p-2 focus:border-[#1A1A1A] focus:bg-white focus:outline-hidden"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-mono font-semibold text-[#5A5A55] mb-1">
+                      Lookbook Page Title
+                    </label>
+                    <input
+                      type="text"
+                      value={customLabels.lookbookPageTitle}
+                      onChange={(e) => updateCustomLabel('lookbookPageTitle', e.target.value)}
+                      placeholder="Lookbook & Editorial Research Studio"
+                      className="w-full text-xs font-mono bg-[#FAF9F5] border border-[#CCCCCC] p-2 focus:border-[#1A1A1A] focus:bg-white focus:outline-hidden"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-mono font-semibold text-[#5A5A55] mb-1">
+                      Editorial Feed Page Title
+                    </label>
+                    <input
+                      type="text"
+                      value={customLabels.editorialPageTitle}
+                      onChange={(e) => updateCustomLabel('editorialPageTitle', e.target.value)}
+                      placeholder="Brand Editorials & Sartorial Dispatches"
+                      className="w-full text-xs font-mono bg-[#FAF9F5] border border-[#CCCCCC] p-2 focus:border-[#1A1A1A] focus:bg-white focus:outline-hidden"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-mono font-semibold text-[#5A5A55] mb-1">
+                      Tools & Utilities Page Title
+                    </label>
+                    <input
+                      type="text"
+                      value={customLabels.toolsPageTitle}
+                      onChange={(e) => updateCustomLabel('toolsPageTitle', e.target.value)}
+                      placeholder="Studio Tools & Utilities"
+                      className="w-full text-xs font-mono bg-[#FAF9F5] border border-[#CCCCCC] p-2 focus:border-[#1A1A1A] focus:bg-white focus:outline-hidden"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Section 4: Collection & Category Sections */}
+              <div className="border border-[#E5E5E1] p-4 space-y-3 bg-white">
+                <h4 className="text-xs font-mono font-bold uppercase tracking-wider text-[#1A1A1A] flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-[#1A1A1A]" />
+                  Collections &amp; Category Headers
+                </h4>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-mono font-semibold text-[#5A5A55] mb-1">
+                      Garment Categories &amp; Collections Header
+                    </label>
+                    <input
+                      type="text"
+                      value={customLabels.garmentCollectionsTitle}
+                      onChange={(e) => updateCustomLabel('garmentCollectionsTitle', e.target.value)}
+                      placeholder="Garment Categories & Collections"
+                      className="w-full text-xs font-mono bg-[#FAF9F5] border border-[#CCCCCC] p-2 focus:border-[#1A1A1A] focus:bg-white focus:outline-hidden"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-mono font-semibold text-[#5A5A55] mb-1">
+                      Homeware Categories &amp; Collections Header
+                    </label>
+                    <input
+                      type="text"
+                      value={customLabels.homewareCollectionsTitle}
+                      onChange={(e) => updateCustomLabel('homewareCollectionsTitle', e.target.value)}
+                      placeholder="Homeware Categories & Collections"
+                      className="w-full text-xs font-mono bg-[#FAF9F5] border border-[#CCCCCC] p-2 focus:border-[#1A1A1A] focus:bg-white focus:outline-hidden"
+                    />
+                  </div>
+                </div>
               </div>
             </div>
           )}

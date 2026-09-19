@@ -26,6 +26,7 @@ import { EDITORIAL_RESEARCH_IDEAS } from '../data/editorialInspirations';
 import { formatGbp } from '../utils/formatters';
 import { EmptyState } from './common/EmptyState';
 import { GoogleAiResearchStudio } from './GoogleAiResearchStudio';
+import { InlineEditableTitle } from './common/InlineEditableTitle';
 
 interface LookbookViewProps {
   onOpenCreateLook: () => void;
@@ -45,6 +46,8 @@ export const LookbookView: React.FC<LookbookViewProps> = ({
     toggleOutfitFavorite,
     deleteOutfit,
     addOutfit,
+    customLabels,
+    updateCustomLabel,
   } = useWardrobe();
 
   const [selectedOccasion, setSelectedOccasion] = useState<string>('All');
@@ -163,16 +166,27 @@ export const LookbookView: React.FC<LookbookViewProps> = ({
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white border border-[#E5E5E1] rounded-xl p-4 shadow-xs">
         <div>
           <div className="flex items-center gap-2">
-            <h1 className="text-xl font-serif font-bold text-[#1A1A1A]">
-              Lookbook &amp; Editorial Research Studio
-            </h1>
+            <InlineEditableTitle
+              value={customLabels.lookbookPageTitle || 'Lookbook & Editorial Research Studio'}
+              onSave={(val) => updateCustomLabel('lookbookPageTitle', val)}
+              as="h1"
+              className="text-xl font-serif font-bold text-[#1A1A1A]"
+              tooltip="Click or pencil to rename Lookbook title inline"
+            />
             <span className="text-[10px] font-mono px-2 py-0.5 bg-[#F8F7F4] text-[#8C7355] border border-[#E5E5E1] rounded font-semibold">
               Atelier Curated
             </span>
           </div>
-          <p className="text-xs text-[#767670] mt-0.5">
-            Photographic street-style research, web styling imports, and bespoke wardrobe formulas.
-          </p>
+          <InlineEditableTitle
+            value={
+              customLabels.lookbookPageSubtitle ||
+              'Photographic street-style research, web styling imports, and bespoke wardrobe formulas.'
+            }
+            onSave={(val) => updateCustomLabel('lookbookPageSubtitle', val)}
+            as="p"
+            className="text-xs text-[#767670] mt-0.5"
+            tooltip="Click or pencil to edit Lookbook subtitle inline"
+          />
         </div>
 
         <div className="flex flex-wrap items-center gap-2">

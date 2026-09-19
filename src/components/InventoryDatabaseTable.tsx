@@ -78,6 +78,11 @@ const CONDITIONS: Condition[] = [
   'Vintage / Well-Loved',
 ];
 
+const SEASONS: Season[] = ['All-Season', 'Spring', 'Summer', 'Autumn', 'Winter'];
+
+import { COLOR_HEX_MAP, getColorHex } from '../utils/colorUtils';
+export { COLOR_HEX_MAP, getColorHex };
+
 export const InventoryDatabaseTable: React.FC<InventoryDatabaseTableProps> = ({
   items,
   selectedItemIds,
@@ -107,6 +112,7 @@ export const InventoryDatabaseTable: React.FC<InventoryDatabaseTableProps> = ({
     startResize,
     resetColumnWidth,
     getWidth,
+    getCellStyle,
   } = useResizableColumns({
     storageKey: 'inventory_table_widths_v2',
     defaultWidths: DEFAULT_COLUMN_WIDTHS,
@@ -190,10 +196,15 @@ export const InventoryDatabaseTable: React.FC<InventoryDatabaseTableProps> = ({
       if (!isNaN(parsed) && parsed >= 0) {
         updateItem(itemId, { wearCount: parsed });
       }
-    } else if (field === 'name' || field === 'brand' || field === 'storageLocation') {
-      if (editingValue.trim()) {
-        updateItem(itemId, { [field]: editingValue.trim() });
-      }
+    } else if (field === 'color') {
+      const trimmed = editingValue.trim();
+      const detectedHex = getColorHex(trimmed);
+      updateItem(itemId, {
+        color: trimmed,
+        ...(detectedHex ? { colorHex: detectedHex } : {}),
+      });
+    } else {
+      updateItem(itemId, { [field]: editingValue.trim() });
     }
     setEditingFieldId(null);
   };
@@ -256,7 +267,7 @@ export const InventoryDatabaseTable: React.FC<InventoryDatabaseTableProps> = ({
         isResizing ? 'select-none' : ''
       }`}
     >
-      <table className={`w-full text-left border-collapse ${textSize} text-[#1A1A1A]`}>
+      <table className={`w-full min-w-full text-left border-collapse ${textSize} text-[#1A1A1A] table-fixed`}>
         {/* Resizable Table Header */}
         <thead
           className={`bg-[#F8F7F4] text-[#5A5A55] font-mono text-[10px] uppercase tracking-wider border-b border-[#E5E5E1] select-none ${
@@ -521,6 +532,7 @@ export const InventoryDatabaseTable: React.FC<InventoryDatabaseTableProps> = ({
             const isEditingRrp = editingFieldId === `${item.id}_rrp`;
             const isEditingWear = editingFieldId === `${item.id}_wearCount`;
             const isEditingLocation = editingFieldId === `${item.id}_storageLocation`;
+            const isEditingColor = editingFieldId === `${item.id}_color`;
             const isSelected = selectedItemIds.has(item.id);
 
             const rowBg = isSelected
@@ -533,8 +545,8 @@ export const InventoryDatabaseTable: React.FC<InventoryDatabaseTableProps> = ({
               <tr key={item.id} className={`${rowBg} transition-colors group/row`}>
                 {/* Multi-Select Checkbox */}
                 <td
-                  style={{ width: `${getWidth('select')}px` }}
-                  className={`${densityPadding} text-center`}
+                  style={getCellStyle('select')}
+                  className={`${densityPadding} text-center overflow-hidden`}
                   onClick={(e) => e.stopPropagation()}
                 >
                   <button
@@ -555,8 +567,8 @@ export const InventoryDatabaseTable: React.FC<InventoryDatabaseTableProps> = ({
                 {/* Garment Image Thumbnail */}
                 {tableSettings.showImage && (
                   <td
-                    style={{ width: `${getWidth('image')}px` }}
-                    className={`${densityPadding} text-center`}
+                    style={getCellStyle('image')}
+                    className={`${densityPadding} text-center overflow-hidden`}
                   >
                     <div
                       onClick={() => onSelectItem(item)}
@@ -577,11 +589,8 @@ export const InventoryDatabaseTable: React.FC<InventoryDatabaseTableProps> = ({
                 {/* Garment Name / Title (Inline Editable & Draggable width) */}
                 {tableSettings.showName && (
                   <td
-                    style={{
-                      width: `${getWidth('name')}px`,
-                      maxWidth: `${getWidth('name')}px`,
-                    }}
-                    className={`${densityPadding}`}
+                    style={getCellStyle('name')}
+                    className={`${densityPadding} overflow-hidden`}
                   >
                     {isEditingName ? (
                       <div className="flex items-center gap-1 w-full">
@@ -622,14 +631,17 @@ export const InventoryDatabaseTable: React.FC<InventoryDatabaseTableProps> = ({
                 {/* Category (Dropdown Switcher) */}
                 {tableSettings.showCategory && (
                   <td
-                    style={{ width: `${getWidth('category')}px` }}
-                    className={`${densityPadding}`}
+                    style={getCellStyle('category')}
+                    className={`${densityPadding} overflow-hidden`}
                   >
                     <select
                       value={item.category}
                       onChange={(e) => handleQuickCategoryChange(item.id, e.target.value)}
                       className="w-full bg-[#F8F7F4] border border-[#E5E5E1] text-[#1A1A1A] px-1.5 py-0.5 focus:outline-none focus:border-[#8C7355] cursor-pointer rounded-xs truncate font-mono text-[11px]"
                     >
+                      {item.category && !categories.includes(item.category) && (
+                        <option value={item.category}>{item.category}</option>
+                      )}
                       {categories.map((cat) => (
                         <option key={cat} value={cat}>
                           {cat}
@@ -642,11 +654,8 @@ export const InventoryDatabaseTable: React.FC<InventoryDatabaseTableProps> = ({
                 {/* Brand (Inline Editable) */}
                 {tableSettings.showBrand && (
                   <td
-                    style={{
-                      width: `${getWidth('brand')}px`,
-                      maxWidth: `${getWidth('brand')}px`,
-                    }}
-                    className={`${densityPadding}`}
+                    style={getCellStyle('brand')}
+                    className={`${densityPadding} overflow-hidden`}
                   >
                     {isEditingBrand ? (
                       <input
@@ -683,8 +692,8 @@ export const InventoryDatabaseTable: React.FC<InventoryDatabaseTableProps> = ({
                 {/* Purchase Price (£) (Inline Editable) */}
                 {tableSettings.showPrice && (
                   <td
-                    style={{ width: `${getWidth('price')}px` }}
-                    className={`${densityPadding}`}
+                    style={getCellStyle('price')}
+                    className={`${densityPadding} overflow-hidden`}
                   >
                     {isEditingPrice ? (
                       <div className="flex items-center gap-0.5 w-full">
@@ -722,8 +731,8 @@ export const InventoryDatabaseTable: React.FC<InventoryDatabaseTableProps> = ({
                 {/* RRP Retail Price (£) (Inline Editable) */}
                 {tableSettings.showRrp && (
                   <td
-                    style={{ width: `${getWidth('rrp')}px` }}
-                    className={`${densityPadding}`}
+                    style={getCellStyle('rrp')}
+                    className={`${densityPadding} overflow-hidden`}
                   >
                     {isEditingRrp ? (
                       <div className="flex items-center gap-0.5 w-full">
@@ -773,8 +782,8 @@ export const InventoryDatabaseTable: React.FC<InventoryDatabaseTableProps> = ({
                 {/* Wears & Quick Increment */}
                 {tableSettings.showWearCount && (
                   <td
-                    style={{ width: `${getWidth('wearCount')}px` }}
-                    className={`${densityPadding} font-mono`}
+                    style={getCellStyle('wearCount')}
+                    className={`${densityPadding} font-mono overflow-hidden`}
                   >
                     <div className="flex items-center gap-1">
                       {isEditingWear ? (
@@ -817,8 +826,8 @@ export const InventoryDatabaseTable: React.FC<InventoryDatabaseTableProps> = ({
                 {/* Condition */}
                 {tableSettings.showCondition && (
                   <td
-                    style={{ width: `${getWidth('condition')}px` }}
-                    className={`${densityPadding}`}
+                    style={getCellStyle('condition')}
+                    className={`${densityPadding} overflow-hidden`}
                   >
                     <select
                       value={item.condition}
@@ -839,41 +848,81 @@ export const InventoryDatabaseTable: React.FC<InventoryDatabaseTableProps> = ({
                 {/* Season */}
                 {tableSettings.showSeason && (
                   <td
-                    style={{ width: `${getWidth('season')}px` }}
-                    className={`${densityPadding} text-[11px] text-[#767670]`}
+                    style={getCellStyle('season')}
+                    className={`${densityPadding} overflow-hidden`}
                   >
-                    <span className={tableSettings.textWrap ? '' : 'truncate block'}>
-                      {Array.isArray(item.season) ? item.season.join(', ') : (item.season || 'All-Season')}
-                    </span>
+                    <select
+                      value={Array.isArray(item.season) ? item.season[0] : (item.season || 'All-Season')}
+                      onChange={(e) => {
+                        const val = e.target.value as Season;
+                        updateItem(item.id, { season: [val] });
+                      }}
+                      className="w-full bg-[#F8F7F4] border border-[#E5E5E1] text-[#1A1A1A] px-1 py-0.5 focus:outline-none focus:border-[#8C7355] cursor-pointer rounded-xs truncate text-[11px]"
+                      title="Change season inline"
+                    >
+                      {SEASONS.map((s) => (
+                        <option key={s} value={s}>
+                          {s}
+                        </option>
+                      ))}
+                    </select>
                   </td>
                 )}
 
-                {/* Color */}
+                {/* Color (Inline Editable) */}
                 {tableSettings.showColor && (
                   <td
-                    style={{ width: `${getWidth('color')}px` }}
-                    className={`${densityPadding} text-[11px] text-[#767670]`}
+                    style={getCellStyle('color')}
+                    className={`${densityPadding} overflow-hidden`}
                   >
-                    <div className="flex items-center gap-1.5 truncate">
-                      {item.colorHex && (
-                        <span
-                          className="w-2.5 h-2.5 rounded-full border border-black/10 shrink-0"
-                          style={{ backgroundColor: item.colorHex }}
-                        />
-                      )}
-                      <span className="truncate">{item.color}</span>
-                    </div>
+                    {isEditingColor ? (
+                      <input
+                        type="text"
+                        value={editingValue}
+                        onChange={(e) => setEditingValue(e.target.value)}
+                        onBlur={() => handleSaveInline(item.id, 'color')}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') handleSaveInline(item.id, 'color');
+                          if (e.key === 'Escape') setEditingFieldId(null);
+                        }}
+                        autoFocus
+                        placeholder="e.g. Navy, Black"
+                        className="w-full min-w-[90px] max-w-[200px] text-xs border border-[#8C7355] px-1.5 py-0.5 bg-white rounded-xs shadow-2xs focus:outline-none"
+                      />
+                    ) : (
+                      <div
+                        onClick={() => {
+                          setEditingFieldId(`${item.id}_color`);
+                          setEditingValue(item.color || '');
+                        }}
+                        className={`text-[11px] text-[#1A1A1A] hover:text-[#8C7355] cursor-pointer flex items-center justify-between gap-1 group/field ${
+                          tableSettings.textWrap ? 'whitespace-normal' : 'truncate'
+                        }`}
+                        title="Click to edit colour inline"
+                      >
+                        <div className="flex items-center gap-1.5 truncate">
+                          <span
+                            className="w-2.5 h-2.5 rounded-full border border-black/10 shrink-0"
+                            style={{
+                              backgroundColor:
+                                item.colorHex || getColorHex(item.color) || '#D5D5D0',
+                            }}
+                          />
+                          <span className="truncate">
+                            {item.color || <span className="text-[#A5A59E] italic">Add colour...</span>}
+                          </span>
+                        </div>
+                        <Pencil className="w-2.5 h-2.5 opacity-0 group-hover/field:opacity-60 shrink-0 text-[#8C7355]" />
+                      </div>
+                    )}
                   </td>
                 )}
 
                 {/* Storage Location */}
                 {tableSettings.showLocation && (
                   <td
-                    style={{
-                      width: `${getWidth('location')}px`,
-                      maxWidth: `${getWidth('location')}px`,
-                    }}
-                    className={`${densityPadding}`}
+                    style={getCellStyle('location')}
+                    className={`${densityPadding} overflow-hidden`}
                   >
                     {isEditingLocation ? (
                       <input
@@ -910,11 +959,8 @@ export const InventoryDatabaseTable: React.FC<InventoryDatabaseTableProps> = ({
                 {/* Tags with delete & quick add */}
                 {tableSettings.showTags && (
                   <td
-                    style={{
-                      width: `${getWidth('tags')}px`,
-                      maxWidth: `${getWidth('tags')}px`,
-                    }}
-                    className={`${densityPadding}`}
+                    style={getCellStyle('tags')}
+                    className={`${densityPadding} overflow-hidden`}
                   >
                     <div className="flex flex-wrap items-center gap-1">
                       {(Array.isArray(item.tags) ? item.tags : []).map((t) => (
@@ -968,11 +1014,8 @@ export const InventoryDatabaseTable: React.FC<InventoryDatabaseTableProps> = ({
                 {/* Provenance / Vinted Details */}
                 {tableSettings.showVintedDetails && (
                   <td
-                    style={{
-                      width: `${getWidth('vinted')}px`,
-                      maxWidth: `${getWidth('vinted')}px`,
-                    }}
-                    className={`${densityPadding} text-[11px] font-mono text-[#007782]`}
+                    style={getCellStyle('vinted')}
+                    className={`${densityPadding} text-[11px] font-mono text-[#007782] overflow-hidden`}
                   >
                     {item.vintedUrl ? (
                       <a
@@ -998,8 +1041,8 @@ export const InventoryDatabaseTable: React.FC<InventoryDatabaseTableProps> = ({
                 {/* Actions */}
                 {tableSettings.showActions && (
                   <td
-                    style={{ width: `${getWidth('actions')}px` }}
-                    className={`${densityPadding} text-right`}
+                    style={getCellStyle('actions')}
+                    className={`${densityPadding} text-right overflow-hidden`}
                   >
                     <div className="flex items-center justify-end gap-1">
                       {onSellItem && tableSettings.showResaleOption !== false && (

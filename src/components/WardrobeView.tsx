@@ -27,17 +27,20 @@ import {
   CheckCircle,
   Ban,
   Shirt,
+  Pencil,
+  Package,
 } from 'lucide-react';
 import { useWardrobe } from '../context/WardrobeContext';
-import { WardrobeItem, Category, Season, Condition } from '../types';
+import { WardrobeItem, Category, Season, Condition, isHomewareCategory } from '../types';
 import { safeConfirm } from '../utils/safeConfirm';
 import { AutoImportModal } from './AutoImportModal';
 import { GarmentImage } from './GarmentImage';
 import { BulkEditModal } from './BulkEditModal';
 import { DuplicateMergeModal } from './DuplicateMergeModal';
-import { InventoryDatabaseTable } from './InventoryDatabaseTable';
+import { InventoryDatabaseTable, getColorHex } from './InventoryDatabaseTable';
 import { BulkActionBar } from './common/BulkActionBar';
 import { EmptyState } from './common/EmptyState';
+import { InlineEditableTitle } from './common/InlineEditableTitle';
 import { formatGbp } from '../utils/formatters';
 import {
   InventoryDisplaySettings,
@@ -70,14 +73,26 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
     searchQuery,
     setSearchQuery,
     categories,
+    garmentCategories,
+    homewareCategories,
     addCategory,
     updateCategory,
     deleteCategory,
     resetCategories,
+    addGarmentCategory,
+    updateGarmentCategory,
+    deleteGarmentCategory,
+    resetGarmentCategories,
+    addHomewareCategory,
+    updateHomewareCategory,
+    deleteHomewareCategory,
+    resetHomewareCategories,
     moveWardrobeItemToSales,
     moveWardrobeItemToShopping,
     moveMultipleWardrobeItems,
     formatCurrency,
+    customLabels,
+    updateCustomLabel,
   } = useWardrobe();
 
   // Load Inventory Display Settings from LocalStorage
@@ -163,11 +178,175 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
     return 'All';
   });
 
-  const handleSetSelectedCategory = (cat: string | 'All') => {
-    setSelectedCategory(cat);
+  // Independent Garment & Homeware Filter States
+  const [selectedGarmentCategory, setSelectedGarmentCategory] = useState<string | 'All'>(() => {
     try {
-      localStorage.setItem('inventory_selected_category', cat);
+      return localStorage.getItem('inventory_selected_garment_category') || 'All';
     } catch (e) {}
+    return 'All';
+  });
+
+  const [selectedGarmentTag, setSelectedGarmentTag] = useState<string | 'All'>(() => {
+    try {
+      return localStorage.getItem('inventory_selected_garment_tag') || 'All';
+    } catch (e) {}
+    return 'All';
+  });
+
+  const [selectedHomewareCategory, setSelectedHomewareCategory] = useState<string | 'All'>(() => {
+    try {
+      return localStorage.getItem('inventory_selected_homeware_category') || 'All';
+    } catch (e) {}
+    return 'All';
+  });
+
+  const [selectedHomewareTag, setSelectedHomewareTag] = useState<string | 'All'>(() => {
+    try {
+      return localStorage.getItem('inventory_selected_homeware_tag') || 'All';
+    } catch (e) {}
+    return 'All';
+  });
+
+  const [categoryFilterScope, setCategoryFilterScope] = useState<'all' | 'garments' | 'homeware'>(() => {
+    try {
+      return (localStorage.getItem('inventory_category_filter_scope') as any) || 'all';
+    } catch (e) {}
+    return 'all';
+  });
+
+  const handleSelectGarmentCategory = (cat: string | 'All' | '__ALL_GARMENTS__') => {
+    if (cat === 'All' || (categoryFilterScope === 'garments' && selectedGarmentCategory === cat)) {
+      setCategoryFilterScope('all');
+      setSelectedGarmentCategory('All');
+      try {
+        localStorage.setItem('inventory_category_filter_scope', 'all');
+        localStorage.setItem('inventory_selected_garment_category', 'All');
+      } catch (e) {}
+      return;
+    }
+    setCategoryFilterScope('garments');
+    setSelectedGarmentCategory(cat);
+    setSelectedHomewareCategory('All');
+    setSelectedHomewareTag('All');
+    setSelectedCategory('All');
+    try {
+      localStorage.setItem('inventory_category_filter_scope', 'garments');
+      localStorage.setItem('inventory_selected_garment_category', cat);
+      localStorage.setItem('inventory_selected_homeware_category', 'All');
+      localStorage.setItem('inventory_selected_homeware_tag', 'All');
+      localStorage.setItem('inventory_selected_category', 'All');
+    } catch (e) {}
+  };
+
+  const handleSelectGarmentTag = (tag: string | 'All') => {
+    if (tag === 'All' || (categoryFilterScope === 'garments' && selectedGarmentTag === tag)) {
+      setSelectedGarmentTag('All');
+      if (selectedGarmentCategory === 'All') {
+        setCategoryFilterScope('all');
+        try {
+          localStorage.setItem('inventory_category_filter_scope', 'all');
+        } catch (e) {}
+      }
+      try {
+        localStorage.setItem('inventory_selected_garment_tag', 'All');
+      } catch (e) {}
+      return;
+    }
+    setCategoryFilterScope('garments');
+    setSelectedGarmentTag(tag);
+    setSelectedHomewareCategory('All');
+    setSelectedHomewareTag('All');
+    setSelectedTag('All');
+    try {
+      localStorage.setItem('inventory_category_filter_scope', 'garments');
+      localStorage.setItem('inventory_selected_garment_tag', tag);
+      localStorage.setItem('inventory_selected_homeware_category', 'All');
+      localStorage.setItem('inventory_selected_homeware_tag', 'All');
+      localStorage.setItem('inventory_selected_tag', 'All');
+    } catch (e) {}
+  };
+
+  const handleSelectHomewareCategory = (cat: string | 'All' | '__ALL_HOMEWARE__') => {
+    if (cat === 'All' || (categoryFilterScope === 'homeware' && selectedHomewareCategory === cat)) {
+      setCategoryFilterScope('all');
+      setSelectedHomewareCategory('All');
+      try {
+        localStorage.setItem('inventory_category_filter_scope', 'all');
+        localStorage.setItem('inventory_selected_homeware_category', 'All');
+      } catch (e) {}
+      return;
+    }
+    setCategoryFilterScope('homeware');
+    setSelectedHomewareCategory(cat);
+    setSelectedGarmentCategory('All');
+    setSelectedGarmentTag('All');
+    setSelectedCategory('All');
+    try {
+      localStorage.setItem('inventory_category_filter_scope', 'homeware');
+      localStorage.setItem('inventory_selected_homeware_category', cat);
+      localStorage.setItem('inventory_selected_garment_category', 'All');
+      localStorage.setItem('inventory_selected_garment_tag', 'All');
+      localStorage.setItem('inventory_selected_category', 'All');
+    } catch (e) {}
+  };
+
+  const handleSelectHomewareTag = (tag: string | 'All') => {
+    if (tag === 'All' || (categoryFilterScope === 'homeware' && selectedHomewareTag === tag)) {
+      setSelectedHomewareTag('All');
+      if (selectedHomewareCategory === 'All') {
+        setCategoryFilterScope('all');
+        try {
+          localStorage.setItem('inventory_category_filter_scope', 'all');
+        } catch (e) {}
+      }
+      try {
+        localStorage.setItem('inventory_selected_homeware_tag', 'All');
+      } catch (e) {}
+      return;
+    }
+    setCategoryFilterScope('homeware');
+    setSelectedHomewareTag(tag);
+    setSelectedGarmentCategory('All');
+    setSelectedGarmentTag('All');
+    setSelectedTag('All');
+    try {
+      localStorage.setItem('inventory_category_filter_scope', 'homeware');
+      localStorage.setItem('inventory_selected_homeware_tag', tag);
+      localStorage.setItem('inventory_selected_garment_category', 'All');
+      localStorage.setItem('inventory_selected_garment_tag', 'All');
+      localStorage.setItem('inventory_selected_tag', 'All');
+    } catch (e) {}
+  };
+
+  const handleClearAllCategoryFilters = () => {
+    setCategoryFilterScope('all');
+    setSelectedGarmentCategory('All');
+    setSelectedGarmentTag('All');
+    setSelectedHomewareCategory('All');
+    setSelectedHomewareTag('All');
+    setSelectedCategory('All');
+    setSelectedTag('All');
+    try {
+      localStorage.setItem('inventory_category_filter_scope', 'all');
+      localStorage.setItem('inventory_selected_garment_category', 'All');
+      localStorage.setItem('inventory_selected_garment_tag', 'All');
+      localStorage.setItem('inventory_selected_homeware_category', 'All');
+      localStorage.setItem('inventory_selected_homeware_tag', 'All');
+      localStorage.setItem('inventory_selected_category', 'All');
+      localStorage.setItem('inventory_selected_tag', 'All');
+    } catch (e) {}
+  };
+
+  const handleSetSelectedCategory = (cat: string | 'All') => {
+    if (cat === 'All') {
+      handleClearAllCategoryFilters();
+      return;
+    }
+    if (isHomewareCategory(cat)) {
+      handleSelectHomewareCategory(cat);
+    } else {
+      handleSelectGarmentCategory(cat);
+    }
   };
 
   const [selectedBrand, setSelectedBrand] = useState<string | 'All'>(() => {
@@ -272,11 +451,23 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
   const [isBulkEditOpen, setIsBulkEditOpen] = useState(false);
   const [isDuplicateMergeOpen, setIsDuplicateMergeOpen] = useState(false);
 
-  // Category management state
+  // Category management state (Legacy fallback + Independent Garment & Homeware)
   const [isAddingCategory, setIsAddingCategory] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
   const [editingCategoryName, setEditingCategoryName] = useState<string | null>(null);
   const [editingCategoryValue, setEditingCategoryValue] = useState('');
+
+  // Garment Category Management State
+  const [isAddingGarmentCategory, setIsAddingGarmentCategory] = useState(false);
+  const [newGarmentCategoryName, setNewGarmentCategoryName] = useState('');
+  const [editingGarmentCategoryName, setEditingGarmentCategoryName] = useState<string | null>(null);
+  const [editingGarmentCategoryValue, setEditingGarmentCategoryValue] = useState('');
+
+  // Homeware Category Management State
+  const [isAddingHomewareCategory, setIsAddingHomewareCategory] = useState(false);
+  const [newHomewareCategoryName, setNewHomewareCategoryName] = useState('');
+  const [editingHomewareCategoryName, setEditingHomewareCategoryName] = useState<string | null>(null);
+  const [editingHomewareCategoryValue, setEditingHomewareCategoryValue] = useState('');
 
   // Auto-Import Modal State
   const [isAutoImportOpen, setIsAutoImportOpen] = useState(false);
@@ -323,7 +514,52 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
       .map(([tag, count]) => ({ tag, count }));
   }, [items]);
 
+  // Unique Tags specifically for Garment pieces
+  const uniqueGarmentTags = useMemo(() => {
+    const counts: Record<string, number> = {};
+    items.forEach((it) => {
+      if (!it.isArchived && !isHomewareCategory(it.category) && Array.isArray(it.tags)) {
+        it.tags.forEach((t) => {
+          const clean = t.trim();
+          if (clean) {
+            counts[clean] = (counts[clean] || 0) + 1;
+          }
+        });
+      }
+    });
+    return Object.entries(counts)
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .map(([tag, count]) => ({ tag, count }));
+  }, [items]);
+
+  // Unique Tags specifically for Homeware pieces
+  const uniqueHomewareTags = useMemo(() => {
+    const counts: Record<string, number> = {};
+    items.forEach((it) => {
+      if (!it.isArchived && isHomewareCategory(it.category) && Array.isArray(it.tags)) {
+        it.tags.forEach((t) => {
+          const clean = t.trim();
+          if (clean) {
+            counts[clean] = (counts[clean] || 0) + 1;
+          }
+        });
+      }
+    });
+    return Object.entries(counts)
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .map(([tag, count]) => ({ tag, count }));
+  }, [items]);
+
   // Pipeline Counts (All, Closet, Purchased, Sold, Cancelled)
+  const garmentItemsCount = useMemo(
+    () => items.filter((it) => !it.isArchived && !isHomewareCategory(it.category)).length,
+    [items]
+  );
+  const homewareItemsCount = useMemo(
+    () => items.filter((it) => !it.isArchived && isHomewareCategory(it.category)).length,
+    [items]
+  );
+
   const pipelineStats = useMemo(() => {
     let closet = 0;
     let purchased = 0;
@@ -418,18 +654,53 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
           if (pipelineTab === 'Cancelled' && !isCancelled) return false;
         }
 
-        // Tag Filter
-        if (selectedTag !== 'All') {
-          if (!item.tags || !item.tags.some((t) => t.toLowerCase() === selectedTag.toLowerCase())) {
+        // Independent Category & Tag Filtering System (Garments vs Homeware)
+        if (categoryFilterScope === 'garments') {
+          if (isHomewareCategory(item.category)) return false;
+          if (
+            selectedGarmentCategory !== 'All' &&
+            selectedGarmentCategory !== '__ALL_GARMENTS__' &&
+            (item.category || '').trim().toLowerCase() !== selectedGarmentCategory.trim().toLowerCase()
+          ) {
             return false;
           }
-        }
-
-        if (
-          selectedCategory !== 'All' &&
-          (item.category || '').trim().toLowerCase() !== selectedCategory.trim().toLowerCase()
-        ) {
-          return false;
+          if (selectedGarmentTag !== 'All') {
+            if (!item.tags || !item.tags.some((t) => t.toLowerCase() === selectedGarmentTag.toLowerCase())) {
+              return false;
+            }
+          }
+        } else if (categoryFilterScope === 'homeware') {
+          if (!isHomewareCategory(item.category)) return false;
+          if (
+            selectedHomewareCategory !== 'All' &&
+            selectedHomewareCategory !== '__ALL_HOMEWARE__' &&
+            (item.category || '').trim().toLowerCase() !== selectedHomewareCategory.trim().toLowerCase()
+          ) {
+            return false;
+          }
+          if (selectedHomewareTag !== 'All') {
+            if (!item.tags || !item.tags.some((t) => t.toLowerCase() === selectedHomewareTag.toLowerCase())) {
+              return false;
+            }
+          }
+        } else {
+          // Both are 'All', all inventory pieces are allowed
+          // Optional backward compatible legacy filter check
+          if (selectedCategory === '__GARMENTS__') {
+            if (isHomewareCategory(item.category)) return false;
+          } else if (selectedCategory === '__HOMEWARE__') {
+            if (!isHomewareCategory(item.category)) return false;
+          } else if (
+            selectedCategory !== 'All' &&
+            (item.category || '').trim().toLowerCase() !== selectedCategory.trim().toLowerCase()
+          ) {
+            return false;
+          }
+          if (selectedTag !== 'All') {
+            if (!item.tags || !item.tags.some((t) => t.toLowerCase() === selectedTag.toLowerCase())) {
+              return false;
+            }
+          }
         }
         if (selectedBrand !== 'All' && item.brand !== selectedBrand) return false;
         if (selectedSeason !== 'All') {
@@ -503,7 +774,23 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
             return 0;
         }
       });
-  }, [items, pipelineTab, selectedTag, selectedCategory, selectedBrand, selectedSeason, selectedCondition, favoritesOnly, searchQuery, sortBy]);
+  }, [
+    items,
+    pipelineTab,
+    categoryFilterScope,
+    selectedGarmentCategory,
+    selectedGarmentTag,
+    selectedHomewareCategory,
+    selectedHomewareTag,
+    selectedTag,
+    selectedCategory,
+    selectedBrand,
+    selectedSeason,
+    selectedCondition,
+    favoritesOnly,
+    searchQuery,
+    sortBy,
+  ]);
 
   const filteredTotalValue = filteredItems.reduce((acc, item) => acc + item.purchasePrice, 0);
   const filteredTotalRrp = filteredItems.reduce((acc, item) => acc + (item.rrp || 0), 0);
@@ -531,6 +818,14 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
       parsedVal = !isNaN(p) && p >= 0 ? p : undefined;
     } else if (field === 'wearCount') {
       parsedVal = Math.max(0, parseInt(editingValue) || 0);
+    } else if (field === 'color') {
+      const detectedHex = getColorHex(parsedVal);
+      updateItem(itemId, {
+        color: parsedVal,
+        ...(detectedHex ? { colorHex: detectedHex } : {}),
+      });
+      setEditingFieldId(null);
+      return;
     }
 
     updateItem(itemId, { [field]: parsedVal });
@@ -598,6 +893,66 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
     deleteCategory(catToDelete);
     if (selectedCategory === catToDelete) {
       setSelectedCategory('All');
+    }
+  };
+
+  // Garment Category Actions
+  const handleAddNewGarmentCategory = () => {
+    if (!newGarmentCategoryName.trim()) {
+      setIsAddingGarmentCategory(false);
+      return;
+    }
+    addGarmentCategory(newGarmentCategoryName.trim());
+    setNewGarmentCategoryName('');
+    setIsAddingGarmentCategory(false);
+  };
+
+  const handleSaveGarmentCategoryRename = (oldName: string) => {
+    if (!editingGarmentCategoryValue.trim() || editingGarmentCategoryValue.trim() === oldName) {
+      setEditingGarmentCategoryName(null);
+      return;
+    }
+    updateGarmentCategory(oldName, editingGarmentCategoryValue.trim());
+    if (selectedGarmentCategory === oldName) {
+      setSelectedGarmentCategory(editingGarmentCategoryValue.trim());
+    }
+    setEditingGarmentCategoryName(null);
+  };
+
+  const handleDeleteGarmentCategoryPrompt = (catToDelete: string) => {
+    deleteGarmentCategory(catToDelete);
+    if (selectedGarmentCategory === catToDelete) {
+      setSelectedGarmentCategory('All');
+    }
+  };
+
+  // Homeware Category Actions
+  const handleAddNewHomewareCategory = () => {
+    if (!newHomewareCategoryName.trim()) {
+      setIsAddingHomewareCategory(false);
+      return;
+    }
+    addHomewareCategory(newHomewareCategoryName.trim());
+    setNewHomewareCategoryName('');
+    setIsAddingHomewareCategory(false);
+  };
+
+  const handleSaveHomewareCategoryRename = (oldName: string) => {
+    if (!editingHomewareCategoryValue.trim() || editingHomewareCategoryValue.trim() === oldName) {
+      setEditingHomewareCategoryName(null);
+      return;
+    }
+    updateHomewareCategory(oldName, editingHomewareCategoryValue.trim());
+    if (selectedHomewareCategory === oldName) {
+      setSelectedHomewareCategory(editingHomewareCategoryValue.trim());
+    }
+    setEditingHomewareCategoryName(null);
+  };
+
+  const handleDeleteHomewareCategoryPrompt = (catToDelete: string) => {
+    deleteHomewareCategory(catToDelete);
+    if (selectedHomewareCategory === catToDelete) {
+      setSelectedHomewareCategory('All');
     }
   };
 
@@ -681,7 +1036,13 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
             <div className="flex items-center gap-2">
-              <h1 className="text-xl font-serif font-bold text-[#1A1A1A]">Inventory Studio</h1>
+              <InlineEditableTitle
+                value={customLabels.wardrobePageTitle || 'Inventory Studio'}
+                onSave={(val) => updateCustomLabel('wardrobePageTitle', val)}
+                as="h1"
+                className="text-xl font-serif font-bold text-[#1A1A1A]"
+                tooltip="Click or pencil to rename Inventory Studio inline"
+              />
               <span className="font-mono text-xs px-2 py-0.5 bg-[#F2F1ED] border border-[#E5E5E1] text-[#5A5A55]">
                 {items.length} garments total
               </span>
@@ -916,239 +1277,506 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
         </div>
       </div>
 
-      {/* Category Manager & Filter Bar */}
+      {/* Category Managers & Filter Bars (Garments & Homeware Duplicated Sections) */}
       {displaySettings.showCategoryTabs && (
-        <div className="bg-white border border-[#E5E5E1] p-3 space-y-2.5 shadow-xs">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Tag className="w-3.5 h-3.5 text-[#8C7355]" />
-              <span className="text-xs font-mono font-bold text-[#1A1A1A] uppercase tracking-wider">
-                Garment Categories
-              </span>
-              <span className="text-[10px] font-mono text-[#767670]">
-                ({categories.length} active)
-              </span>
-            </div>
-
-            <div className="flex items-center gap-3">
-              {selectedCategory !== 'All' && (
-                <button
-                  type="button"
-                  onClick={() => handleSetSelectedCategory('All')}
-                  className="text-[10px] font-mono text-[#8C7355] hover:text-[#1A1A1A] hover:underline cursor-pointer flex items-center gap-1"
-                >
-                  <X className="w-3 h-3" />
-                  Clear category ({selectedCategory})
-                </button>
-              )}
-              {selectedTag !== 'All' && (
-                <button
-                  type="button"
-                  onClick={() => handleSetSelectedTag('All')}
-                  className="text-[10px] font-mono text-[#1A1A1A] hover:text-rose-600 hover:underline cursor-pointer flex items-center gap-1"
-                >
-                  <X className="w-3 h-3" />
-                  Clear tag (#{selectedTag})
-                </button>
-              )}
-
-              {!isAddingCategory ? (
-                <button
-                  onClick={() => setIsAddingCategory(true)}
-                  className="flex items-center gap-1 px-2.5 py-1 text-xs font-mono font-medium text-[#8C7355] bg-[#F8F7F4] hover:bg-[#EAE8E3] border border-[#E5E5E1] transition-colors cursor-pointer"
-                >
-                  <Plus className="w-3 h-3" />
-                  Add Category
-                </button>
-              ) : (
-                <div className="flex items-center gap-1">
-                  <input
-                    type="text"
-                    placeholder="New category name..."
-                    value={newCategoryName}
-                    onChange={(e) => setNewCategoryName(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') handleAddNewCategory();
-                      if (e.key === 'Escape') setIsAddingCategory(false);
-                    }}
-                    autoFocus
-                    className="px-2 py-1 text-xs bg-white border border-[#8C7355] text-[#1A1A1A] font-mono focus:outline-none w-36"
-                  />
-                  <button
-                    onClick={handleAddNewCategory}
-                    className="p-1 bg-[#8C7355] text-white hover:bg-[#786248] cursor-pointer"
-                    title="Save category"
-                  >
-                    <Check className="w-3 h-3" />
-                  </button>
-                  <button
-                    onClick={() => setIsAddingCategory(false)}
-                    className="p-1 text-[#767670] hover:text-[#1A1A1A] cursor-pointer"
-                    title="Cancel"
-                  >
-                    <X className="w-3 h-3" />
-                  </button>
-                </div>
-              )}
-
+        <div className="space-y-3">
+          {/* Active Category Filter Global Banner (if filtered) */}
+          {categoryFilterScope !== 'all' && (
+            <div className="bg-[#FAF9F6] border border-[#8C7355]/30 px-3 py-1.5 flex items-center justify-between shadow-xs">
+              <div className="flex items-center gap-2 text-xs font-mono text-[#5A5A55]">
+                <span className="font-bold text-[#1A1A1A]">Active Filter:</span>
+                {categoryFilterScope === 'garments' ? (
+                  <span>
+                    Apparel &amp; Garments &rarr; {selectedGarmentCategory === 'All' ? 'All Garments' : selectedGarmentCategory}
+                    {selectedGarmentTag !== 'All' ? ` (#${selectedGarmentTag})` : ''}
+                  </span>
+                ) : (
+                  <span>
+                    Homeware &amp; Lifestyle &rarr; {selectedHomewareCategory === 'All' ? 'All Homeware' : selectedHomewareCategory}
+                    {selectedHomewareTag !== 'All' ? ` (#${selectedHomewareTag})` : ''}
+                  </span>
+                )}
+              </div>
               <button
-                onClick={() => {
-                  if (safeConfirm('Reset categories to standard wardrobe defaults?')) {
-                    resetCategories();
-                  }
-                }}
-                className="text-[10px] font-mono text-[#A5A59E] hover:text-[#5A5A55] hover:underline cursor-pointer"
-                title="Reset to default 8 categories"
+                type="button"
+                onClick={handleClearAllCategoryFilters}
+                className="text-xs font-mono text-[#8C7355] hover:text-[#1A1A1A] hover:underline cursor-pointer flex items-center gap-1 font-semibold"
               >
-                Reset Defaults
+                <X className="w-3.5 h-3.5" />
+                View All Pieces ({items.length})
               </button>
             </div>
-          </div>
+          )}
 
-          {/* Dynamic Category Chips with Inline Rename & (x) Deletion */}
-          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-1">
-            {/* All Garments Pill */}
-            <button
-              onClick={() => handleSetSelectedCategory('All')}
-              className={`px-2.5 py-1 text-xs border transition-all cursor-pointer whitespace-nowrap font-mono ${
-                selectedCategory === 'All'
-                  ? 'bg-[#8C7355] text-white border-[#8C7355] font-semibold shadow-xs'
-                  : 'bg-[#F8F7F4] text-[#4A4A45] hover:bg-[#EAE8E3] border-[#E5E5E1]'
-              }`}
-            >
-              All Pieces ({items.length})
-            </button>
+          {/* 1. Garment Categories & Collections */}
+          <div className={`bg-white border p-3 space-y-2.5 shadow-xs transition-colors ${
+            categoryFilterScope === 'garments' ? 'border-[#8C7355]' : 'border-[#E5E5E1]'
+          }`}>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Shirt className="w-3.5 h-3.5 text-[#8C7355]" />
+                <InlineEditableTitle
+                  value={customLabels.garmentCollectionsTitle || 'Garment Categories & Collections'}
+                  onSave={(val) => updateCustomLabel('garmentCollectionsTitle', val)}
+                  as="span"
+                  className="text-xs font-mono font-bold text-[#1A1A1A] uppercase tracking-wider"
+                  tooltip="Click or pencil to rename Garment Categories & Collections section"
+                />
+                <span className="text-[10px] font-mono text-[#767670]">
+                  ({garmentCategories.length} active)
+                </span>
+                {categoryFilterScope === 'garments' && (
+                  <span className="text-[10px] font-mono px-1.5 py-0.2 bg-[#8C7355]/10 text-[#8C7355] font-semibold">
+                    ACTIVE FILTER
+                  </span>
+                )}
+              </div>
 
-            {/* Dynamic Categories */}
-            {categories.map((cat) => {
-              const isSelected = selectedCategory === cat;
-              const count = items.filter((i) => i.category === cat).length;
-              const isEditing = editingCategoryName === cat;
-
-              if (isEditing) {
-                return (
-                  <div
-                    key={cat}
-                    className="flex items-center gap-1 px-1.5 py-0.5 bg-white border border-[#8C7355] shadow-xs"
+              <div className="flex items-center gap-3">
+                {categoryFilterScope === 'garments' && (selectedGarmentCategory !== 'All' || selectedGarmentTag !== 'All') && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedGarmentCategory('All');
+                      setSelectedGarmentTag('All');
+                      setCategoryFilterScope('all');
+                    }}
+                    className="text-[10px] font-mono text-[#8C7355] hover:text-[#1A1A1A] hover:underline cursor-pointer flex items-center gap-1"
                   >
+                    <X className="w-3 h-3" />
+                    Clear garment filter ({selectedGarmentCategory !== 'All' ? selectedGarmentCategory : `#${selectedGarmentTag}`})
+                  </button>
+                )}
+
+                {!isAddingGarmentCategory ? (
+                  <button
+                    onClick={() => setIsAddingGarmentCategory(true)}
+                    className="flex items-center gap-1 px-2.5 py-1 text-xs font-mono font-medium text-[#8C7355] bg-[#F8F7F4] hover:bg-[#EAE8E3] border border-[#E5E5E1] transition-colors cursor-pointer"
+                  >
+                    <Plus className="w-3 h-3" />
+                    Add Category
+                  </button>
+                ) : (
+                  <div className="flex items-center gap-1">
                     <input
                       type="text"
-                      value={editingCategoryValue}
-                      onChange={(e) => setEditingCategoryValue(e.target.value)}
+                      placeholder="New garment category..."
+                      value={newGarmentCategoryName}
+                      onChange={(e) => setNewGarmentCategoryName(e.target.value)}
                       onKeyDown={(e) => {
-                        if (e.key === 'Enter') handleSaveCategoryRename(cat);
-                        if (e.key === 'Escape') setEditingCategoryName(null);
+                        if (e.key === 'Enter') handleAddNewGarmentCategory();
+                        if (e.key === 'Escape') setIsAddingGarmentCategory(false);
                       }}
-                      onBlur={() => handleSaveCategoryRename(cat)}
                       autoFocus
-                      className="text-xs font-mono text-[#1A1A1A] bg-transparent focus:outline-none w-24"
+                      className="px-2 py-1 text-xs bg-white border border-[#8C7355] text-[#1A1A1A] font-mono focus:outline-none w-40"
                     />
                     <button
-                      onClick={() => handleSaveCategoryRename(cat)}
-                      className="text-emerald-700 hover:text-emerald-900 cursor-pointer"
+                      onClick={handleAddNewGarmentCategory}
+                      className="p-1 bg-[#8C7355] text-white hover:bg-[#786248] cursor-pointer"
+                      title="Save garment category"
                     >
                       <Check className="w-3 h-3" />
                     </button>
                     <button
-                      onClick={() => setEditingCategoryName(null)}
-                      className="text-rose-600 hover:text-rose-800 cursor-pointer"
+                      onClick={() => setIsAddingGarmentCategory(false)}
+                      className="p-1 text-[#767670] hover:text-[#1A1A1A] cursor-pointer"
+                      title="Cancel"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                )}
+
+                <button
+                  onClick={() => {
+                    if (safeConfirm('Reset garment categories to standard wardrobe defaults?')) {
+                      resetGarmentCategories();
+                    }
+                  }}
+                  className="text-[10px] font-mono text-[#A5A59E] hover:text-[#5A5A55] hover:underline cursor-pointer"
+                  title="Reset to default 8 garment categories"
+                >
+                  Reset Defaults
+                </button>
+              </div>
+            </div>
+
+            {/* Garment Category Chips */}
+            <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-1">
+              <button
+                onClick={() => handleSelectGarmentCategory('All')}
+                className={`px-2.5 py-1 text-xs border transition-all cursor-pointer whitespace-nowrap font-mono ${
+                  categoryFilterScope === 'garments' && selectedGarmentCategory === 'All'
+                    ? 'bg-[#1A1A1A] text-white border-[#1A1A1A] font-semibold shadow-xs'
+                    : 'bg-[#F8F7F4] text-[#4A4A45] hover:bg-[#EAE8E3] border-[#E5E5E1]'
+                }`}
+              >
+                All Garments ({garmentItemsCount})
+              </button>
+
+              {garmentCategories.map((cat) => {
+                const isSelected = categoryFilterScope === 'garments' && selectedGarmentCategory === cat;
+                const count = items.filter((i) => !i.isArchived && i.category === cat).length;
+                const isEditing = editingGarmentCategoryName === cat;
+
+                if (isEditing) {
+                  return (
+                    <div
+                      key={cat}
+                      className="flex items-center gap-1 px-1.5 py-0.5 bg-white border border-[#8C7355] shadow-xs"
+                    >
+                      <input
+                        type="text"
+                        value={editingGarmentCategoryValue}
+                        onChange={(e) => setEditingGarmentCategoryValue(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') handleSaveGarmentCategoryRename(cat);
+                          if (e.key === 'Escape') setEditingGarmentCategoryName(null);
+                        }}
+                        onBlur={() => handleSaveGarmentCategoryRename(cat)}
+                        autoFocus
+                        className="text-xs font-mono text-[#1A1A1A] bg-transparent focus:outline-none w-24"
+                      />
+                      <button
+                        onClick={() => handleSaveGarmentCategoryRename(cat)}
+                        className="text-emerald-700 hover:text-emerald-900 cursor-pointer"
+                      >
+                        <Check className="w-3 h-3" />
+                      </button>
+                      <button
+                        onClick={() => setEditingGarmentCategoryName(null)}
+                        className="text-rose-600 hover:text-rose-800 cursor-pointer"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  );
+                }
+
+                return (
+                  <div
+                    key={cat}
+                    className={`group inline-flex items-center gap-1 px-2.5 py-1 text-xs border transition-all whitespace-nowrap font-mono ${
+                      isSelected
+                        ? 'bg-[#8C7355] text-white border-[#8C7355] font-semibold shadow-xs'
+                        : 'bg-[#F8F7F4] text-[#4A4A45] hover:bg-[#EAE8E3] border-[#E5E5E1]'
+                    }`}
+                  >
+                    <span
+                      onClick={() => handleSelectGarmentCategory(cat)}
+                      className="cursor-pointer hover:underline"
+                      title={`Filter by garment category ${cat}`}
+                    >
+                      {cat} ({count})
+                    </span>
+
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setEditingGarmentCategoryName(cat);
+                        setEditingGarmentCategoryValue(cat);
+                      }}
+                      className={`p-0.5 opacity-60 hover:opacity-100 cursor-pointer ${
+                        isSelected ? 'text-white hover:text-amber-200' : 'text-[#767670] hover:text-[#1A1A1A]'
+                      }`}
+                      title={`Rename garment category "${cat}"`}
+                    >
+                      <Edit2 className="w-2.5 h-2.5" />
+                    </button>
+
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeleteGarmentCategoryPrompt(cat);
+                      }}
+                      className={`p-0.5 opacity-60 hover:opacity-100 cursor-pointer ${
+                        isSelected ? 'text-white hover:text-rose-200' : 'text-[#767670] hover:text-rose-600'
+                      }`}
+                      title={`Delete category "${cat}" (✕)`}
                     >
                       <X className="w-3 h-3" />
                     </button>
                   </div>
                 );
-              }
+              })}
+            </div>
 
-              return (
-                <div
-                  key={cat}
-                  className={`group inline-flex items-center gap-1 px-2.5 py-1 text-xs border transition-all whitespace-nowrap font-mono ${
-                    isSelected
-                      ? 'bg-[#8C7355] text-white border-[#8C7355] font-semibold shadow-xs'
-                      : 'bg-[#F8F7F4] text-[#4A4A45] hover:bg-[#EAE8E3] border-[#E5E5E1]'
+            {/* Garment Tags Filter Strip */}
+            {uniqueGarmentTags.length > 0 && (
+              <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pt-2 border-t border-[#E5E5E1]/70 text-xs">
+                <span className="text-[10px] font-mono text-[#767670] uppercase tracking-wider shrink-0">
+                  Garment Tags:
+                </span>
+                <button
+                  type="button"
+                  onClick={() => handleSelectGarmentTag('All')}
+                  className={`px-2 py-0.5 text-[10px] font-mono border transition-all cursor-pointer whitespace-nowrap ${
+                    categoryFilterScope === 'garments' && selectedGarmentTag === 'All'
+                      ? 'bg-[#1A1A1A] text-white border-[#1A1A1A] font-semibold'
+                      : 'bg-[#F8F7F4] text-[#767670] hover:bg-[#EAE8E3] border-[#E5E5E1]'
                   }`}
                 >
-                  <span
-                    onClick={() => handleSetSelectedCategory(cat)}
-                    className="cursor-pointer hover:underline"
-                    title={`Filter by ${cat}`}
-                  >
-                    {cat} ({count})
-                  </span>
-
-                  {/* Inline Edit Button */}
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setEditingCategoryName(cat);
-                      setEditingCategoryValue(cat);
-                    }}
-                    className={`p-0.5 opacity-60 hover:opacity-100 cursor-pointer ${
-                      isSelected ? 'text-white hover:text-amber-200' : 'text-[#767670] hover:text-[#1A1A1A]'
-                    }`}
-                    title={`Rename category "${cat}"`}
-                  >
-                    <Edit2 className="w-2.5 h-2.5" />
-                  </button>
-
-                  {/* Inline Delete (x) Button */}
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleDeleteCategoryPrompt(cat);
-                    }}
-                    className={`p-0.5 opacity-60 hover:opacity-100 cursor-pointer ${
-                      isSelected ? 'text-white hover:text-rose-200' : 'text-[#767670] hover:text-rose-600'
-                    }`}
-                    title={`Delete category "${cat}" (✕)`}
-                  >
-                    <X className="w-3 h-3" />
-                  </button>
-                </div>
-              );
-            })}
+                  All Tags
+                </button>
+                {uniqueGarmentTags.map((ut) => {
+                  const isSelected = categoryFilterScope === 'garments' && selectedGarmentTag.toLowerCase() === ut.tag.toLowerCase();
+                  return (
+                    <button
+                      key={ut.tag}
+                      type="button"
+                      onClick={() => handleSelectGarmentTag(isSelected ? 'All' : ut.tag)}
+                      className={`inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-mono border transition-all cursor-pointer whitespace-nowrap ${
+                        isSelected
+                          ? 'bg-[#1A1A1A] text-white border-[#1A1A1A] font-semibold shadow-xs'
+                          : 'bg-[#F2F1ED] text-[#4A4A45] hover:bg-[#E5E3DC] border-[#E5E5E1]'
+                      }`}
+                      title={`Filter garments by tag #${ut.tag}`}
+                    >
+                      #{ut.tag}
+                      <span className={`text-[9px] ${isSelected ? 'text-zinc-300' : 'text-[#767670]'}`}>
+                        ({ut.count})
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
-          {/* Dynamic Tags filter strip */}
-          {uniqueTags.length > 0 && (
-            <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pt-2 border-t border-[#E5E5E1]/70 text-xs">
-              <span className="text-[10px] font-mono text-[#767670] uppercase tracking-wider shrink-0">
-                Tags:
-              </span>
+          {/* 2. Homeware Categories & Collections (Duplicated Separate Heading & Management Box) */}
+          <div className={`bg-white border p-3 space-y-2.5 shadow-xs transition-colors ${
+            categoryFilterScope === 'homeware' ? 'border-[#8C7355]' : 'border-[#E5E5E1]'
+          }`}>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Package className="w-3.5 h-3.5 text-[#8C7355]" />
+                <InlineEditableTitle
+                  value={customLabels.homewareCollectionsTitle || 'Homeware Categories & Collections'}
+                  onSave={(val) => updateCustomLabel('homewareCollectionsTitle', val)}
+                  as="span"
+                  className="text-xs font-mono font-bold text-[#1A1A1A] uppercase tracking-wider"
+                  tooltip="Click or pencil to rename Homeware Categories & Collections section"
+                />
+                <span className="text-[10px] font-mono text-[#767670]">
+                  ({homewareCategories.length} active)
+                </span>
+                {categoryFilterScope === 'homeware' && (
+                  <span className="text-[10px] font-mono px-1.5 py-0.2 bg-[#8C7355]/10 text-[#8C7355] font-semibold">
+                    ACTIVE FILTER
+                  </span>
+                )}
+              </div>
+
+              <div className="flex items-center gap-3">
+                {categoryFilterScope === 'homeware' && (selectedHomewareCategory !== 'All' || selectedHomewareTag !== 'All') && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedHomewareCategory('All');
+                      setSelectedHomewareTag('All');
+                      setCategoryFilterScope('all');
+                    }}
+                    className="text-[10px] font-mono text-[#8C7355] hover:text-[#1A1A1A] hover:underline cursor-pointer flex items-center gap-1"
+                  >
+                    <X className="w-3 h-3" />
+                    Clear homeware filter ({selectedHomewareCategory !== 'All' ? selectedHomewareCategory : `#${selectedHomewareTag}`})
+                  </button>
+                )}
+
+                {!isAddingHomewareCategory ? (
+                  <button
+                    onClick={() => setIsAddingHomewareCategory(true)}
+                    className="flex items-center gap-1 px-2.5 py-1 text-xs font-mono font-medium text-[#8C7355] bg-[#F8F7F4] hover:bg-[#EAE8E3] border border-[#E5E5E1] transition-colors cursor-pointer"
+                  >
+                    <Plus className="w-3 h-3" />
+                    Add Category
+                  </button>
+                ) : (
+                  <div className="flex items-center gap-1">
+                    <input
+                      type="text"
+                      placeholder="New homeware category..."
+                      value={newHomewareCategoryName}
+                      onChange={(e) => setNewHomewareCategoryName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') handleAddNewHomewareCategory();
+                        if (e.key === 'Escape') setIsAddingHomewareCategory(false);
+                      }}
+                      autoFocus
+                      className="px-2 py-1 text-xs bg-white border border-[#8C7355] text-[#1A1A1A] font-mono focus:outline-none w-44"
+                    />
+                    <button
+                      onClick={handleAddNewHomewareCategory}
+                      className="p-1 bg-[#8C7355] text-white hover:bg-[#786248] cursor-pointer"
+                      title="Save homeware category"
+                    >
+                      <Check className="w-3 h-3" />
+                    </button>
+                    <button
+                      onClick={() => setIsAddingHomewareCategory(false)}
+                      className="p-1 text-[#767670] hover:text-[#1A1A1A] cursor-pointer"
+                      title="Cancel"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                )}
+
+                <button
+                  onClick={() => {
+                    if (safeConfirm('Reset homeware categories to standard defaults?')) {
+                      resetHomewareCategories();
+                    }
+                  }}
+                  className="text-[10px] font-mono text-[#A5A59E] hover:text-[#5A5A55] hover:underline cursor-pointer"
+                  title="Reset to default 6 homeware categories"
+                >
+                  Reset Defaults
+                </button>
+              </div>
+            </div>
+
+            {/* Homeware Category Chips */}
+            <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-1">
               <button
-                type="button"
-                onClick={() => handleSetSelectedTag('All')}
-                className={`px-2 py-0.5 text-[10px] font-mono border transition-all cursor-pointer whitespace-nowrap ${
-                  selectedTag === 'All'
-                    ? 'bg-[#1A1A1A] text-white border-[#1A1A1A] font-semibold'
-                    : 'bg-[#F8F7F4] text-[#767670] hover:bg-[#EAE8E3] border-[#E5E5E1]'
+                onClick={() => handleSelectHomewareCategory('All')}
+                className={`px-2.5 py-1 text-xs border transition-all cursor-pointer whitespace-nowrap font-mono ${
+                  categoryFilterScope === 'homeware' && selectedHomewareCategory === 'All'
+                    ? 'bg-[#1A1A1A] text-white border-[#1A1A1A] font-semibold shadow-xs'
+                    : 'bg-[#F8F7F4] text-[#4A4A45] hover:bg-[#EAE8E3] border-[#E5E5E1]'
                 }`}
               >
-                All Tags
+                All Homeware ({homewareItemsCount})
               </button>
-              {uniqueTags.map((ut) => {
-                const isSelected = selectedTag.toLowerCase() === ut.tag.toLowerCase();
+
+              {homewareCategories.map((cat) => {
+                const isSelected = categoryFilterScope === 'homeware' && selectedHomewareCategory === cat;
+                const count = items.filter((i) => !i.isArchived && i.category === cat).length;
+                const isEditing = editingHomewareCategoryName === cat;
+
+                if (isEditing) {
+                  return (
+                    <div
+                      key={cat}
+                      className="flex items-center gap-1 px-1.5 py-0.5 bg-white border border-[#8C7355] shadow-xs"
+                    >
+                      <input
+                        type="text"
+                        value={editingHomewareCategoryValue}
+                        onChange={(e) => setEditingHomewareCategoryValue(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') handleSaveHomewareCategoryRename(cat);
+                          if (e.key === 'Escape') setEditingHomewareCategoryName(null);
+                        }}
+                        onBlur={() => handleSaveHomewareCategoryRename(cat)}
+                        autoFocus
+                        className="text-xs font-mono text-[#1A1A1A] bg-transparent focus:outline-none w-28"
+                      />
+                      <button
+                        onClick={() => handleSaveHomewareCategoryRename(cat)}
+                        className="text-emerald-700 hover:text-emerald-900 cursor-pointer"
+                      >
+                        <Check className="w-3 h-3" />
+                      </button>
+                      <button
+                        onClick={() => setEditingHomewareCategoryName(null)}
+                        className="text-rose-600 hover:text-rose-800 cursor-pointer"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  );
+                }
+
                 return (
-                  <button
-                    key={ut.tag}
-                    type="button"
-                    onClick={() => handleSetSelectedTag(isSelected ? 'All' : ut.tag)}
-                    className={`inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-mono border transition-all cursor-pointer whitespace-nowrap ${
+                  <div
+                    key={cat}
+                    className={`group inline-flex items-center gap-1 px-2.5 py-1 text-xs border transition-all whitespace-nowrap font-mono ${
                       isSelected
-                        ? 'bg-[#1A1A1A] text-white border-[#1A1A1A] font-semibold shadow-xs'
-                        : 'bg-[#F2F1ED] text-[#4A4A45] hover:bg-[#E5E3DC] border-[#E5E5E1]'
+                        ? 'bg-[#8C7355] text-white border-[#8C7355] font-semibold shadow-xs'
+                        : 'bg-[#F8F7F4] text-[#4A4A45] hover:bg-[#EAE8E3] border-[#E5E5E1]'
                     }`}
-                    title={`Filter by tag #${ut.tag}`}
                   >
-                    #{ut.tag}
-                    <span className={`text-[9px] ${isSelected ? 'text-zinc-300' : 'text-[#767670]'}`}>
-                      ({ut.count})
+                    <span
+                      onClick={() => handleSelectHomewareCategory(cat)}
+                      className="cursor-pointer hover:underline"
+                      title={`Filter by homeware category ${cat}`}
+                    >
+                      {cat} ({count})
                     </span>
-                  </button>
+
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setEditingHomewareCategoryName(cat);
+                        setEditingHomewareCategoryValue(cat);
+                      }}
+                      className={`p-0.5 opacity-60 hover:opacity-100 cursor-pointer ${
+                        isSelected ? 'text-white hover:text-amber-200' : 'text-[#767670] hover:text-[#1A1A1A]'
+                      }`}
+                      title={`Rename homeware category "${cat}"`}
+                    >
+                      <Edit2 className="w-2.5 h-2.5" />
+                    </button>
+
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeleteHomewareCategoryPrompt(cat);
+                      }}
+                      className={`p-0.5 opacity-60 hover:opacity-100 cursor-pointer ${
+                        isSelected ? 'text-white hover:text-rose-200' : 'text-[#767670] hover:text-rose-600'
+                      }`}
+                      title={`Delete category "${cat}" (✕)`}
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
                 );
               })}
             </div>
-          )}
+
+            {/* Homeware Tags Filter Strip */}
+            {uniqueHomewareTags.length > 0 && (
+              <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pt-2 border-t border-[#E5E5E1]/70 text-xs">
+                <span className="text-[10px] font-mono text-[#767670] uppercase tracking-wider shrink-0">
+                  Homeware Tags:
+                </span>
+                <button
+                  type="button"
+                  onClick={() => handleSelectHomewareTag('All')}
+                  className={`px-2 py-0.5 text-[10px] font-mono border transition-all cursor-pointer whitespace-nowrap ${
+                    categoryFilterScope === 'homeware' && selectedHomewareTag === 'All'
+                      ? 'bg-[#1A1A1A] text-white border-[#1A1A1A] font-semibold'
+                      : 'bg-[#F8F7F4] text-[#767670] hover:bg-[#EAE8E3] border-[#E5E5E1]'
+                  }`}
+                >
+                  All Tags
+                </button>
+                {uniqueHomewareTags.map((ut) => {
+                  const isSelected = categoryFilterScope === 'homeware' && selectedHomewareTag.toLowerCase() === ut.tag.toLowerCase();
+                  return (
+                    <button
+                      key={ut.tag}
+                      type="button"
+                      onClick={() => handleSelectHomewareTag(isSelected ? 'All' : ut.tag)}
+                      className={`inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-mono border transition-all cursor-pointer whitespace-nowrap ${
+                        isSelected
+                          ? 'bg-[#1A1A1A] text-white border-[#1A1A1A] font-semibold shadow-xs'
+                          : 'bg-[#F2F1ED] text-[#4A4A45] hover:bg-[#E5E3DC] border-[#E5E5E1]'
+                      }`}
+                      title={`Filter homeware by tag #${ut.tag}`}
+                    >
+                      #{ut.tag}
+                      <span className={`text-[9px] ${isSelected ? 'text-zinc-300' : 'text-[#767670]'}`}>
+                        ({ut.count})
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -1300,6 +1928,11 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
             {/* Sort Dropdown & Reset Filters */}
             <div className="flex items-center gap-2">
               {(pipelineTab !== 'All' ||
+                categoryFilterScope !== 'all' ||
+                selectedGarmentCategory !== 'All' ||
+                selectedGarmentTag !== 'All' ||
+                selectedHomewareCategory !== 'All' ||
+                selectedHomewareTag !== 'All' ||
                 selectedTag !== 'All' ||
                 selectedCategory !== 'All' ||
                 selectedBrand !== 'All' ||
@@ -1310,8 +1943,7 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
                 <button
                   onClick={() => {
                     handleSetPipelineTab('All');
-                    handleSetSelectedTag('All');
-                    handleSetSelectedCategory('All');
+                    handleClearAllCategoryFilters();
                     handleSetSelectedBrand('All');
                     handleSetSelectedSeason('All');
                     handleSetSelectedCondition('All');
@@ -1348,6 +1980,11 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
 
           {/* Active Filter Pills Bar */}
           {(pipelineTab !== 'All' ||
+            categoryFilterScope !== 'all' ||
+            selectedGarmentCategory !== 'All' ||
+            selectedGarmentTag !== 'All' ||
+            selectedHomewareCategory !== 'All' ||
+            selectedHomewareTag !== 'All' ||
             selectedTag !== 'All' ||
             selectedCategory !== 'All' ||
             selectedBrand !== 'All' ||
@@ -1371,6 +2008,66 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
                 </span>
               )}
 
+              {/* Garment Category Pill */}
+              {categoryFilterScope === 'garments' && selectedGarmentCategory !== 'All' && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-[#FAF9F6] border border-[#8C7355] text-[#8C7355] rounded-xs font-medium">
+                  Garments: {selectedGarmentCategory}
+                  <button
+                    type="button"
+                    onClick={() => handleSelectGarmentCategory(selectedGarmentCategory)}
+                    className="hover:text-rose-600 cursor-pointer"
+                    title="Remove garment category filter"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </span>
+              )}
+
+              {/* Garment Tag Pill */}
+              {categoryFilterScope === 'garments' && selectedGarmentTag !== 'All' && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-[#1A1A1A] text-white rounded-xs font-medium">
+                  #{selectedGarmentTag}
+                  <button
+                    type="button"
+                    onClick={() => handleSelectGarmentTag('All')}
+                    className="hover:text-rose-300 cursor-pointer"
+                    title="Remove garment tag filter"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </span>
+              )}
+
+              {/* Homeware Category Pill */}
+              {categoryFilterScope === 'homeware' && selectedHomewareCategory !== 'All' && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-[#FAF9F6] border border-[#8C7355] text-[#8C7355] rounded-xs font-medium">
+                  Homeware: {selectedHomewareCategory}
+                  <button
+                    type="button"
+                    onClick={() => handleSelectHomewareCategory(selectedHomewareCategory)}
+                    className="hover:text-rose-600 cursor-pointer"
+                    title="Remove homeware category filter"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </span>
+              )}
+
+              {/* Homeware Tag Pill */}
+              {categoryFilterScope === 'homeware' && selectedHomewareTag !== 'All' && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-[#1A1A1A] text-white rounded-xs font-medium">
+                  #{selectedHomewareTag}
+                  <button
+                    type="button"
+                    onClick={() => handleSelectHomewareTag('All')}
+                    className="hover:text-rose-300 cursor-pointer"
+                    title="Remove homeware tag filter"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </span>
+              )}
+
               {selectedTag !== 'All' && (
                 <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-[#1A1A1A] text-white rounded-xs font-medium">
                   #{selectedTag}
@@ -1387,7 +2084,7 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
 
               {selectedCategory !== 'All' && (
                 <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-[#FAF9F6] border border-[#8C7355] text-[#8C7355] rounded-xs font-medium">
-                  Category: {selectedCategory}
+                  Category: {selectedCategory === '__GARMENTS__' ? 'Apparel Only' : selectedCategory === '__HOMEWARE__' ? 'Homeware & Lifestyle' : selectedCategory}
                   <button
                     type="button"
                     onClick={() => handleSetSelectedCategory('All')}
@@ -1523,6 +2220,8 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
             const isEditingPrice = editingFieldId === `${item.id}_purchasePrice`;
             const isEditingRrp = editingFieldId === `${item.id}_rrp`;
             const isEditingWear = editingFieldId === `${item.id}_wearCount`;
+            const isEditingColor = editingFieldId === `${item.id}_color`;
+            const isEditingLocation = editingFieldId === `${item.id}_storageLocation`;
             const isSelected = selectedItemIds.has(item.id);
 
             return (
@@ -1806,19 +2505,141 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
                       </h3>
                     )}
 
-                    {/* Color & Seasons */}
-                    <p className="text-[11px] text-[#767670] line-clamp-1 font-sans">
-                      {item.color}
-                      {displaySettings.showSeason && item.season && ` • ${Array.isArray(item.season) ? item.season.join(', ') : item.season}`}
-                      {displaySettings.showCondition && item.condition && ` • ${item.condition}`}
-                    </p>
+                    {/* Color, Season, Condition (Inline Editable) */}
+                    <div className="text-[11px] text-[#767670] font-sans flex flex-wrap items-center gap-1.5 pt-0.5">
+                      {/* Color */}
+                      {isEditingColor ? (
+                        <div className="flex items-center gap-1">
+                          <input
+                            type="text"
+                            value={editingValue}
+                            onChange={(e) => setEditingValue(e.target.value)}
+                            onBlur={() => handleSaveInline(item.id, 'color')}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') handleSaveInline(item.id, 'color');
+                              if (e.key === 'Escape') setEditingFieldId(null);
+                            }}
+                            autoFocus
+                            placeholder="Color..."
+                            className="w-20 text-[11px] border border-[#8C7355] px-1 py-0.5 bg-white rounded-xs focus:outline-none"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => handleSaveInline(item.id, 'color')}
+                            className="text-emerald-700 hover:text-emerald-900 cursor-pointer"
+                          >
+                            <Check className="w-3 h-3" />
+                          </button>
+                        </div>
+                      ) : (
+                        <span
+                          onClick={() => {
+                            setEditingFieldId(`${item.id}_color`);
+                            setEditingValue(item.color || '');
+                          }}
+                          className="hover:text-[#8C7355] hover:underline cursor-pointer inline-flex items-center gap-1 group/color shrink-0"
+                          title="Click to edit colour inline"
+                        >
+                          <span
+                            className="w-2 h-2 rounded-full border border-black/10 shrink-0 inline-block"
+                            style={{
+                              backgroundColor:
+                                item.colorHex || getColorHex(item.color) || '#D5D5D0',
+                            }}
+                          />
+                          <span>{item.color || <span className="text-[#A5A59E] italic">Add colour</span>}</span>
+                          <Pencil className="w-2.5 h-2.5 opacity-0 group-hover/color:opacity-60 text-[#8C7355]" />
+                        </span>
+                      )}
 
-                    {/* Storage Location */}
-                    {displaySettings.showLocation && item.storageLocation && (
-                      <p className="text-[10px] font-mono text-[#8C7355] flex items-center gap-1">
-                        <MapPin className="w-2.5 h-2.5" />
-                        {item.storageLocation}
-                      </p>
+                      {/* Season Dropdown */}
+                      {displaySettings.showSeason && (
+                        <span className="inline-flex items-center gap-1">
+                          <span className="text-[#B0B0A8]">•</span>
+                          <select
+                            value={Array.isArray(item.season) ? item.season[0] : (item.season || 'All-Season')}
+                            onChange={(e) => {
+                              const val = e.target.value as Season;
+                              updateItem(item.id, { season: [val] });
+                            }}
+                            className="text-[10px] font-sans text-[#767670] hover:text-[#1A1A1A] bg-transparent border-b border-dashed border-[#D5D5D0] hover:border-[#8C7355] focus:outline-none cursor-pointer py-0 px-0.5"
+                            title="Change season inline"
+                          >
+                            {['All-Season', 'Spring', 'Summer', 'Autumn', 'Winter'].map((s) => (
+                              <option key={s} value={s}>
+                                {s}
+                              </option>
+                            ))}
+                          </select>
+                        </span>
+                      )}
+
+                      {/* Condition Dropdown */}
+                      {displaySettings.showCondition && (
+                        <span className="inline-flex items-center gap-1">
+                          <span className="text-[#B0B0A8]">•</span>
+                          <select
+                            value={item.condition}
+                            onChange={(e) => {
+                              updateItem(item.id, { condition: e.target.value as Condition });
+                            }}
+                            className="text-[10px] font-sans text-[#767670] hover:text-[#1A1A1A] bg-transparent border-b border-dashed border-[#D5D5D0] hover:border-[#8C7355] focus:outline-none cursor-pointer py-0 px-0.5"
+                            title="Change condition inline"
+                          >
+                            {['Pristine / New', 'Excellent', 'Good', 'Vintage / Well-Loved'].map((c) => (
+                              <option key={c} value={c}>
+                                {c}
+                              </option>
+                            ))}
+                          </select>
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Storage Location (Inline Editable) */}
+                    {displaySettings.showLocation && (
+                      <div className="pt-0.5">
+                        {isEditingLocation ? (
+                          <div className="flex items-center gap-1">
+                            <MapPin className="w-2.5 h-2.5 text-[#8C7355] shrink-0" />
+                            <input
+                              type="text"
+                              value={editingValue}
+                              onChange={(e) => setEditingValue(e.target.value)}
+                              onBlur={() => handleSaveInline(item.id, 'storageLocation')}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') handleSaveInline(item.id, 'storageLocation');
+                                if (e.key === 'Escape') setEditingFieldId(null);
+                              }}
+                              autoFocus
+                              placeholder="Storage location..."
+                              className="w-full text-[10px] font-mono border border-[#8C7355] px-1 py-0.5 bg-white rounded-xs focus:outline-none"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => handleSaveInline(item.id, 'storageLocation')}
+                              className="text-emerald-700 hover:text-emerald-900 cursor-pointer"
+                            >
+                              <Check className="w-2.5 h-2.5" />
+                            </button>
+                          </div>
+                        ) : (
+                          <p
+                            onClick={() => {
+                              setEditingFieldId(`${item.id}_storageLocation`);
+                              setEditingValue(item.storageLocation || '');
+                            }}
+                            className="text-[10px] font-mono text-[#8C7355] flex items-center gap-1 hover:underline cursor-pointer group/loc"
+                            title="Click to edit storage location inline"
+                          >
+                            <MapPin className="w-2.5 h-2.5 shrink-0" />
+                            <span className="truncate">
+                              {item.storageLocation || <span className="text-[#A5A59E] italic">Add location...</span>}
+                            </span>
+                            <Pencil className="w-2.5 h-2.5 opacity-0 group-hover/loc:opacity-60 shrink-0" />
+                          </p>
+                        )}
+                      </div>
                     )}
 
                     {/* Vinted Order & Resale Info (Matching Purchases card view) */}

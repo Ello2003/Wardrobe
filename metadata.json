@@ -1,6 +1,6 @@
 {
   "name": "Wardrobe & Style Studio",
-  "description": "Track fabric compositions, cost-per-wear economics, care guides, and styling combinations in GBP (£).",
+  "description": "Track garments, homeware, cost-per-wear economics, care guides, and styling combinations in GBP (£).",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

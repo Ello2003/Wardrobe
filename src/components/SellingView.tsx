@@ -40,6 +40,7 @@ import {
   ChevronDown,
   ChevronUp,
   Ban,
+  Pencil,
 } from 'lucide-react';
 import {
   SaleItem,
@@ -61,6 +62,7 @@ import { DuplicateMergeModal } from './DuplicateMergeModal';
 import { SellingDatabaseTable } from './SellingDatabaseTable';
 import { BulkActionBar } from './common/BulkActionBar';
 import { EmptyState } from './common/EmptyState';
+import { InlineEditableTitle } from './common/InlineEditableTitle';
 import {
   SellingDisplaySettingsModal,
   SellingDisplaySettings,
@@ -72,6 +74,7 @@ import {
   ALL_SELLING_STATUSES,
   getSellingStatusBadgeClass,
 } from '../utils/statusUtils';
+import { getColorHex } from '../utils/colorUtils';
 
 export type { SalesPipelineStage };
 export { getSaleItemPipelineStage };
@@ -91,6 +94,8 @@ export const SellingView: React.FC = () => {
     moveSaleItemToShopping,
     moveMultipleSaleItems,
     formatCurrency,
+    customLabels,
+    updateCustomLabel,
   } = useWardrobe();
 
   // Display Settings
@@ -137,10 +142,12 @@ export const SellingView: React.FC = () => {
     };
   }, []);
 
-  // Resale Pipeline Stage Filter State
+  // Resale Pipeline Stage & Status Filter State (Single Source of Truth)
   const [salesPipelineStage, setSalesPipelineStage] = useState<SalesPipelineStage>(() => {
     try {
-      const saved = localStorage.getItem('sales_resale_pipeline_stage');
+      const saved =
+        localStorage.getItem('sales_resale_pipeline_stage') ||
+        localStorage.getItem('sales_selected_status_tab');
       if (
         saved &&
         [
@@ -160,12 +167,44 @@ export const SellingView: React.FC = () => {
     return 'All';
   });
 
-  const handleSetSalesPipelineStage = (stage: SalesPipelineStage) => {
-    setSalesPipelineStage(stage);
+  const [selectedStatusTab, setSelectedStatusTab] = useState<string>(() => {
     try {
-      localStorage.setItem('sales_resale_pipeline_stage', stage);
+      return (
+        localStorage.getItem('sales_resale_pipeline_stage') ||
+        localStorage.getItem('sales_selected_status_tab') ||
+        'All'
+      );
+    } catch {
+      return 'All';
+    }
+  });
+
+  const handleSetSalesPipelineStage = useCallback((stage: SalesPipelineStage | string) => {
+    let normalizedStage: SalesPipelineStage = 'All';
+    if (stage === 'Active') normalizedStage = 'Listed';
+    else if (stage === 'Sold') normalizedStage = 'Completed';
+    else if (
+      [
+        'All',
+        'Draft',
+        'Listed',
+        'Reserved',
+        'Awaiting Dispatch',
+        'In Transit',
+        'Completed',
+        'Cancelled',
+      ].includes(stage)
+    ) {
+      normalizedStage = stage as SalesPipelineStage;
+    }
+
+    setSalesPipelineStage(normalizedStage);
+    setSelectedStatusTab(normalizedStage);
+    try {
+      localStorage.setItem('sales_resale_pipeline_stage', normalizedStage);
+      localStorage.setItem('sales_selected_status_tab', normalizedStage);
     } catch {}
-  };
+  }, []);
 
   // Pipeline Statistics & Valuations for the Workflow Bar
   const pipelineStats = useMemo(() => {
@@ -194,7 +233,6 @@ export const SellingView: React.FC = () => {
   }, [saleItems]);
 
   // Filters & View State
-  const [selectedStatusTab, setSelectedStatusTab] = useState<string>('All');
   const [selectedBrand, setSelectedBrand] = useState<string>('All');
   const [selectedPlatform, setSelectedPlatform] = useState<string>('All');
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
@@ -203,6 +241,24 @@ export const SellingView: React.FC = () => {
   const [viewMode, setViewMode] = useState<'grid' | 'table'>(
     (displaySettings.viewMode as string) === 'database' || displaySettings.viewMode === 'table' ? 'table' : 'grid'
   );
+
+  // Inline editing state for card view
+  const [editingFieldId, setEditingFieldId] = useState<string | null>(null);
+  const [editingValue, setEditingValue] = useState<string>('');
+
+  const handleSaveInline = (itemId: string, field: keyof SaleItem) => {
+    const item = saleItems.find((s) => s.id === itemId);
+    if (!item) return;
+
+    let parsedVal: any = editingValue.trim();
+    if (field === 'listingPrice' || field === 'soldPrice' || field === 'originalPricePaid') {
+      const num = parseFloat(editingValue);
+      parsedVal = !isNaN(num) && num >= 0 ? num : item[field];
+    }
+
+    updateSaleItem(itemId, { [field]: parsedVal });
+    setEditingFieldId(null);
+  };
 
   // Sync viewMode changes to displaySettings
   const handleSetViewMode = (mode: 'grid' | 'table') => {
@@ -325,26 +381,10 @@ export const SellingView: React.FC = () => {
   // Filtered & Sorted Sale Items
   const filteredSales = useMemo(() => {
     const matched = saleItems.filter((item) => {
-      // Pipeline Stage filter
+      // Pipeline Stage & Status Filter (Unified Single Source of Truth)
       if (salesPipelineStage !== 'All') {
         const stage = getSaleItemPipelineStage(item);
         if (stage !== salesPipelineStage) return false;
-      }
-
-      // Status tab filter
-      if (selectedStatusTab === 'Active') {
-        if (item.status !== 'Listed' && item.status !== 'Reserved') return false;
-      } else if (selectedStatusTab === 'Sold') {
-        if (
-          item.status !== 'Sold' &&
-          item.status !== 'Shipped' &&
-          item.status !== 'Completed'
-        )
-          return false;
-      } else if (selectedStatusTab === 'Draft') {
-        if (item.status !== 'Draft') return false;
-      } else if (selectedStatusTab === 'Cancelled') {
-        if (item.status !== 'Cancelled' && item.status !== 'Delisted') return false;
       }
 
       // Platform filter
@@ -488,7 +528,13 @@ export const SellingView: React.FC = () => {
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
             <div className="flex items-center gap-2">
-              <h1 className="text-xl font-serif font-bold text-[#1A1A1A]">Sales & Resale Studio</h1>
+              <InlineEditableTitle
+                value={customLabels.sellingPageTitle || 'Sales & Resale Studio'}
+                onSave={(val) => updateCustomLabel('sellingPageTitle', val)}
+                as="h1"
+                className="text-xl font-serif font-bold text-[#1A1A1A]"
+                tooltip="Click or pencil to rename Selling page inline"
+              />
               <span className="font-mono text-xs px-2 py-0.5 bg-[#F2F1ED] border border-[#E5E5E1] text-[#5A5A55]">
                 {saleItems.length} listings total
               </span>
@@ -921,16 +967,21 @@ export const SellingView: React.FC = () => {
         {isFilterPanelOpen && (
           <div className="flex flex-wrap items-center justify-between gap-2.5 pt-2 border-t border-[#E5E5E1]">
             <div className="flex flex-wrap items-center gap-2">
+              {/* Pipeline Stage & Status Filter (Unified SSOT) */}
               <select
-                value={selectedStatusTab}
-                onChange={(e) => setSelectedStatusTab(e.target.value)}
+                value={salesPipelineStage}
+                onChange={(e) => handleSetSalesPipelineStage(e.target.value as SalesPipelineStage)}
                 className="bg-white border border-[#E5E5E1] px-2.5 py-1 text-xs font-mono text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none cursor-pointer"
+                title="Filter by Resale Pipeline Stage & Status"
               >
-                <option value="All">All Statuses</option>
-                <option value="Active">Active / Listed</option>
-                <option value="Sold">Sold / Shipped</option>
-                <option value="Draft">Drafts</option>
-                <option value="Cancelled">Cancelled / Delisted</option>
+                <option value="All">All Pipeline Stages ({pipelineStats.All.count})</option>
+                <option value="Draft">Draft ({pipelineStats.Draft.count})</option>
+                <option value="Listed">Listed / Active ({pipelineStats.Listed.count})</option>
+                <option value="Reserved">Reserved ({pipelineStats.Reserved.count})</option>
+                <option value="Awaiting Dispatch">Awaiting Dispatch ({pipelineStats['Awaiting Dispatch'].count})</option>
+                <option value="In Transit">In Transit ({pipelineStats['In Transit'].count})</option>
+                <option value="Completed">Completed / Sold ({pipelineStats.Completed.count})</option>
+                <option value="Cancelled">Cancelled / Delisted ({pipelineStats.Cancelled.count})</option>
               </select>
 
               <select
@@ -1172,6 +1223,12 @@ export const SellingView: React.FC = () => {
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
             {filteredSales.map((item) => {
               const isSelected = selectedSaleIds.has(item.id);
+              const isEditingBrand = editingFieldId === `${item.id}_brand`;
+              const isEditingPrice = editingFieldId === `${item.id}_price`;
+              const isEditingName = editingFieldId === `${item.id}_name`;
+              const isEditingColor = editingFieldId === `${item.id}_color`;
+              const isEditingSize = editingFieldId === `${item.id}_size`;
+              const isEditingNotes = editingFieldId === `${item.id}_notes`;
               return (
                 <div
                   key={item.id}
@@ -1241,31 +1298,129 @@ export const SellingView: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* Body Details matching Purchases fonts and layout */}
+                  {/* Body Details with full inline editing */}
                   <div className="p-3.5 space-y-2.5 flex-1 flex flex-col justify-between">
                     <div className="space-y-1.5">
                       {/* Brand & Price Header */}
                       <div className="flex items-center justify-between gap-2">
-                        <span className="text-[10px] font-mono uppercase tracking-wider text-[#8C7355] font-bold truncate">
-                          {item.brand || 'Unbranded'}
-                        </span>
-                        <span className="text-xs font-mono font-bold text-[#1A1A1A]">
-                          {formatCurrency(
-                            item.listingPrice ?? item.soldPrice ?? item.originalPricePaid ?? 0
-                          )}
-                        </span>
+                        {isEditingBrand ? (
+                          <input
+                            type="text"
+                            value={editingValue}
+                            onChange={(e) => setEditingValue(e.target.value)}
+                            onBlur={() => handleSaveInline(item.id, 'brand')}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') handleSaveInline(item.id, 'brand');
+                              if (e.key === 'Escape') setEditingFieldId(null);
+                            }}
+                            autoFocus
+                            className="text-[10px] font-mono border border-[#8C7355] px-1 py-0.5 bg-white text-[#8C7355] font-bold uppercase w-24"
+                          />
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingFieldId(`${item.id}_brand`);
+                              setEditingValue(item.brand || '');
+                            }}
+                            className="text-[10px] font-mono uppercase tracking-wider text-[#8C7355] font-bold hover:underline cursor-pointer flex items-center gap-1 group/brand truncate"
+                            title="Click to edit brand inline"
+                          >
+                            <span className="truncate">{item.brand || 'Unbranded'}</span>
+                            <Pencil className="w-2.5 h-2.5 opacity-0 group-hover/brand:opacity-70" />
+                          </button>
+                        )}
+
+                        {isEditingPrice ? (
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={editingValue}
+                            onChange={(e) => setEditingValue(e.target.value)}
+                            onBlur={() =>
+                              handleSaveInline(
+                                item.id,
+                                item.status === 'Sold' || item.status === 'Completed'
+                                  ? 'soldPrice'
+                                  : 'listingPrice'
+                              )
+                            }
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                handleSaveInline(
+                                  item.id,
+                                  item.status === 'Sold' || item.status === 'Completed'
+                                    ? 'soldPrice'
+                                    : 'listingPrice'
+                                );
+                              }
+                              if (e.key === 'Escape') setEditingFieldId(null);
+                            }}
+                            autoFocus
+                            className="w-18 text-xs font-mono font-bold text-[#1A1A1A] border border-[#8C7355] px-1 py-0.5 bg-white text-right"
+                          />
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const priceField =
+                                item.status === 'Sold' || item.status === 'Completed'
+                                  ? 'soldPrice'
+                                  : 'listingPrice';
+                              setEditingFieldId(`${item.id}_price`);
+                              setEditingValue(
+                                (
+                                  item[priceField] ??
+                                  item.listingPrice ??
+                                  item.soldPrice ??
+                                  item.originalPricePaid ??
+                                  0
+                                ).toString()
+                              );
+                            }}
+                            className="text-xs font-mono font-bold text-[#1A1A1A] hover:text-[#8C7355] cursor-pointer flex items-center gap-0.5 group/price"
+                            title="Click to edit price inline"
+                          >
+                            <span>
+                              {formatCurrency(
+                                item.listingPrice ?? item.soldPrice ?? item.originalPricePaid ?? 0
+                              )}
+                            </span>
+                            <Pencil className="w-2.5 h-2.5 opacity-0 group-hover/price:opacity-70 text-[#8C7355]" />
+                          </button>
+                        )}
                       </div>
 
                       {/* Garment Title in Serif */}
-                      <h3
-                        className="text-xs font-serif font-bold text-[#1A1A1A] line-clamp-1"
-                        title={item.name}
-                      >
-                        {item.name}
-                      </h3>
+                      {isEditingName ? (
+                        <input
+                          type="text"
+                          value={editingValue}
+                          onChange={(e) => setEditingValue(e.target.value)}
+                          onBlur={() => handleSaveInline(item.id, 'name')}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleSaveInline(item.id, 'name');
+                            if (e.key === 'Escape') setEditingFieldId(null);
+                          }}
+                          autoFocus
+                          className="w-full text-xs font-serif font-bold text-[#1A1A1A] border border-[#8C7355] px-1 py-0.5 bg-white"
+                        />
+                      ) : (
+                        <h3
+                          onClick={() => {
+                            setEditingFieldId(`${item.id}_name`);
+                            setEditingValue(item.name);
+                          }}
+                          className="text-xs font-serif font-bold text-[#1A1A1A] hover:text-[#8C7355] cursor-pointer line-clamp-1 flex items-center justify-between gap-1 group/title"
+                          title="Click to edit item title inline"
+                        >
+                          <span className="truncate">{item.name}</span>
+                          <Pencil className="w-2.5 h-2.5 opacity-0 group-hover/title:opacity-70 shrink-0 text-[#8C7355]" />
+                        </h3>
+                      )}
 
-                      {/* Garment Sub-details (Category, Condition, Size, Color) */}
-                      <p className="text-[11px] text-[#767670] font-sans line-clamp-1">
+                      {/* Garment Sub-details (Category, Condition, Size, Color) with inline editing */}
+                      <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-mono text-[#767670]">
                         {item.category && (
                           <button
                             type="button"
@@ -1276,16 +1431,122 @@ export const SellingView: React.FC = () => {
                             {item.category}
                           </button>
                         )}
-                        {item.condition && ` • ${item.condition}`}
-                        {item.size && ` • Size ${item.size}`}
-                        {item.color && ` • ${item.color}`}
-                      </p>
 
-                      {/* Description / Notes */}
-                      {(item.description || item.notes) && (
-                        <p className="text-[11px] text-[#767670] line-clamp-2 leading-relaxed font-sans">
+                        {item.category && <span>•</span>}
+
+                        {item.condition && (
+                          <>
+                            <span>{item.condition}</span>
+                            <span>•</span>
+                          </>
+                        )}
+
+                        {/* Size inline editable */}
+                        {isEditingSize ? (
+                          <input
+                            type="text"
+                            placeholder="Size..."
+                            value={editingValue}
+                            onChange={(e) => setEditingValue(e.target.value)}
+                            onBlur={() => handleSaveInline(item.id, 'size')}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') handleSaveInline(item.id, 'size');
+                              if (e.key === 'Escape') setEditingFieldId(null);
+                            }}
+                            autoFocus
+                            className="w-14 text-[10px] font-mono border border-[#8C7355] px-1 py-0.2 bg-white"
+                          />
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingFieldId(`${item.id}_size`);
+                              setEditingValue(item.size || '');
+                            }}
+                            className="hover:text-[#8C7355] cursor-pointer flex items-center gap-0.5 group/size"
+                            title="Click to edit size inline"
+                          >
+                            <span className="group-hover/size:underline">
+                              {item.size ? `Size ${item.size}` : 'Set Size'}
+                            </span>
+                            <Pencil className="w-2 h-2 opacity-0 group-hover/size:opacity-70 text-[#8C7355]" />
+                          </button>
+                        )}
+
+                        <span>•</span>
+
+                        {/* Color inline editable with swatch */}
+                        {isEditingColor ? (
+                          <input
+                            type="text"
+                            placeholder="Color..."
+                            value={editingValue}
+                            onChange={(e) => setEditingValue(e.target.value)}
+                            onBlur={() => handleSaveInline(item.id, 'color')}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') handleSaveInline(item.id, 'color');
+                              if (e.key === 'Escape') setEditingFieldId(null);
+                            }}
+                            autoFocus
+                            className="w-18 text-[10px] font-mono border border-[#8C7355] px-1 py-0.2 bg-white"
+                          />
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingFieldId(`${item.id}_color`);
+                              setEditingValue(item.color || '');
+                            }}
+                            className="hover:text-[#8C7355] cursor-pointer flex items-center gap-1 group/color"
+                            title="Click to edit color inline"
+                          >
+                            <span
+                              className="w-2 h-2 rounded-full border border-black/20 shrink-0"
+                              style={{ backgroundColor: getColorHex(item.color) || '#D4D4D0' }}
+                            />
+                            <span className="group-hover/color:underline">
+                              {item.color || 'Set Color'}
+                            </span>
+                            <Pencil className="w-2 h-2 opacity-0 group-hover/color:opacity-70 text-[#8C7355]" />
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Description / Notes with inline editing */}
+                      {isEditingNotes ? (
+                        <textarea
+                          value={editingValue}
+                          onChange={(e) => setEditingValue(e.target.value)}
+                          onBlur={() =>
+                            handleSaveInline(item.id, item.description ? 'description' : 'notes')
+                          }
+                          autoFocus
+                          rows={2}
+                          className="w-full text-[11px] text-[#4A4A45] border border-[#8C7355] p-1 bg-white focus:outline-none"
+                        />
+                      ) : item.description || item.notes ? (
+                        <p
+                          onClick={() => {
+                            setEditingFieldId(`${item.id}_notes`);
+                            setEditingValue(item.description || item.notes || '');
+                          }}
+                          className="text-[11px] text-[#767670] line-clamp-2 leading-relaxed font-sans hover:text-[#1A1A1A] cursor-pointer"
+                          title="Click to edit notes/description inline"
+                        >
                           {item.description || item.notes}
                         </p>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingFieldId(`${item.id}_notes`);
+                            setEditingValue('');
+                          }}
+                          className="text-[10px] font-mono text-[#8C7355] hover:underline cursor-pointer text-left"
+                          title="Click to add note inline"
+                        >
+                          + Add notes
+                        </button>
                       )}
                     </div>
 

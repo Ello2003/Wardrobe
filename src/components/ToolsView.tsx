@@ -36,6 +36,7 @@ import {
   getStoredIgnoredClusters,
 } from './duplicateMerge/duplicateEngine';
 import { getDefaultPresetConfig } from './duplicateMerge/duplicateUtils';
+import { InlineEditableTitle } from './common/InlineEditableTitle';
 
 interface ToolsViewProps {
   onOpenCreateSnapshot: () => void;
@@ -54,6 +55,8 @@ export const ToolsView: React.FC<ToolsViewProps> = ({
     changeLogs,
     currentVersion,
     formatCurrency,
+    customLabels,
+    updateCustomLabel,
   } = useWardrobe();
 
   const [activeSubTab, setActiveSubTab] = useState<
@@ -127,16 +130,27 @@ export const ToolsView: React.FC<ToolsViewProps> = ({
               </div>
               <div>
                 <div className="flex items-center gap-2">
-                  <h1 className="text-xl font-serif font-bold text-[#1A1A1A]">
-                    Studio Tools &amp; Utilities
-                  </h1>
+                  <InlineEditableTitle
+                    value={customLabels.toolsPageTitle || 'Studio Tools & Utilities'}
+                    onSave={(val) => updateCustomLabel('toolsPageTitle', val)}
+                    as="h1"
+                    className="text-xl font-serif font-bold text-[#1A1A1A]"
+                    tooltip="Click or pencil to rename Tools title inline"
+                  />
                   <span className="font-mono text-[10px] px-2 py-0.5 bg-[#F2F1ED] border border-[#E5E5E1] text-[#5A5A55] uppercase font-semibold tracking-wider">
                     Maintenance Suite
                   </span>
                 </div>
-                <p className="text-xs text-[#767670] mt-0.5 font-sans">
-                  Centralized control center for deduplication, multi-source imports, database snapshots, and audit history.
-                </p>
+                <InlineEditableTitle
+                  value={
+                    customLabels.toolsPageSubtitle ||
+                    'Centralized control center for deduplication, multi-source imports, database snapshots, and audit history.'
+                  }
+                  onSave={(val) => updateCustomLabel('toolsPageSubtitle', val)}
+                  as="p"
+                  className="text-xs text-[#767670] mt-0.5 font-sans"
+                  tooltip="Click or pencil to rename Tools subtitle inline"
+                />
               </div>
             </div>
           </div>

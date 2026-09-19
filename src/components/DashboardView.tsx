@@ -15,7 +15,7 @@ import {
   SlidersHorizontal,
 } from 'lucide-react';
 import { useWardrobe } from '../context/WardrobeContext';
-import { WardrobeItem } from '../types';
+import { WardrobeItem, isHomewareCategory } from '../types';
 import { GarmentImage } from './GarmentImage';
 import {
   DashboardDisplaySettings,
@@ -23,6 +23,7 @@ import {
   DashboardDisplaySettingsModal,
 } from './DashboardDisplaySettingsModal';
 import { formatGbp } from '../utils/formatters';
+import { InlineEditableTitle } from './common/InlineEditableTitle';
 
 interface DashboardViewProps {
   onOpenAddItem: () => void;
@@ -46,6 +47,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     logItemWear,
     setActiveTab,
     stats,
+    customLabels,
+    updateCustomLabel,
   } = useWardrobe();
 
   // Load Dashboard Display Settings from LocalStorage
@@ -90,13 +93,23 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 Inventory &amp; Wardrobe Intelligence
               </span>
             </div>
-            <h1 className="text-xl sm:text-2xl font-serif font-bold text-[#1A1A1A]">
-              Sartorial Dashboard &amp; Lookbook
-            </h1>
-            <p className="text-xs text-[#767670] max-w-2xl">
-              Real-time inventory valuation, garment utilization, outfit formula research, and
-              structured change history in British Pounds (£).
-            </p>
+            <InlineEditableTitle
+              value={customLabels.dashboardPageTitle || 'Executive Wardrobe & Acquisition Dashboard'}
+              onSave={(val) => updateCustomLabel('dashboardPageTitle', val)}
+              as="h1"
+              className="text-xl sm:text-2xl font-serif font-bold text-[#1A1A1A]"
+              tooltip="Click or pencil to rename Dashboard title inline"
+            />
+            <InlineEditableTitle
+              value={
+                customLabels.dashboardPageSubtitle ||
+                'Real-time inventory valuation, garment utilization, outfit formula research, and structured change history in British Pounds (£).'
+              }
+              onSave={(val) => updateCustomLabel('dashboardPageSubtitle', val)}
+              as="p"
+              className="text-xs text-[#767670] max-w-2xl"
+              tooltip="Click or pencil to edit Dashboard subtitle inline"
+            />
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
@@ -337,7 +350,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
 
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2.5">
-            {items.slice(0, 6).map((item) => {
+            {items
+              .filter((item) => !isHomewareCategory(item.category))
+              .slice(0, 6)
+              .map((item) => {
               return (
                 <div
                   key={item.id}

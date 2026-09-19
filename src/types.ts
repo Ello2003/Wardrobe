@@ -1,23 +1,105 @@
 export type Category = string;
 
-export const DEFAULT_CATEGORIES: string[] = [
+export const DEFAULT_GARMENT_CATEGORIES: string[] = [
   'Outerwear',
   'Knitwear',
   'Tops',
+  'Shirts',
+  'T-Shirts',
   'Bottoms',
+  'Trousers',
+  'Jeans',
+  'Tailoring',
+  'Coats',
+  'Jacket',
   'Dresses & Jumpsuits',
   'Shoes',
   'Bags',
   'Accessories',
+  'Resort Wear',
+  'Socks',
   'Formalwear',
   'Activewear',
 ];
+
+export const DEFAULT_HOMEWARE_CATEGORIES: string[] = [
+  'Homeware',
+  'Furniture & Living',
+  'Lighting & Lamps',
+  'Audio & Tech',
+  'Electronics & Tech',
+  'Cameras & Optics',
+  'Hobbies & Instruments',
+  'Vinyl',
+  'Art & Books',
+  'Textiles & Bedding',
+  'Tableware & Dining',
+  'Kitchen & Cookware',
+  'Decor & Vases',
+  'Tools & EDC',
+  'Shoe Care & Maintenance',
+  'Misc Homeware',
+];
+
+export const DEFAULT_CATEGORIES: string[] = Array.from(
+  new Set([...DEFAULT_GARMENT_CATEGORIES, ...DEFAULT_HOMEWARE_CATEGORIES])
+);
+
+export const isHomewareCategory = (category: string | undefined | null): boolean => {
+  if (!category) return false;
+  const lower = category.trim().toLowerCase();
+  const homewareKeywords = [
+    'homeware',
+    'vinyl',
+    'bedding',
+    'textiles',
+    'tableware',
+    'dining',
+    'kitchen',
+    'cookware',
+    'lighting',
+    'lamps',
+    'decor',
+    'vases',
+    'furniture',
+    'living',
+    'audio',
+    'tech',
+    'electronics',
+    'gadget',
+    'camera',
+    'hobby',
+    'hobbies',
+    'instrument',
+    'tool',
+    'books',
+    'art & books',
+    'shoe care',
+    'cigar',
+    'humidor',
+    'misc',
+  ];
+  return (
+    DEFAULT_HOMEWARE_CATEGORIES.some((c) => c.toLowerCase() === lower) ||
+    homewareKeywords.some((kw) => lower.includes(kw))
+  );
+};
 
 export const normalizeCategoryName = (
   category: string | undefined | null,
   availableCategories: string[] = DEFAULT_CATEGORIES
 ): string => {
   if (!category || !category.trim()) return availableCategories[0] || 'Outerwear';
+  const clean = category.trim();
+  const found = availableCategories.find((c) => c.toLowerCase() === clean.toLowerCase());
+  return found || clean;
+};
+
+export const normalizeHomewareCategoryName = (
+  category: string | undefined | null,
+  availableCategories: string[] = DEFAULT_HOMEWARE_CATEGORIES
+): string => {
+  if (!category || !category.trim()) return availableCategories[0] || 'Homeware';
   const clean = category.trim();
   const found = availableCategories.find((c) => c.toLowerCase() === clean.toLowerCase());
   return found || clean;
@@ -37,6 +119,80 @@ export type ShoppingStatus =
   | 'Sold'
   | 'Cancelled'
   | 'Passed';
+
+export interface CustomLabels {
+  // App / Header
+  headerTitle: string;
+  headerSubtitle: string;
+
+  // Navigation tab labels
+  tabDashboard: string;
+  tabWardrobe: string;
+  tabShopping: string;
+  tabSelling: string;
+  tabAnalytics: string;
+  tabLookbook: string;
+  tabTrends: string;
+  tabTools: string;
+
+  // Page titles and subtitles
+  wardrobePageTitle: string;
+  wardrobePageSubtitle: string;
+  garmentCollectionsTitle: string;
+  homewareCollectionsTitle: string;
+
+  shoppingPageTitle: string;
+  shoppingPageSubtitle: string;
+
+  sellingPageTitle: string;
+  sellingPageSubtitle: string;
+
+  dashboardPageTitle: string;
+  dashboardPageSubtitle: string;
+
+  analyticsPageTitle: string;
+  analyticsPageSubtitle: string;
+
+  lookbookPageTitle: string;
+  lookbookPageSubtitle: string;
+
+  editorialPageTitle: string;
+  editorialPageSubtitle: string;
+
+  toolsPageTitle: string;
+  toolsPageSubtitle: string;
+}
+
+export const DEFAULT_CUSTOM_LABELS: CustomLabels = {
+  headerTitle: 'Wardrobe & Style Studio',
+  headerSubtitle: 'Wardrobe, lookbook, shopping, selling and style analytics.',
+  tabDashboard: 'Overview',
+  tabWardrobe: 'Wardrobe',
+  tabShopping: 'Shopping',
+  tabSelling: 'Selling',
+  tabAnalytics: 'Analytics',
+  tabLookbook: 'Lookbook',
+  tabTrends: 'Editorials',
+  tabTools: 'Tools',
+  wardrobePageTitle: 'Inventory Studio',
+  wardrobePageSubtitle: 'Wardrobe catalog, garment archive & care management',
+  garmentCollectionsTitle: 'Garment Categories & Collections',
+  homewareCollectionsTitle: 'Homeware Categories & Collections',
+  shoppingPageTitle: 'Shopping & Wishlist Manager',
+  shoppingPageSubtitle: 'Planned purchases, wishlist pipeline & retail tracking',
+  sellingPageTitle: 'Sales & Resale Studio',
+  sellingPageSubtitle: 'Resale listings, sold items archive & liquidation tracker',
+  dashboardPageTitle: 'Executive Wardrobe & Acquisition Dashboard',
+  dashboardPageSubtitle: 'At-a-glance economics, wear velocity, and collection balance',
+  analyticsPageTitle: 'Wardrobe Analytics & Intelligence',
+  analyticsPageSubtitle: 'Economics, cost-per-wear breakdown, and color analytics',
+  lookbookPageTitle: 'Lookbook & Editorial Research Studio',
+  lookbookPageSubtitle: 'Photographic street-style research, web styling imports, and bespoke wardrobe formulas',
+  editorialPageTitle: 'Editorial & Style Feed',
+  editorialPageSubtitle: 'Curated menswear, heritage fashion, and style feeds',
+  toolsPageTitle: 'Wardrobe Operations & Diagnostics',
+  toolsPageSubtitle: 'Bulk management, lossless backups, duplication audit & data tools',
+};
 
 export interface AppSettings {
   currency: 'GBP' | 'USD' | 'EUR' | 'JPY' | 'AUD' | 'CAD';
@@ -63,6 +219,7 @@ export interface AppSettings {
   vintedWorkerAuth?: VintedWorkerAuth;
   ebayAuth?: EbayAuth;
   googleDriveSettings?: GoogleDriveSettings;
+  customLabels?: CustomLabels;
 }
 
 export interface GoogleDriveSettings {
@@ -153,6 +310,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   vintedWorkerAuth: DEFAULT_VINTED_WORKER_AUTH,
   ebayAuth: DEFAULT_EBAY_AUTH,
   googleDriveSettings: DEFAULT_GOOGLE_DRIVE_SETTINGS,
+  customLabels: DEFAULT_CUSTOM_LABELS,
 };
 
 export interface BulkEditWardrobePayload {
@@ -245,8 +403,37 @@ export interface WardrobeItem {
   orderValue?: number;
   walletAmount?: number;
   lastUpdatedDate?: string;
+  // Homeware, Electronics & Hobbies Extended Criteria
+  itemType?: 'clothing' | 'homeware_lifestyle' | string;
+  modelNumber?: string;
+  dimensions?: string;
+  weight?: string;
+  powerSpecs?: string;
+  connectivity?: string;
+  warrantyInfo?: string;
+  includedAccessories?: string;
+  roomLocation?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export type QuickNoteCategory =
+  | 'Style Idea'
+  | 'To Buy'
+  | 'Fit & Sizing'
+  | 'Care & Alteration'
+  | 'Homeware & Tech'
+  | 'General';
+
+export interface QuickNote {
+  id: string;
+  content: string;
+  category: QuickNoteCategory;
+  isPinned: boolean;
+  isCompleted: boolean;
+  createdAt: string;
+  updatedAt?: string;
+  convertedTo?: 'shopping' | 'wardrobe' | null;
 }
 
 export interface LookbookOutfitPiece {

@@ -17,7 +17,10 @@ import {
   DEFAULT_CATEGORIES,
   AppSettings,
   DEFAULT_APP_SETTINGS,
+  CustomLabels,
+  DEFAULT_CUSTOM_LABELS,
   normalizeCategoryName,
+  isHomewareCategory,
 } from '../types';
 import {
   VintedOrder,
@@ -38,6 +41,9 @@ import {
   INITIAL_SALE_ITEMS,
   INITIAL_VERSION_LOGS,
   INITIAL_SNAPSHOTS,
+  INITIAL_CATEGORIES,
+  INITIAL_GARMENT_CATEGORIES,
+  INITIAL_HOMEWARE_CATEGORIES,
 } from '../data/initialData';
 import {
   isGarmentDuplicate,
@@ -91,6 +97,8 @@ interface UndoState {
   shoppingList: ShoppingItem[];
   saleItems: SaleItem[];
   categories: string[];
+  garmentCategories?: string[];
+  homewareCategories?: string[];
   monthlyBudget: number;
   actionTitle: string;
   timestamp: number;
@@ -108,6 +116,8 @@ interface WardrobeContextType {
   changeLogs: VersionChangeLog[];
   snapshots: WardrobeSnapshot[];
   categories: string[];
+  garmentCategories: string[];
+  homewareCategories: string[];
   monthlyBudget: number; // in currency units
   spentThisMonth: number; // in currency units
   currentVersion: number;
@@ -118,6 +128,9 @@ interface WardrobeContextType {
   settings: AppSettings;
   updateSettings: (updates: Partial<AppSettings>) => void;
   resetSettings: () => void;
+  customLabels: CustomLabels;
+  updateCustomLabel: (key: keyof CustomLabels, value: string) => void;
+  resetCustomLabels: () => void;
   formatCurrency: (amount: number) => string;
 
   // Undo & Bulk Operations
@@ -175,6 +188,18 @@ interface WardrobeContextType {
   updateCategory: (oldName: string, newName: string) => void;
   deleteCategory: (name: string) => void;
   resetCategories: () => void;
+
+  // Garment Category Actions
+  addGarmentCategory: (name: string) => void;
+  updateGarmentCategory: (oldName: string, newName: string) => void;
+  deleteGarmentCategory: (name: string) => void;
+  resetGarmentCategories: () => void;
+
+  // Homeware Category Actions
+  addHomewareCategory: (name: string) => void;
+  updateHomewareCategory: (oldName: string, newName: string) => void;
+  deleteHomewareCategory: (name: string) => void;
+  resetHomewareCategories: () => void;
 
   // Wardrobe Item Actions
   addItem: (itemData: Omit<WardrobeItem, 'id' | 'createdAt' | 'updatedAt' | 'wearCount'>, checkDuplicate?: boolean) => string;
@@ -585,7 +610,9 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed;
+          const existingIds = new Set(parsed.map((l: any) => l.id));
+          const missingInitial = INITIAL_VERSION_LOGS.filter((l) => !existingIds.has(l.id));
+          return [...parsed, ...missingInitial];
         }
       }
     } catch {
@@ -659,15 +686,36 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   });
 
-  const [categories, setCategories] = useState<string[]>(() => {
+  const [garmentCategories, setGarmentCategories] = useState<string[]>(() => {
     try {
-      const saved = localStorage.getItem(`${STORAGE_KEY}_categories`);
+      const saved = localStorage.getItem(`${STORAGE_KEY}_garment_categories`);
       const parsed = saved ? JSON.parse(saved) : null;
-      return Array.isArray(parsed) && parsed.length > 0 ? parsed : DEFAULT_CATEGORIES;
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return Array.from(new Set([...parsed, ...INITIAL_GARMENT_CATEGORIES]));
+      }
+      return INITIAL_GARMENT_CATEGORIES;
     } catch {
-      return DEFAULT_CATEGORIES;
+      return INITIAL_GARMENT_CATEGORIES;
     }
   });
+
+  const [homewareCategories, setHomewareCategories] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem(`${STORAGE_KEY}_homeware_categories`);
+      const parsed = saved ? JSON.parse(saved) : null;
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return Array.from(new Set([...parsed, ...INITIAL_HOMEWARE_CATEGORIES]));
+      }
+      return INITIAL_HOMEWARE_CATEGORIES;
+    } catch {
+      return INITIAL_HOMEWARE_CATEGORIES;
+    }
+  });
+
+  const categories = useMemo(
+    () => Array.from(new Set([...garmentCategories, ...homewareCategories])),
+    [garmentCategories, homewareCategories]
+  );
 
   const [monthlyBudget, setMonthlyBudget] = useState<number>(() => {
     try {
@@ -720,6 +768,42 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   }, []);
 
+  const customLabels: CustomLabels = useMemo(() => {
+    return {
+      ...DEFAULT_CUSTOM_LABELS,
+      ...(settings.customLabels || {}),
+    };
+  }, [settings.customLabels]);
+
+  const updateCustomLabel = useCallback(
+    (key: keyof CustomLabels, value: string) => {
+      const nextLabels = {
+        ...customLabels,
+        [key]: value,
+      };
+      updateSettings({
+        customLabels: nextLabels,
+      });
+      if (key === 'headerTitle') {
+        document.title = value.trim() || DEFAULT_CUSTOM_LABELS.headerTitle;
+      }
+    },
+    [customLabels, updateSettings]
+  );
+
+  const resetCustomLabels = useCallback(() => {
+    updateSettings({
+      customLabels: DEFAULT_CUSTOM_LABELS,
+    });
+    document.title = DEFAULT_CUSTOM_LABELS.headerTitle;
+  }, [updateSettings]);
+
+  useEffect(() => {
+    if (customLabels.headerTitle) {
+      document.title = customLabels.headerTitle;
+    }
+  }, [customLabels.headerTitle]);
+
   const formatCurrency = useCallback(
     (amount: number) => {
       const sym = settings.currencySymbol || '£';
@@ -759,6 +843,8 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           shoppingList: JSON.parse(JSON.stringify(shoppingList)),
           saleItems: JSON.parse(JSON.stringify(saleItems)),
           categories: JSON.parse(JSON.stringify(categories)),
+          garmentCategories: JSON.parse(JSON.stringify(garmentCategories)),
+          homewareCategories: JSON.parse(JSON.stringify(homewareCategories)),
           monthlyBudget,
           actionTitle,
           timestamp: Date.now(),
@@ -785,7 +871,8 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     setOutfits(lastState.outfits);
     setShoppingList(lastState.shoppingList);
     if (lastState.saleItems) setSaleItems(lastState.saleItems);
-    setCategories(lastState.categories);
+    if (lastState.garmentCategories) setGarmentCategories(lastState.garmentCategories);
+    if (lastState.homewareCategories) setHomewareCategories(lastState.homewareCategories);
     setMonthlyBudget(lastState.monthlyBudget);
     setUndoStack(remaining);
     setUndoToast(null);
@@ -820,7 +907,9 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   useEffect(() => {
     saveEntitySafely(`${STORAGE_KEY}_categories`, categories, STORAGE_KEY);
-  }, [categories]);
+    saveEntitySafely(`${STORAGE_KEY}_garment_categories`, garmentCategories, STORAGE_KEY);
+    saveEntitySafely(`${STORAGE_KEY}_homeware_categories`, homewareCategories, STORAGE_KEY);
+  }, [categories, garmentCategories, homewareCategories]);
 
   useEffect(() => {
     saveEntitySafely(`${STORAGE_KEY}_budget`, monthlyBudget, STORAGE_KEY);
@@ -4928,9 +5017,24 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           DEFAULT_CATEGORIES.forEach((c) => extractedCategories.add(c));
         }
 
-        const resolvedCategories = Array.from(extractedCategories);
-        setCategories(resolvedCategories);
-        saveEntitySafely(`${STORAGE_KEY}_categories`, resolvedCategories, STORAGE_KEY);
+        const allExtracted = Array.from(extractedCategories);
+        const resolvedGarments = Array.from(
+          new Set([
+            ...INITIAL_GARMENT_CATEGORIES,
+            ...allExtracted.filter((c) => !isHomewareCategory(c)),
+          ])
+        );
+        const resolvedHomeware = Array.from(
+          new Set([
+            ...INITIAL_HOMEWARE_CATEGORIES,
+            ...allExtracted.filter((c) => isHomewareCategory(c)),
+          ])
+        );
+        const totalCategoriesCount = resolvedGarments.length + resolvedHomeware.length;
+        setGarmentCategories(resolvedGarments);
+        setHomewareCategories(resolvedHomeware);
+        saveEntitySafely(`${STORAGE_KEY}_garment_categories`, resolvedGarments, STORAGE_KEY);
+        saveEntitySafely(`${STORAGE_KEY}_homeware_categories`, resolvedHomeware, STORAGE_KEY);
 
         if (mode === 'merge') {
           // Merge items
@@ -4975,12 +5079,12 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           'BULK_IMPORT',
           'system',
           'JSON Backup Restore',
-          `Restored wardrobe database (${sanitizedItems.length} items, ${resolvedCategories.length} categories, ${container.outfits?.length || 0} looks) in ${mode} mode.`
+          `Restored wardrobe database (${sanitizedItems.length} items, ${totalCategoriesCount} categories, ${container.outfits?.length || 0} looks) in ${mode} mode.`
         );
 
         return {
           success: true,
-          message: `Successfully restored ${sanitizedItems.length} items, ${resolvedCategories.length} categories, and ${container.outfits?.length || 0} looks.`,
+          message: `Successfully restored ${sanitizedItems.length} items, ${totalCategoriesCount} categories, and ${container.outfits?.length || 0} looks.`,
         };
       } catch (err: any) {
         return { success: false, message: err?.message || 'Failed to parse JSON file.' };
@@ -4989,33 +5093,33 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     [items, outfits, shoppingList, saleItems, recordChange]
   );
 
-  // CATEGORY MANAGEMENT
-  const addCategory = useCallback(
+  // GARMENT CATEGORY MANAGEMENT
+  const addGarmentCategory = useCallback(
     (name: string) => {
       const trimmed = name.trim();
       if (!trimmed) return;
-      captureUndoState(`Created category "${trimmed}"`);
-      setCategories((prev) => {
+      captureUndoState(`Created garment category "${trimmed}"`);
+      setGarmentCategories((prev) => {
         if (prev.some((c) => c.toLowerCase() === trimmed.toLowerCase())) return prev;
         return [...prev, trimmed];
       });
       recordChange(
         'ITEM_UPDATED',
         'system',
-        `Category: ${trimmed}`,
-        `Created new custom category "${trimmed}".`
+        `Garment Category: ${trimmed}`,
+        `Created new garment category "${trimmed}".`
       );
     },
     [captureUndoState, recordChange]
   );
 
-  const updateCategory = useCallback(
+  const updateGarmentCategory = useCallback(
     (oldName: string, newName: string) => {
       const trimmed = newName.trim();
       if (!trimmed || trimmed === oldName) return;
 
-      captureUndoState(`Renamed category "${oldName}" to "${trimmed}"`);
-      setCategories((prev) => prev.map((c) => (c === oldName ? trimmed : c)));
+      captureUndoState(`Renamed garment category "${oldName}" to "${trimmed}"`);
+      setGarmentCategories((prev) => prev.map((c) => (c === oldName ? trimmed : c)));
 
       // Update in items
       setItems((prev) =>
@@ -5035,17 +5139,17 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       recordChange(
         'ITEM_UPDATED',
         'system',
-        `Category Renamed`,
-        `Renamed category "${oldName}" to "${trimmed}".`
+        `Garment Category Renamed`,
+        `Renamed garment category "${oldName}" to "${trimmed}".`
       );
     },
     [captureUndoState, recordChange]
   );
 
-  const deleteCategory = useCallback(
+  const deleteGarmentCategory = useCallback(
     (nameToDelete: string) => {
-      captureUndoState(`Deleted category "${nameToDelete}"`);
-      setCategories((prev) => {
+      captureUndoState(`Deleted garment category "${nameToDelete}"`);
+      setGarmentCategories((prev) => {
         const remaining = prev.filter((c) => c !== nameToDelete);
         const fallback = remaining[0] || 'Tops';
 
@@ -5076,16 +5180,155 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       recordChange(
         'ITEM_DELETED',
         'system',
-        `Category: ${nameToDelete}`,
-        `Deleted category "${nameToDelete}".`
+        `Garment Category: ${nameToDelete}`,
+        `Deleted garment category "${nameToDelete}".`
       );
     },
     [captureUndoState, recordChange]
   );
 
+  const resetGarmentCategories = useCallback(() => {
+    captureUndoState('Reset garment categories to default');
+    setGarmentCategories(INITIAL_GARMENT_CATEGORIES);
+  }, [captureUndoState]);
+
+  // HOMEWARE CATEGORY MANAGEMENT
+  const addHomewareCategory = useCallback(
+    (name: string) => {
+      const trimmed = name.trim();
+      if (!trimmed) return;
+      captureUndoState(`Created homeware category "${trimmed}"`);
+      setHomewareCategories((prev) => {
+        if (prev.some((c) => c.toLowerCase() === trimmed.toLowerCase())) return prev;
+        return [...prev, trimmed];
+      });
+      recordChange(
+        'ITEM_UPDATED',
+        'system',
+        `Homeware Category: ${trimmed}`,
+        `Created new homeware category "${trimmed}".`
+      );
+    },
+    [captureUndoState, recordChange]
+  );
+
+  const updateHomewareCategory = useCallback(
+    (oldName: string, newName: string) => {
+      const trimmed = newName.trim();
+      if (!trimmed || trimmed === oldName) return;
+
+      captureUndoState(`Renamed homeware category "${oldName}" to "${trimmed}"`);
+      setHomewareCategories((prev) => prev.map((c) => (c === oldName ? trimmed : c)));
+
+      // Update in items
+      setItems((prev) =>
+        prev.map((item) => (item.category === oldName ? { ...item, category: trimmed } : item))
+      );
+
+      // Update in shopping list
+      setShoppingList((prev) =>
+        prev.map((s) => (s.category === oldName ? { ...s, category: trimmed } : s))
+      );
+
+      // Update in sale items
+      setSaleItems((prev) =>
+        prev.map((s) => (s.category === oldName ? { ...s, category: trimmed } : s))
+      );
+
+      recordChange(
+        'ITEM_UPDATED',
+        'system',
+        `Homeware Category Renamed`,
+        `Renamed homeware category "${oldName}" to "${trimmed}".`
+      );
+    },
+    [captureUndoState, recordChange]
+  );
+
+  const deleteHomewareCategory = useCallback(
+    (nameToDelete: string) => {
+      captureUndoState(`Deleted homeware category "${nameToDelete}"`);
+      setHomewareCategories((prev) => {
+        const remaining = prev.filter((c) => c !== nameToDelete);
+        const fallback = remaining[0] || 'Homeware';
+
+        // Reassign affected items
+        setItems((itemPrev) =>
+          itemPrev.map((item) =>
+            item.category === nameToDelete ? { ...item, category: fallback } : item
+          )
+        );
+
+        // Reassign affected shopping items
+        setShoppingList((shopPrev) =>
+          shopPrev.map((s) =>
+            s.category === nameToDelete ? { ...s, category: fallback } : s
+          )
+        );
+
+        // Reassign affected sale items
+        setSaleItems((salePrev) =>
+          salePrev.map((s) =>
+            s.category === nameToDelete ? { ...s, category: fallback } : s
+          )
+        );
+
+        return remaining;
+      });
+
+      recordChange(
+        'ITEM_DELETED',
+        'system',
+        `Homeware Category: ${nameToDelete}`,
+        `Deleted homeware category "${nameToDelete}".`
+      );
+    },
+    [captureUndoState, recordChange]
+  );
+
+  const resetHomewareCategories = useCallback(() => {
+    captureUndoState('Reset homeware categories to default');
+    setHomewareCategories(INITIAL_HOMEWARE_CATEGORIES);
+  }, [captureUndoState]);
+
+  // UNIFIED CATEGORY MANAGEMENT (Backward-Compatible)
+  const addCategory = useCallback(
+    (name: string) => {
+      if (isHomewareCategory(name)) {
+        addHomewareCategory(name);
+      } else {
+        addGarmentCategory(name);
+      }
+    },
+    [addHomewareCategory, addGarmentCategory]
+  );
+
+  const updateCategory = useCallback(
+    (oldName: string, newName: string) => {
+      if (homewareCategories.includes(oldName)) {
+        updateHomewareCategory(oldName, newName);
+      } else {
+        updateGarmentCategory(oldName, newName);
+      }
+    },
+    [homewareCategories, updateHomewareCategory, updateGarmentCategory]
+  );
+
+  const deleteCategory = useCallback(
+    (nameToDelete: string) => {
+      if (homewareCategories.includes(nameToDelete)) {
+        deleteHomewareCategory(nameToDelete);
+      } else {
+        deleteGarmentCategory(nameToDelete);
+      }
+    },
+    [homewareCategories, deleteHomewareCategory, deleteGarmentCategory]
+  );
+
   const resetCategories = useCallback(() => {
     captureUndoState('Reset categories to default');
-    setCategories(DEFAULT_CATEGORIES);
+    setGarmentCategories(INITIAL_GARMENT_CATEGORIES);
+    setHomewareCategories(INITIAL_HOMEWARE_CATEGORIES);
   }, [captureUndoState]);
 
   // 21. RESET TO DEFAULT DATA
@@ -5096,7 +5339,8 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     setSaleItems(INITIAL_SALE_ITEMS);
     setChangeLogs(INITIAL_VERSION_LOGS);
     setSnapshots(INITIAL_SNAPSHOTS);
-    setCategories(DEFAULT_CATEGORIES);
+    setGarmentCategories(INITIAL_GARMENT_CATEGORIES);
+    setHomewareCategories(INITIAL_HOMEWARE_CATEGORIES);
     setMonthlyBudget(350);
   }, []);
 
@@ -5278,6 +5522,9 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       settings,
       updateSettings,
       resetSettings,
+      customLabels,
+      updateCustomLabel,
+      resetCustomLabels,
       formatCurrency,
       undoLastAction,
       canUndo: undoStack.length > 0,
@@ -5300,10 +5547,20 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       mergeTagsGlobally,
       consolidateAllDuplicateTags,
       renameBrandGlobally,
+      garmentCategories,
+      homewareCategories,
       addCategory,
       updateCategory,
       deleteCategory,
       resetCategories,
+      addGarmentCategory,
+      updateGarmentCategory,
+      deleteGarmentCategory,
+      resetGarmentCategories,
+      addHomewareCategory,
+      updateHomewareCategory,
+      deleteHomewareCategory,
+      resetHomewareCategories,
       addItem,
       updateItem,
       deleteItem,
@@ -5376,6 +5633,9 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       settings,
       updateSettings,
       resetSettings,
+      customLabels,
+      updateCustomLabel,
+      resetCustomLabels,
       formatCurrency,
       undoLastAction,
       undoStack.length,
@@ -5398,10 +5658,21 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       mergeTagsGlobally,
       consolidateAllDuplicateTags,
       renameBrandGlobally,
+      categories,
+      garmentCategories,
+      homewareCategories,
       addCategory,
       updateCategory,
       deleteCategory,
       resetCategories,
+      addGarmentCategory,
+      updateGarmentCategory,
+      deleteGarmentCategory,
+      resetGarmentCategories,
+      addHomewareCategory,
+      updateHomewareCategory,
+      deleteHomewareCategory,
+      resetHomewareCategories,
       addItem,
       updateItem,
       deleteItem,

@@ -9,7 +9,7 @@ import {
   Tag,
   PoundSterling,
 } from 'lucide-react';
-import { WardrobeItem } from '../types';
+import { WardrobeItem, isHomewareCategory } from '../types';
 import { useWardrobe } from '../context/WardrobeContext';
 import { GarmentImage } from './GarmentImage';
 
@@ -31,6 +31,7 @@ export const ItemDetailModal: React.FC<ItemDetailModalProps> = ({ item, onClose,
 
   if (!item) return null;
 
+  const isHomeware = isHomewareCategory(item.category);
   const itemTags = Array.isArray(item.tags) ? item.tags : [];
   const itemSeasons = Array.isArray(item.season)
     ? item.season
@@ -121,7 +122,9 @@ export const ItemDetailModal: React.FC<ItemDetailModalProps> = ({ item, onClose,
             </div>
 
             <div className="p-2.5 rounded-lg bg-[#F8F7F4] border border-[#E5E5E1] text-center">
-              <span className="text-[9px] font-mono text-[#767670] uppercase font-semibold">Times Worn</span>
+              <span className="text-[9px] font-mono text-[#767670] uppercase font-semibold">
+                {isHomeware ? 'Times Used / Played' : 'Times Worn'}
+              </span>
               <div className="text-base font-serif font-bold text-[#1A1A1A]">{item.wearCount}x</div>
               <span className="text-[9px] text-[#767670]">
                 {item.lastWornDate ? `Last: ${item.lastWornDate}` : 'Never logged'}
@@ -138,32 +141,39 @@ export const ItemDetailModal: React.FC<ItemDetailModalProps> = ({ item, onClose,
           {/* Detailed Specs */}
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs bg-[#F8F7F4] p-3 rounded-lg border border-[#E5E5E1]">
             <div>
-              <span className="text-[#767670] font-mono text-[10px]">Color:</span>
-              <p className="text-[#1A1A1A] font-semibold">{item.color}</p>
+              <span className="text-[#767670] font-mono text-[10px]">{isHomeware ? 'Finish / Color:' : 'Color:'}</span>
+              <p className="text-[#1A1A1A] font-semibold">{item.color || 'Standard'}</p>
+            </div>
+
+            {!isHomeware ? (
+              <div>
+                <span className="text-[#767670] font-mono text-[10px]">Season:</span>
+                <p className="text-[#1A1A1A] font-semibold">{itemSeasons.join(', ')}</p>
+              </div>
+            ) : (
+              <div>
+                <span className="text-[#767670] font-mono text-[10px]">Category:</span>
+                <p className="text-[#1A1A1A] font-semibold">{item.category}</p>
+              </div>
+            )}
+
+            <div>
+              <span className="text-[#767670] font-mono text-[10px]">{isHomeware ? 'Dimensions / Size:' : 'Size / Fit:'}</span>
+              <p className="text-[#1A1A1A] font-semibold">{item.dimensions || item.size || 'Standard'}</p>
             </div>
 
             <div>
-              <span className="text-[#767670] font-mono text-[10px]">Season:</span>
-              <p className="text-[#1A1A1A] font-semibold">{itemSeasons.join(', ')}</p>
+              <span className="text-[#767670] font-mono text-[10px]">{isHomeware ? 'Materials / Build:' : 'Material:'}</span>
+              <p className="text-[#1A1A1A] font-semibold">{item.material || 'Standard Build'}</p>
             </div>
 
             <div>
-              <span className="text-[#767670] font-mono text-[10px]">Size / Fit:</span>
-              <p className="text-[#1A1A1A] font-semibold">{item.size || 'Standard Fit'}</p>
+              <span className="text-[#767670] font-mono text-[10px]">{isHomeware ? 'Room / Placement:' : 'Storage Location:'}</span>
+              <p className="text-[#1A1A1A] font-semibold">{item.roomLocation || item.storageLocation || 'Main Space'}</p>
             </div>
 
             <div>
-              <span className="text-[#767670] font-mono text-[10px]">Material:</span>
-              <p className="text-[#1A1A1A] font-semibold">{item.material || 'Natural fabric'}</p>
-            </div>
-
-            <div>
-              <span className="text-[#767670] font-mono text-[10px]">Storage Location:</span>
-              <p className="text-[#1A1A1A] font-semibold">{item.storageLocation || 'Main Closet'}</p>
-            </div>
-
-            <div>
-              <span className="text-[#767670] font-mono text-[10px]">Purchase Date:</span>
+              <span className="text-[#767670] font-mono text-[10px]">Acquisition Date:</span>
               <p className="text-[#1A1A1A] font-semibold">{item.purchaseDate || 'Unknown'}</p>
             </div>
 
@@ -174,6 +184,69 @@ export const ItemDetailModal: React.FC<ItemDetailModalProps> = ({ item, onClose,
               </div>
             )}
           </div>
+
+          {/* Homeware, Electronics & Hardware Specs Card if present */}
+          {(item.modelNumber || item.powerSpecs || item.connectivity || item.warrantyInfo || item.includedAccessories || item.weight) && (
+            <div className="p-3 bg-[#FAF8F5] border border-[#E8DEC8] rounded-lg space-y-2 text-xs">
+              <div className="flex items-center justify-between text-[11px] font-mono font-semibold text-[#8C7355]">
+                <span className="flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-[#8C7355]"></span>
+                  Hardware, Electronics &amp; Lifestyle Specs
+                </span>
+                {item.modelNumber && (
+                  <span className="px-2 py-0.5 bg-[#EAE3D2] text-[#63503B] rounded-xs text-[10px] font-mono">
+                    {item.modelNumber}
+                  </span>
+                )}
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 font-mono text-[11px] text-[#4A4A45]">
+                {item.modelNumber && (
+                  <div>
+                    <span className="text-[#8C7355] text-[10px] block">Model / Edition:</span>
+                    <strong className="text-[#1A1A1A]">{item.modelNumber}</strong>
+                  </div>
+                )}
+                {item.weight && (
+                  <div>
+                    <span className="text-[#8C7355] text-[10px] block">Weight:</span>
+                    <strong className="text-[#1A1A1A]">{item.weight}</strong>
+                  </div>
+                )}
+                {item.powerSpecs && (
+                  <div>
+                    <span className="text-[#8C7355] text-[10px] block">Power / Battery:</span>
+                    <strong className="text-[#1A1A1A]">{item.powerSpecs}</strong>
+                  </div>
+                )}
+                {item.connectivity && (
+                  <div>
+                    <span className="text-[#8C7355] text-[10px] block">Connectivity:</span>
+                    <strong className="text-[#1A1A1A]">{item.connectivity}</strong>
+                  </div>
+                )}
+                {item.warrantyInfo && (
+                  <div>
+                    <span className="text-[#8C7355] text-[10px] block">Warranty / Service:</span>
+                    <strong className="text-[#1A1A1A]">{item.warrantyInfo}</strong>
+                  </div>
+                )}
+                {item.roomLocation && (
+                  <div>
+                    <span className="text-[#8C7355] text-[10px] block">Room Location:</span>
+                    <strong className="text-[#1A1A1A]">{item.roomLocation}</strong>
+                  </div>
+                )}
+              </div>
+
+              {item.includedAccessories && (
+                <div className="pt-1.5 border-t border-[#E8DEC8]/60 text-[11px]">
+                  <span className="text-[#8C7355] font-mono font-semibold">Included Accessories &amp; Box: </span>
+                  <span className="text-[#4A4A45]">{item.includedAccessories}</span>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Vinted Acquisition Provenance */}
           {(item.seller || item.orderStatus || item.transactionType || item.orderValue || item.retailerName === 'Vinted' || itemTags.includes('vinted')) && (
@@ -326,7 +399,7 @@ export const ItemDetailModal: React.FC<ItemDetailModalProps> = ({ item, onClose,
             className="flex items-center gap-1 px-3 py-1.5 text-xs font-semibold bg-[#8C7355] hover:bg-[#786248] text-white rounded-md shadow-xs transition-all cursor-pointer"
           >
             <Plus className="w-3.5 h-3.5" />
-            Log Wear for Today (+1)
+            {isHomeware ? 'Log Use / Play (+1)' : 'Log Wear for Today (+1)'}
           </button>
         </div>
       </div>

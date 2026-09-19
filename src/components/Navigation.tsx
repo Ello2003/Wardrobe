@@ -3,6 +3,7 @@ import {
   History,
   Layers,
   Newspaper,
+  PenLine,
   Plus,
   PoundSterling,
   Search,
@@ -14,6 +15,7 @@ import {
   Wrench,
 } from 'lucide-react';
 import { useWardrobe } from '../context/WardrobeContext';
+import { InlineEditableTitle } from './common/InlineEditableTitle';
 
 interface NavigationProps {
   onOpenAddItem: () => void;
@@ -61,7 +63,33 @@ export const Navigation = ({
     saleItems,
     undoLastAction,
     canUndo,
+    customLabels,
+    updateCustomLabel,
+    settings,
   } = useWardrobe();
+
+  const getTabLabel = (id: string, defaultLabel: string) => {
+    switch (id) {
+      case 'dashboard':
+        return customLabels.tabDashboard || defaultLabel;
+      case 'wardrobe':
+        return customLabels.tabWardrobe || defaultLabel;
+      case 'shopping':
+        return customLabels.tabShopping || defaultLabel;
+      case 'selling':
+        return customLabels.tabSelling || defaultLabel;
+      case 'analytics':
+        return customLabels.tabAnalytics || defaultLabel;
+      case 'lookbook':
+        return customLabels.tabLookbook || defaultLabel;
+      case 'trends':
+        return customLabels.tabTrends || defaultLabel;
+      case 'tools':
+        return customLabels.tabTools || defaultLabel;
+      default:
+        return defaultLabel;
+    }
+  };
 
   const counts = {
     items: items.length,
@@ -74,20 +102,30 @@ export const Navigation = ({
     <header className="sticky top-0 z-40 border-b border-[#E5E5E1] bg-white/95 text-[#1A1A1A] backdrop-blur-md">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         <div className="flex h-14 items-center justify-between gap-4">
-          <div className="flex items-center gap-2.5">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#8C7355] text-white shadow-xs">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[#8C7355] text-white shadow-xs">
               <Shirt className="h-4 w-4" />
             </div>
-            <div>
-              <div className="flex items-center gap-1.5">
-                <span className="font-serif text-base font-semibold tracking-tight">Wardrobe &amp; Style Studio</span>
-                <span className="inline-flex items-center gap-0.5 rounded border border-[#E5E5E1] bg-[#F3F2EE] px-1.5 py-0.5 font-mono text-[10px] font-semibold text-[#8C7355]">
-                  <PoundSterling className="h-2.5 w-2.5" /> GBP
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <InlineEditableTitle
+                  value={customLabels.headerTitle}
+                  onSave={(val) => updateCustomLabel('headerTitle', val)}
+                  as="span"
+                  className="font-serif text-base font-semibold tracking-tight"
+                  tooltip="Click or pencil to rename site header inline"
+                />
+                <span className="inline-flex shrink-0 items-center gap-0.5 rounded border border-[#E5E5E1] bg-[#F3F2EE] px-1.5 py-0.5 font-mono text-[10px] font-semibold text-[#8C7355]">
+                  {settings.currencySymbol || '£'} {settings.currency || 'GBP'}
                 </span>
               </div>
-              <p className="font-sans text-[10px] tracking-tight text-[#767670]">
-                Wardrobe, lookbook, shopping, selling and style analytics.
-              </p>
+              <InlineEditableTitle
+                value={customLabels.headerSubtitle}
+                onSave={(val) => updateCustomLabel('headerSubtitle', val)}
+                as="p"
+                className="font-sans text-[10px] tracking-tight text-[#767670] truncate"
+                tooltip="Click or pencil to edit header subtitle inline"
+              />
             </div>
           </div>
 
@@ -145,6 +183,15 @@ export const Navigation = ({
             </button>
             <button
               type="button"
+              onClick={() => window.dispatchEvent(new CustomEvent('toggle-quick-notes'))}
+              aria-label="Quick Notes & Scratchpad (Alt+N)"
+              title="Quick Notes & Scratchpad (Alt+N)"
+              className="rounded-md border border-[#E5E5E1] p-1.5 text-[#767670] transition-all hover:bg-[#F3F2EE] hover:text-[#1A1A1A] cursor-pointer"
+            >
+              <PenLine className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
               onClick={onOpenSettings}
               aria-label="Open settings"
               className="rounded-md border border-[#E5E5E1] p-1.5 text-[#767670] transition-all hover:bg-[#F3F2EE] hover:text-[#1A1A1A]"
@@ -172,7 +219,7 @@ export const Navigation = ({
                 }`}
               >
                 <Icon className={`h-3.5 w-3.5 ${isActive ? 'text-amber-300' : 'text-[#767670]'}`} />
-                <span>{label}</span>
+                <span>{getTabLabel(id, label)}</span>
                 {count !== undefined && (
                   <span className={`rounded-full px-1.5 py-0.2 font-mono text-[9px] ${isActive ? 'bg-stone-700 text-amber-200' : 'bg-[#E5E5E1] text-[#5A5A55]'}`}>
                     {count}

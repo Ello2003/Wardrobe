@@ -1,6 +1,36 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { X, Link2, Sparkles, Loader2, Check, Upload, Image as ImageIcon, ClipboardPaste, AlertTriangle, Layers } from 'lucide-react';
-import { WardrobeItem, Category, Season, Condition } from '../types';
+import {
+  X,
+  Link2,
+  Sparkles,
+  Loader2,
+  Check,
+  Upload,
+  Image as ImageIcon,
+  ClipboardPaste,
+  AlertTriangle,
+  Shirt,
+  Tv,
+  Cpu,
+  Home,
+  Wrench,
+  Camera,
+  Music,
+  BookOpen,
+  Box,
+  Layers,
+  Info,
+} from 'lucide-react';
+import {
+  WardrobeItem,
+  Category,
+  Season,
+  Condition,
+  isHomewareCategory,
+  DEFAULT_CATEGORIES,
+  DEFAULT_GARMENT_CATEGORIES,
+  DEFAULT_HOMEWARE_CATEGORIES,
+} from '../types';
 import { useWardrobe } from '../context/WardrobeContext';
 import { GarmentImage } from './GarmentImage';
 import { isGarmentDuplicate } from './duplicateMerge/duplicateUtils';
@@ -15,35 +45,130 @@ interface ItemFormModalProps {
 
 const ALL_SEASONS: Season[] = ['Autumn', 'Winter', 'Spring', 'Summer', 'All-Season'];
 
+export type FormTab = 'clothing' | 'homeware';
+
+interface QuickPreset {
+  id: string;
+  label: string;
+  category: string;
+  icon: React.ElementType;
+  brandPlaceholder: string;
+  namePlaceholder: string;
+  materialPlaceholder: string;
+}
+
+const HOMEWARE_QUICK_PRESETS: QuickPreset[] = [
+  {
+    id: 'audio_tech',
+    label: 'Audio & Tech',
+    category: 'Audio & Tech',
+    icon: Tv,
+    brandPlaceholder: 'e.g. Braun, Sony, Teenage Engineering, Apple',
+    namePlaceholder: 'e.g. SK4 Record Player, WH-1000XM5 Headphones',
+    materialPlaceholder: 'e.g. Anodized Aluminum, Walnut Wood, Matte Polymer',
+  },
+  {
+    id: 'electronics',
+    label: 'Electronics',
+    category: 'Electronics & Tech',
+    icon: Cpu,
+    brandPlaceholder: 'e.g. Logitech, Dyson, Philips Hue, Keychron',
+    namePlaceholder: 'e.g. Q1 Pro Mechanical Keyboard, Purifier Cool',
+    materialPlaceholder: 'e.g. CNC Aluminum, ABS Plastic, Brass Plate',
+  },
+  {
+    id: 'cameras',
+    label: 'Cameras & Optics',
+    category: 'Cameras & Optics',
+    icon: Camera,
+    brandPlaceholder: 'e.g. Leica, Fujifilm, Sony, Hasselblad',
+    namePlaceholder: 'e.g. M11 Rangefinder, X100V, 50mm f/1.4 Summilux',
+    materialPlaceholder: 'e.g. Magnesium Alloy, Optical Glass, Brass',
+  },
+  {
+    id: 'furniture',
+    label: 'Furniture & Living',
+    category: 'Furniture & Living',
+    icon: Home,
+    brandPlaceholder: 'e.g. Vitra, Herman Miller, Hay, Muuto, Artek',
+    namePlaceholder: 'e.g. Eames DSW Side Chair, Noguchi Coffee Table',
+    materialPlaceholder: 'e.g. Solid Oiled Oak, Molded Plywood, Wool Bouclé',
+  },
+  {
+    id: 'hobbies',
+    label: 'Hobbies & Gear',
+    category: 'Hobbies & Instruments',
+    icon: Music,
+    brandPlaceholder: 'e.g. Fender, Gibson, Korg, Snow Peak, Rapha',
+    namePlaceholder: 'e.g. 1962 Reissue Stratocaster, Titanium Camping Mug',
+    materialPlaceholder: 'e.g. Alder Wood, Rosewood, Titanium, Nitrocellulose',
+  },
+  {
+    id: 'tableware',
+    label: 'Tableware & Kitchen',
+    category: 'Tableware & Dining',
+    icon: Box,
+    brandPlaceholder: 'e.g. Alessi, Iittala, Le Creuset, Moccamaster',
+    namePlaceholder: 'e.g. KBGV Select Filter Coffee Maker, Cast Iron Pot',
+    materialPlaceholder: 'e.g. Enameled Cast Iron, Borosilicate Glass, Copper',
+  },
+  {
+    id: 'tools',
+    label: 'Tools & EDC',
+    category: 'Tools & EDC',
+    icon: Wrench,
+    brandPlaceholder: 'e.g. Wera, Leatherman, James Brand, Bahco',
+    namePlaceholder: 'e.g. Wave+ Multi-tool, Kraftform Kompakt Screwdriver',
+    materialPlaceholder: 'e.g. 420HC Stainless Steel, Hardened Chrome Vanadium',
+  },
+];
+
 export const ItemFormModal: React.FC<ItemFormModalProps> = ({
   isOpen,
   onClose,
   initialItem,
 }) => {
   const { items, addItem, updateItem, categories = [], addCategory } = useWardrobe();
-  const safeCategories = Array.isArray(categories) && categories.length > 0 ? categories : ['Tops', 'Knitwear', 'Trousers', 'Outerwear', 'Footwear', 'Accessories', 'Suits & Tailoring'];
+  const safeCategories = Array.isArray(categories) && categories.length > 0 ? categories : DEFAULT_CATEGORIES;
 
+  // Primary Single Source of Truth Tab State
+  const [activeTab, setActiveTab] = useState<FormTab>('clothing');
+
+  // Shared Core Specs
   const [name, setName] = useState('');
   const [brand, setBrand] = useState('');
   const [category, setCategory] = useState<string>(safeCategories[0] || 'Tops');
   const [isAddingCategory, setIsAddingCategory] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
   const [color, setColor] = useState('');
-  const [seasons, setSeasons] = useState<Season[]>(['Autumn', 'Winter']);
   const [purchasePrice, setPurchasePrice] = useState<string>('');
   const [rrp, setRrp] = useState<string>('');
   const [purchaseDate, setPurchaseDate] = useState<string>('');
   const [condition, setCondition] = useState<Condition>('Excellent');
-  const [material, setMaterial] = useState('');
-  const [size, setSize] = useState('');
-  const [storageLocation, setStorageLocation] = useState('');
-  const [careNotes, setCareNotes] = useState('');
   const [notes, setNotes] = useState('');
   const [tagsInput, setTagsInput] = useState('');
   const [imageUrl, setImageUrl] = useState('');
   const [isPhotoDragging, setIsPhotoDragging] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [autoConsolidate, setAutoConsolidate] = useState(false);
+
+  // Clothing & Wearables Specific Criteria
+  const [seasons, setSeasons] = useState<Season[]>(['Autumn', 'Winter']);
+  const [size, setSize] = useState('');
+  const [clothingMaterial, setClothingMaterial] = useState('');
+  const [clothingStorageLocation, setClothingStorageLocation] = useState('');
+  const [careNotes, setCareNotes] = useState('');
+
+  // Homeware, Electronics & Hobbies Specific Criteria
+  const [modelNumber, setModelNumber] = useState('');
+  const [dimensions, setDimensions] = useState('');
+  const [weight, setWeight] = useState('');
+  const [powerSpecs, setPowerSpecs] = useState('');
+  const [connectivity, setConnectivity] = useState('');
+  const [roomLocation, setRoomLocation] = useState('');
+  const [warrantyInfo, setWarrantyInfo] = useState('');
+  const [includedAccessories, setIncludedAccessories] = useState('');
+  const [homewareMaterial, setHomewareMaterial] = useState('');
 
   // Quick Auto-Import inside modal
   const [importUrl, setImportUrl] = useState('');
@@ -69,19 +194,25 @@ export const ItemFormModal: React.FC<ItemFormModalProps> = ({
     });
   }, [items, brand, name, color, category, imageUrl, initialItem]);
 
+  // Synchronize initial state when opening modal
   useEffect(() => {
     if (initialItem) {
+      // Determine tab based on itemType, category, or hardware attributes
+      const isHomewareType =
+        initialItem.itemType === 'homeware_lifestyle' ||
+        isHomewareCategory(initialItem.category) ||
+        !!initialItem.modelNumber ||
+        !!initialItem.dimensions ||
+        !!initialItem.powerSpecs ||
+        !!initialItem.connectivity ||
+        !!initialItem.roomLocation;
+
+      setActiveTab(isHomewareType ? 'homeware' : 'clothing');
+
       setName(initialItem.name || '');
       setBrand(initialItem.brand || '');
-      setCategory(initialItem.category || safeCategories[0] || 'Tops');
+      setCategory(initialItem.category || (isHomewareType ? 'Audio & Tech' : 'Tops'));
       setColor(initialItem.color || '');
-      setSeasons(
-        Array.isArray(initialItem.season)
-          ? initialItem.season
-          : initialItem.season
-          ? [initialItem.season as any]
-          : ['Autumn', 'Winter']
-      );
       setPurchasePrice(
         initialItem.purchasePrice !== undefined && initialItem.purchasePrice !== null
           ? initialItem.purchasePrice.toString()
@@ -94,10 +225,6 @@ export const ItemFormModal: React.FC<ItemFormModalProps> = ({
       );
       setPurchaseDate(initialItem.purchaseDate || '');
       setCondition(initialItem.condition || 'Excellent');
-      setMaterial(initialItem.material || '');
-      setSize(initialItem.size || '');
-      setStorageLocation(initialItem.storageLocation || '');
-      setCareNotes(initialItem.careNotes || '');
       setNotes(initialItem.notes || '');
       setTagsInput(
         Array.isArray(initialItem.tags)
@@ -107,23 +234,61 @@ export const ItemFormModal: React.FC<ItemFormModalProps> = ({
           : ''
       );
       setImageUrl(initialItem.imageUrl || '');
+
+      // Clothing fields
+      setSeasons(
+        Array.isArray(initialItem.season)
+          ? initialItem.season
+          : initialItem.season
+          ? [initialItem.season as any]
+          : ['Autumn', 'Winter']
+      );
+      setSize(initialItem.size || '');
+      setClothingMaterial(initialItem.material || '');
+      setClothingStorageLocation(initialItem.storageLocation || 'Main Wardrobe');
+      setCareNotes(initialItem.careNotes || '');
+
+      // Homeware & Electronics fields
+      setModelNumber(initialItem.modelNumber || '');
+      setDimensions(initialItem.dimensions || '');
+      setWeight(initialItem.weight || '');
+      setPowerSpecs(initialItem.powerSpecs || '');
+      setConnectivity(initialItem.connectivity || '');
+      setRoomLocation(initialItem.roomLocation || initialItem.storageLocation || 'Living Room');
+      setWarrantyInfo(initialItem.warrantyInfo || '');
+      setIncludedAccessories(initialItem.includedAccessories || '');
+      setHomewareMaterial(initialItem.material || '');
     } else {
+      setActiveTab('clothing');
       setName('');
       setBrand('');
       setCategory(safeCategories[0] || 'Tops');
       setColor('');
-      setSeasons(['Autumn', 'Winter']);
       setPurchasePrice('');
       setRrp('');
       setPurchaseDate(new Date().toISOString().split('T')[0]);
       setCondition('Excellent');
-      setMaterial('');
-      setSize('');
-      setStorageLocation('Main Wardrobe');
-      setCareNotes('');
       setNotes('');
       setTagsInput('');
       setImageUrl('');
+
+      // Clothing defaults
+      setSeasons(['Autumn', 'Winter']);
+      setSize('');
+      setClothingMaterial('');
+      setClothingStorageLocation('Main Wardrobe');
+      setCareNotes('');
+
+      // Homeware & Electronics defaults
+      setModelNumber('');
+      setDimensions('');
+      setWeight('');
+      setPowerSpecs('');
+      setConnectivity('');
+      setRoomLocation('Living Room');
+      setWarrantyInfo('');
+      setIncludedAccessories('');
+      setHomewareMaterial('');
     }
     setImportUrl('');
     setExtractError(null);
@@ -131,6 +296,23 @@ export const ItemFormModal: React.FC<ItemFormModalProps> = ({
   }, [initialItem, isOpen, safeCategories]);
 
   if (!isOpen) return null;
+
+  // Handle Tab Switch with smart category adjustment if desired
+  const handleTabSwitch = (newTab: FormTab) => {
+    setActiveTab(newTab);
+    if (newTab === 'homeware' && !isHomewareCategory(category)) {
+      setCategory('Audio & Tech');
+    } else if (newTab === 'clothing' && isHomewareCategory(category)) {
+      setCategory(DEFAULT_GARMENT_CATEGORIES[0] || 'Tops');
+    }
+  };
+
+  const handleApplyPreset = (preset: QuickPreset) => {
+    setCategory(preset.category);
+    if (!brand.trim()) {
+      setBrand('');
+    }
+  };
 
   const toggleSeason = (s: Season) => {
     const currentSeasons = Array.isArray(seasons) ? seasons : [];
@@ -158,8 +340,8 @@ export const ItemFormModal: React.FC<ItemFormModalProps> = ({
   const handlePasteImage = async () => {
     try {
       if (navigator.clipboard && navigator.clipboard.read) {
-        const items = await navigator.clipboard.read();
-        for (const item of items) {
+        const clipboardItems = await navigator.clipboard.read();
+        for (const item of clipboardItems) {
           const imgType = item.types.find((t) => t.startsWith('image/'));
           if (imgType) {
             const blob = await item.getType(imgType);
@@ -206,7 +388,10 @@ export const ItemFormModal: React.FC<ItemFormModalProps> = ({
           if (item.brand) setBrand(item.brand);
           if (item.category && categories.includes(item.category)) setCategory(item.category);
           if (item.color) setColor(item.color);
-          if (item.material) setMaterial(item.material);
+          if (item.material) {
+            setClothingMaterial(item.material);
+            setHomewareMaterial(item.material);
+          }
           if (item.purchasePrice) setPurchasePrice(item.purchasePrice.toString());
           if (item.rrp) setRrp(item.rrp.toString());
           if (item.notes) setNotes(item.notes);
@@ -246,7 +431,10 @@ export const ItemFormModal: React.FC<ItemFormModalProps> = ({
       if (item.brand) setBrand(item.brand);
       if (item.category) setCategory(item.category);
       if (item.color) setColor(item.color);
-      if (item.material) setMaterial(item.material);
+      if (item.material) {
+        setClothingMaterial(item.material);
+        setHomewareMaterial(item.material);
+      }
       if (item.purchasePrice) setPurchasePrice(item.purchasePrice.toString());
       if (item.rrp) setRrp(item.rrp.toString());
       if (item.imageUrl) setImageUrl(item.imageUrl);
@@ -283,55 +471,86 @@ export const ItemFormModal: React.FC<ItemFormModalProps> = ({
     const finalImageUrl = imageUrl.trim();
 
     try {
-      if (initialItem) {
-        updateItem(
-          initialItem.id,
-          {
-            name: name.trim(),
-            brand: brand.trim(),
-            category,
-            color: color.trim(),
-            season: seasons,
-            purchasePrice: priceNum,
-            rrp: rrpNum,
-            purchaseDate,
-            condition,
-            material: material.trim(),
-            size: size.trim(),
-            storageLocation: storageLocation.trim(),
-            careNotes: careNotes.trim(),
-            notes: notes.trim(),
-            tags,
-            imageUrl: finalImageUrl,
-          },
-          autoConsolidate
-        );
+      if (activeTab === 'clothing') {
+        // Clothing & Wearables Payload
+        const payload = {
+          name: name.trim(),
+          brand: brand.trim(),
+          category,
+          color: color.trim(),
+          season: seasons,
+          purchasePrice: priceNum,
+          rrp: rrpNum,
+          purchaseDate,
+          condition,
+          material: clothingMaterial.trim(),
+          size: size.trim(),
+          storageLocation: clothingStorageLocation.trim() || 'Main Wardrobe',
+          careNotes: careNotes.trim(),
+          notes: notes.trim(),
+          tags,
+          imageUrl: finalImageUrl,
+          itemType: 'clothing',
+        };
+
+        if (initialItem) {
+          updateItem(initialItem.id, payload, autoConsolidate);
+        } else {
+          addItem(
+            {
+              ...payload,
+              subcategory: tags[0] || 'Capsule Piece',
+              currentValuation: priceNum,
+              isFavorite: false,
+              isArchived: false,
+            },
+            autoConsolidate
+          );
+        }
       } else {
-        addItem(
-          {
-            name: name.trim(),
-            brand: brand.trim(),
-            category,
-            subcategory: tags[0] || 'Capsule Piece',
-            color: color.trim(),
-            season: seasons,
-            purchasePrice: priceNum,
-            rrp: rrpNum,
-            currentValuation: priceNum,
-            purchaseDate,
-            condition,
-            material: material.trim(),
-            size: size.trim(),
-            storageLocation: storageLocation.trim(),
-            careNotes: careNotes.trim(),
-            notes: notes.trim(),
-            tags,
-            imageUrl: finalImageUrl,
-            isFavorite: false,
-            isArchived: false,
-          },
-          autoConsolidate
-        );
+        // Homeware, Electronics & Hobbies Payload
+        const payload = {
+          name: name.trim(),
+          brand: brand.trim(),
+          category,
+          color: color.trim(),
+          season: seasons.length > 0 ? seasons : (['All-Season'] as Season[]),
+          purchasePrice: priceNum,
+          rrp: rrpNum,
+          purchaseDate,
+          condition,
+          material: homewareMaterial.trim(),
+          size: dimensions.trim() || size.trim(),
+          storageLocation: roomLocation.trim() || clothingStorageLocation.trim() || 'Living Room',
+          careNotes: warrantyInfo.trim() || careNotes.trim(),
+          notes: notes.trim(),
+          tags,
+          imageUrl: finalImageUrl,
+          itemType: 'homeware_lifestyle',
+          modelNumber: modelNumber.trim() || undefined,
+          dimensions: dimensions.trim() || undefined,
+          weight: weight.trim() || undefined,
+          powerSpecs: powerSpecs.trim() || undefined,
+          connectivity: connectivity.trim() || undefined,
+          roomLocation: roomLocation.trim() || undefined,
+          warrantyInfo: warrantyInfo.trim() || undefined,
+          includedAccessories: includedAccessories.trim() || undefined,
+        };
+
+        if (initialItem) {
+          updateItem(initialItem.id, payload, autoConsolidate);
+        } else {
+          addItem(
+            {
+              ...payload,
+              subcategory: tags[0] || 'Lifestyle Asset',
+              currentValuation: priceNum,
+              isFavorite: false,
+              isArchived: false,
+            },
+            autoConsolidate
+          );
+        }
       }
 
       onClose();
@@ -342,15 +561,20 @@ export const ItemFormModal: React.FC<ItemFormModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-xs overflow-y-auto animate-in fade-in duration-150">
-      <div className="bg-white border border-[#E5E5E1] shadow-2xl rounded-none w-full max-w-xl overflow-hidden my-6">
-        {/* Header */}
+      <div className="bg-white border border-[#E5E5E1] shadow-2xl rounded-none w-full max-w-2xl overflow-hidden my-6">
+        {/* Modal Header */}
         <div className="px-5 py-3.5 bg-[#F8F7F4] border-b border-[#E5E5E1] flex items-center justify-between">
           <div>
-            <h2 className="text-base font-serif font-semibold text-[#1A1A1A]">
-              {initialItem ? 'Edit Wardrobe Piece' : 'Add Wardrobe Piece'}
-            </h2>
+            <div className="flex items-center gap-2">
+              <h2 className="text-base font-serif font-semibold text-[#1A1A1A]">
+                {initialItem ? `Edit Item: ${name || 'Inventory Piece'}` : 'Add Inventory Piece'}
+              </h2>
+              <span className="text-[10px] font-mono px-2 py-0.5 bg-[#EAE8E3] text-[#5A5A55] border border-[#D5D5D0]">
+                Single Source of Truth
+              </span>
+            </div>
             <p className="text-xs text-[#767670] font-sans">
-              Enter garment specifications, valuation in £ GBP, and wardrobe details.
+              Universal inventory studio editor for fashion wearables, homeware, audio/tech, and hobby gear.
             </p>
           </div>
           <button
@@ -362,13 +586,70 @@ export const ItemFormModal: React.FC<ItemFormModalProps> = ({
           </button>
         </div>
 
+        {/* 2-TAB SWITCHER */}
+        <div className="bg-[#FAF9F6] border-b border-[#E5E5E1] px-5 pt-3">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => handleTabSwitch('clothing')}
+              className={`flex-1 py-2.5 px-4 text-left border-b-2 transition-all cursor-pointer flex items-center gap-2.5 ${
+                activeTab === 'clothing'
+                  ? 'border-[#8C7355] bg-white text-[#1A1A1A] shadow-xs font-semibold'
+                  : 'border-transparent text-[#767670] hover:text-[#1A1A1A] hover:bg-[#F2F1ED]'
+              }`}
+            >
+              <div
+                className={`p-1.5 rounded-sm ${
+                  activeTab === 'clothing' ? 'bg-[#8C7355] text-white' : 'bg-[#E5E5E1] text-[#767670]'
+                }`}
+              >
+                <Shirt className="w-4 h-4" />
+              </div>
+              <div>
+                <div className="text-xs font-serif font-bold tracking-tight">Clothing &amp; Wearables</div>
+                <div className="text-[10px] font-mono text-[#767670] font-normal">
+                  Garments, tailoring, footwear &amp; capsule sizing
+                </div>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleTabSwitch('homeware')}
+              className={`flex-1 py-2.5 px-4 text-left border-b-2 transition-all cursor-pointer flex items-center gap-2.5 ${
+                activeTab === 'homeware'
+                  ? 'border-[#8C7355] bg-white text-[#1A1A1A] shadow-xs font-semibold'
+                  : 'border-transparent text-[#767670] hover:text-[#1A1A1A] hover:bg-[#F2F1ED]'
+              }`}
+            >
+              <div
+                className={`p-1.5 rounded-sm ${
+                  activeTab === 'homeware' ? 'bg-[#8C7355] text-white' : 'bg-[#E5E5E1] text-[#767670]'
+                }`}
+              >
+                <Tv className="w-4 h-4" />
+              </div>
+              <div>
+                <div className="text-xs font-serif font-bold tracking-tight">Homeware, Electronics &amp; Hobbies</div>
+                <div className="text-[10px] font-mono text-[#767670] font-normal">
+                  Tech, audio, furniture, optics, gear &amp; instruments
+                </div>
+              </div>
+            </button>
+          </div>
+        </div>
+
         {/* Quick Link Autofill Banner */}
         <div className="bg-[#F2F1ED] px-5 py-2.5 border-b border-[#E5E5E1]">
           <div className="flex items-center gap-2">
             <div className="relative flex-1">
               <input
                 type="url"
-                placeholder="Autofill specs from link (e.g. Barbour, Zara, COS, Arket...)"
+                placeholder={
+                  activeTab === 'clothing'
+                    ? 'Autofill specs from garment link (Barbour, Arket, COS, Matches...)'
+                    : 'Autofill specs from product link (Sony, Braun, Apple, Leica, Vitra...)'
+                }
                 value={importUrl}
                 onChange={(e) => setImportUrl(e.target.value)}
                 onKeyDown={(e) => {
@@ -417,20 +698,20 @@ export const ItemFormModal: React.FC<ItemFormModalProps> = ({
                 className="p-2 border border-dashed border-[#8C7355]/40 bg-amber-50/40 hover:bg-amber-50 text-center cursor-pointer"
               >
                 <span className="text-[10px] font-mono text-[#8C7355] font-semibold">
-                  Or drop a garment screenshot here to autofill with Vision AI
+                  Or drop a screenshot here to autofill with Vision AI
                 </span>
               </div>
             </div>
           )}
           {extractSuccess && (
             <p className="text-[11px] text-emerald-700 mt-1 font-mono flex items-center gap-1">
-              <Check className="w-3 h-3" /> Auto-populated specs and pricing!
+              <Check className="w-3 h-3" /> Auto-populated specs and details!
             </p>
           )}
         </div>
 
         {/* Form Body */}
-        <form onSubmit={handleSubmit} className="p-5 space-y-4 max-h-[75vh] overflow-y-auto">
+        <form onSubmit={handleSubmit} className="p-5 space-y-4 max-h-[72vh] overflow-y-auto">
           {/* Duplicate Detection Alert & Consolidation Notice */}
           {detectedDuplicates.length > 0 && (
             <div className="p-3.5 bg-amber-50/90 border border-amber-300 rounded-sm text-[#1A1A1A]">
@@ -439,14 +720,14 @@ export const ItemFormModal: React.FC<ItemFormModalProps> = ({
                 <div className="flex-1 space-y-1.5">
                   <div className="flex items-center justify-between">
                     <p className="text-xs font-semibold text-amber-900">
-                      {detectedDuplicates.length} duplicate {detectedDuplicates.length === 1 ? 'copy' : 'copies'} detected in your wardrobe
+                      {detectedDuplicates.length} duplicate {detectedDuplicates.length === 1 ? 'copy' : 'copies'} detected in your inventory
                     </p>
                     <span className="text-[10px] font-mono font-medium px-2 py-0.5 bg-amber-200 text-amber-900 rounded-full">
                       Humidor Auto-Merge
                     </span>
                   </div>
                   <p className="text-[11px] text-amber-800 leading-relaxed">
-                    Similar piece(s) exist in your wardrobe. By default, distinct items (such as different colors or separate garments) are kept separate. You can opt in below if you want to consolidate them into 1 master item.
+                    Similar piece(s) exist in your inventory. By default, distinct items are preserved. You can opt in below if you want to consolidate them into 1 master item.
                   </p>
                   <label className="flex items-center gap-2 pt-1 font-medium text-xs text-amber-950 cursor-pointer">
                     <input
@@ -462,12 +743,12 @@ export const ItemFormModal: React.FC<ItemFormModalProps> = ({
             </div>
           )}
 
-          {/* Photo Preview & Upload */}
+          {/* SHARED: Photo Preview & Upload (Universal for both modes) */}
           <div className="space-y-2">
             <label className="text-[11px] font-mono text-[#5A5A55] block font-semibold">
-              Garment Photo
+              {activeTab === 'clothing' ? 'Garment Photography' : 'Item Photography / Hardware Image'}
             </label>
-            
+
             <input
               ref={fileInputRef}
               type="file"
@@ -481,7 +762,6 @@ export const ItemFormModal: React.FC<ItemFormModalProps> = ({
             />
 
             <div className="flex flex-col sm:flex-row gap-3">
-              {/* Photo Box: Supports Drag and Drop */}
               <div
                 onDragOver={(e) => {
                   e.preventDefault();
@@ -506,7 +786,7 @@ export const ItemFormModal: React.FC<ItemFormModalProps> = ({
                 {imageUrl ? (
                   <GarmentImage
                     src={imageUrl}
-                    alt={name || 'Garment preview'}
+                    alt={name || 'Item preview'}
                     category={category}
                     className="max-h-full max-w-full object-contain"
                     containerClassName="w-full h-full flex items-center justify-center bg-[#F8F7F4]"
@@ -527,7 +807,6 @@ export const ItemFormModal: React.FC<ItemFormModalProps> = ({
                 )}
               </div>
 
-              {/* Photo Controls */}
               <div className="flex-1 space-y-2 flex flex-col justify-center">
                 <input
                   type="url"
@@ -568,291 +847,683 @@ export const ItemFormModal: React.FC<ItemFormModalProps> = ({
                   )}
                 </div>
                 <p className="text-[10px] text-[#767670]">
-                  Supports high-resolution fashion imagery, local files, and web links. Full photo will be visible with zero cropping.
+                  Supports high-resolution photography, local image files, and direct links without distortion.
                 </p>
               </div>
             </div>
           </div>
 
-          {/* Brand & Name */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="text-[11px] font-mono text-[#5A5A55] block mb-1 font-semibold">
-                Brand / Designer *
-              </label>
-              <input
-                type="text"
-                required
-                value={brand}
-                onChange={(e) => setBrand(e.target.value)}
-                placeholder="e.g. Barbour, Toast, Arket, COS"
-                className="w-full px-2.5 py-1.5 bg-white border border-[#D5D5D0] text-xs text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none"
-              />
-            </div>
-
-            <div>
-              <label className="text-[11px] font-mono text-[#5A5A55] block mb-1 font-semibold">
-                Garment Title *
-              </label>
-              <input
-                type="text"
-                required
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="e.g. Classic Beaufort Waxed Jacket"
-                className="w-full px-2.5 py-1.5 bg-white border border-[#D5D5D0] text-xs text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none"
-              />
-            </div>
-          </div>
-
-          {/* Category & Color */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <label className="text-[11px] font-mono text-[#5A5A55] font-semibold">
-                  Category *
-                </label>
-                {!isAddingCategory ? (
-                  <button
-                    type="button"
-                    onClick={() => setIsAddingCategory(true)}
-                    className="text-[10px] font-mono text-[#8C7355] hover:text-[#1A1A1A] hover:underline cursor-pointer"
-                  >
-                    + New Category
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => setIsAddingCategory(false)}
-                    className="text-[10px] font-mono text-[#767670] hover:text-[#1A1A1A] cursor-pointer"
-                  >
-                    Cancel
-                  </button>
-                )}
+          {/* ========================================================= */}
+          {/* TAB 1: CLOTHING & WEARABLES FIELDS                        */}
+          {/* ========================================================= */}
+          {activeTab === 'clothing' && (
+            <div className="space-y-4 pt-1 border-t border-[#E5E5E1]">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-mono uppercase tracking-wider text-[#8C7355] font-semibold flex items-center gap-1">
+                  <Shirt className="w-3.5 h-3.5" /> Clothing &amp; Wearable Criteria
+                </span>
+                <span className="text-[10px] font-mono text-[#767670]">Garment &amp; Capsule Specs</span>
               </div>
 
-              {isAddingCategory ? (
-                <div className="flex items-center gap-1.5">
+              {/* Brand & Name */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[11px] font-mono text-[#5A5A55] block mb-1 font-semibold">
+                    Brand / Designer *
+                  </label>
                   <input
                     type="text"
-                    value={newCategoryName}
-                    onChange={(e) => setNewCategoryName(e.target.value)}
-                    placeholder="Category name..."
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        const clean = newCategoryName.trim();
-                        if (clean) {
-                          addCategory(clean);
-                          setCategory(clean);
-                          setNewCategoryName('');
-                          setIsAddingCategory(false);
-                        }
-                      }
-                      if (e.key === 'Escape') setIsAddingCategory(false);
-                    }}
-                    autoFocus
-                    className="flex-1 px-2.5 py-1.5 bg-white border border-[#8C7355] text-xs text-[#1A1A1A] focus:outline-none"
+                    required
+                    value={brand}
+                    onChange={(e) => setBrand(e.target.value)}
+                    placeholder="e.g. Barbour, Toast, Arket, Margaret Howell"
+                    className="w-full px-2.5 py-1.5 bg-white border border-[#D5D5D0] text-xs text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none"
                   />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const clean = newCategoryName.trim();
-                      if (clean) {
-                        addCategory(clean);
-                        setCategory(clean);
-                        setNewCategoryName('');
-                        setIsAddingCategory(false);
-                      }
-                    }}
-                    disabled={!newCategoryName.trim()}
-                    className="px-2.5 py-1.5 bg-[#8C7355] text-white text-xs font-mono disabled:opacity-50 cursor-pointer"
-                  >
-                    Save
-                  </button>
                 </div>
-              ) : (
-                <select
-                  value={category}
-                  onChange={(e) => setCategory(e.target.value)}
-                  className="w-full px-2.5 py-1.5 bg-white border border-[#D5D5D0] text-xs text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none"
-                >
-                  {category && !safeCategories.includes(category) && (
-                    <option value={category}>{category}</option>
+
+                <div>
+                  <label className="text-[11px] font-mono text-[#5A5A55] block mb-1 font-semibold">
+                    Garment Title *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="e.g. Classic Beaufort Waxed Jacket"
+                    className="w-full px-2.5 py-1.5 bg-white border border-[#D5D5D0] text-xs text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              {/* Category & Color */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-[11px] font-mono text-[#5A5A55] font-semibold">
+                      Garment Category *
+                    </label>
+                    {!isAddingCategory ? (
+                      <button
+                        type="button"
+                        onClick={() => setIsAddingCategory(true)}
+                        className="text-[10px] font-mono text-[#8C7355] hover:text-[#1A1A1A] hover:underline cursor-pointer"
+                      >
+                        + New Category
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setIsAddingCategory(false)}
+                        className="text-[10px] font-mono text-[#767670] hover:text-[#1A1A1A] cursor-pointer"
+                      >
+                        Cancel
+                      </button>
+                    )}
+                  </div>
+
+                  {isAddingCategory ? (
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        type="text"
+                        value={newCategoryName}
+                        onChange={(e) => setNewCategoryName(e.target.value)}
+                        placeholder="Category name..."
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            const clean = newCategoryName.trim();
+                            if (clean) {
+                              addCategory(clean);
+                              setCategory(clean);
+                              setNewCategoryName('');
+                              setIsAddingCategory(false);
+                            }
+                          }
+                          if (e.key === 'Escape') setIsAddingCategory(false);
+                        }}
+                        autoFocus
+                        className="flex-1 px-2.5 py-1.5 bg-white border border-[#8C7355] text-xs text-[#1A1A1A] focus:outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const clean = newCategoryName.trim();
+                          if (clean) {
+                            addCategory(clean);
+                            setCategory(clean);
+                            setNewCategoryName('');
+                            setIsAddingCategory(false);
+                          }
+                        }}
+                        disabled={!newCategoryName.trim()}
+                        className="px-2.5 py-1.5 bg-[#8C7355] text-white text-xs font-mono disabled:opacity-50 cursor-pointer"
+                      >
+                        Save
+                      </button>
+                    </div>
+                  ) : (
+                    <select
+                      value={category}
+                      onChange={(e) => setCategory(e.target.value)}
+                      className="w-full px-2.5 py-1.5 bg-white border border-[#D5D5D0] text-xs text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none"
+                    >
+                      {category && !safeCategories.includes(category) && (
+                        <option value={category}>{category}</option>
+                      )}
+                      <optgroup label="Apparel & Garments">
+                        {safeCategories
+                          .filter((cat) => !isHomewareCategory(cat))
+                          .map((cat) => (
+                            <option key={cat} value={cat}>
+                              {cat}
+                            </option>
+                          ))}
+                      </optgroup>
+                      <optgroup label="Homeware & Lifestyle">
+                        {safeCategories
+                          .filter((cat) => isHomewareCategory(cat))
+                          .map((cat) => (
+                            <option key={cat} value={cat}>
+                              {cat}
+                            </option>
+                          ))}
+                      </optgroup>
+                    </select>
                   )}
-                  {safeCategories.map((cat) => (
-                    <option key={cat} value={cat}>
-                      {cat}
-                    </option>
-                  ))}
-                </select>
-              )}
-            </div>
-
-            <div>
-              <label className="text-[11px] font-mono text-[#5A5A55] block mb-1 font-semibold">
-                Color Tone
-              </label>
-              <input
-                type="text"
-                value={color}
-                onChange={(e) => setColor(e.target.value)}
-                placeholder="e.g. Sage Olive, Charcoal, Ecru"
-                className="w-full px-2.5 py-1.5 bg-white border border-[#D5D5D0] text-xs text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none"
-              />
-            </div>
-          </div>
-
-          {/* Price, RRP & Purchase Date */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            <div>
-              <label className="text-[11px] font-mono text-[#5A5A55] block mb-1 font-semibold">
-                Purchase Price (£ GBP)
-              </label>
-              <div className="relative">
-                <span className="absolute left-2.5 top-1.5 text-xs text-[#8C7355] font-mono font-bold">£</span>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={purchasePrice}
-                  onChange={(e) => setPurchasePrice(e.target.value)}
-                  placeholder="299"
-                  className="w-full pl-6 pr-2.5 py-1.5 bg-white border border-[#D5D5D0] text-xs font-mono text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none font-semibold"
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="text-[11px] font-mono text-[#5A5A55] block mb-1 font-semibold">
-                RRP Retail Price (£ GBP)
-              </label>
-              <div className="relative">
-                <span className="absolute left-2.5 top-1.5 text-xs text-[#8C7355] font-mono font-bold">£</span>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={rrp}
-                  onChange={(e) => setRrp(e.target.value)}
-                  placeholder="380"
-                  className="w-full pl-6 pr-2.5 py-1.5 bg-white border border-[#D5D5D0] text-xs font-mono text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none font-semibold"
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="text-[11px] font-mono text-[#5A5A55] block mb-1 font-semibold">
-                Purchase Date
-              </label>
-              <input
-                type="date"
-                value={purchaseDate}
-                onChange={(e) => setPurchaseDate(e.target.value)}
-                className="w-full px-2 py-1.5 bg-white border border-[#D5D5D0] text-xs text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none"
-              />
-            </div>
-
-            <div>
-              <label className="text-[11px] font-mono text-[#5A5A55] block mb-1 font-semibold">
-                Condition
-              </label>
-              <select
-                value={condition}
-                onChange={(e) => setCondition(e.target.value as Condition)}
-                className="w-full px-2 py-1.5 bg-white border border-[#D5D5D0] text-xs text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none"
-              >
-                <option value="Pristine / New">Pristine / New</option>
-                <option value="Excellent">Excellent</option>
-                <option value="Good">Good</option>
-                <option value="Needs Repair">Needs Repair</option>
-              </select>
-            </div>
-          </div>
-
-          {/* Live RRP Savings Indicator if applicable */}
-          {(() => {
-            const p = parseFloat(purchasePrice);
-            const r = parseFloat(rrp);
-            if (!isNaN(p) && !isNaN(r) && r > p) {
-              const savings = calculateRrpSavings(p, r);
-              return (
-                <div className="flex items-center justify-between text-xs bg-[#EBF3ED] text-[#245934] border border-[#BBDBC2] px-3 py-1.5">
-                  <span className="font-mono font-medium">
-                    Saving vs RRP: <strong>{savings.formattedSavings}</strong> ({savings.formattedDiscount})
-                  </span>
-                  <span className="text-[11px] text-[#2E7D32]/80 uppercase tracking-wider font-mono">Retail discount recorded</span>
                 </div>
-              );
-            }
-            return null;
-          })()}
 
-          {/* Material & Size */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="text-[11px] font-mono text-[#5A5A55] block mb-1 font-semibold">
-                Material / Composition
-              </label>
-              <input
-                type="text"
-                value={material}
-                onChange={(e) => setMaterial(e.target.value)}
-                placeholder="e.g. 100% Waxed Cotton, 100% Cashmere"
-                className="w-full px-2.5 py-1.5 bg-white border border-[#D5D5D0] text-xs text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none"
-              />
+                <div>
+                  <label className="text-[11px] font-mono text-[#5A5A55] block mb-1 font-semibold">
+                    Color Tone
+                  </label>
+                  <input
+                    type="text"
+                    value={color}
+                    onChange={(e) => setColor(e.target.value)}
+                    placeholder="e.g. Sage Olive, Charcoal, Ecru"
+                    className="w-full px-2.5 py-1.5 bg-white border border-[#D5D5D0] text-xs text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              {/* Material & Size */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[11px] font-mono text-[#5A5A55] block mb-1 font-semibold">
+                    Material / Fabric Composition
+                  </label>
+                  <input
+                    type="text"
+                    value={clothingMaterial}
+                    onChange={(e) => setClothingMaterial(e.target.value)}
+                    placeholder="e.g. 100% Waxed Cotton, 100% Cashmere, 14oz Denim"
+                    className="w-full px-2.5 py-1.5 bg-white border border-[#D5D5D0] text-xs text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-mono text-[#5A5A55] block mb-1 font-semibold">
+                    Size / Fit Sizing
+                  </label>
+                  <input
+                    type="text"
+                    value={size}
+                    onChange={(e) => setSize(e.target.value)}
+                    placeholder="e.g. M, 38R, 32W/32L, UK 9, Oversized"
+                    className="w-full px-2.5 py-1.5 bg-white border border-[#D5D5D0] text-xs text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              {/* Season Selector */}
+              <div>
+                <label className="text-[11px] font-mono text-[#5A5A55] block mb-1.5 font-semibold">
+                  Wearable Seasons
+                </label>
+                <div className="flex flex-wrap gap-1.5">
+                  {ALL_SEASONS.map((s) => (
+                    <button
+                      type="button"
+                      key={s}
+                      onClick={() => toggleSeason(s)}
+                      className={`px-3 py-1 text-xs border transition-all cursor-pointer ${
+                        (Array.isArray(seasons) ? seasons : []).includes(s)
+                          ? 'bg-[#1A1A1A] text-white font-semibold border-[#1A1A1A]'
+                          : 'bg-[#F8F7F4] text-[#5A5A55] border-[#E5E5E1] hover:text-[#1A1A1A]'
+                      }`}
+                    >
+                      {s}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Storage & Care */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[11px] font-mono text-[#5A5A55] block mb-1 font-semibold">
+                    Storage Location
+                  </label>
+                  <input
+                    type="text"
+                    value={clothingStorageLocation}
+                    onChange={(e) => setClothingStorageLocation(e.target.value)}
+                    placeholder="e.g. Main Wardrobe, Hallway Rail, Cedar Chest"
+                    className="w-full px-2.5 py-1.5 bg-white border border-[#D5D5D0] text-xs text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-mono text-[#5A5A55] block mb-1 font-semibold">
+                    Care &amp; Cleaning Directives
+                  </label>
+                  <input
+                    type="text"
+                    value={careNotes}
+                    onChange={(e) => setCareNotes(e.target.value)}
+                    placeholder="e.g. Sponge clean only, re-wax annually, dry clean"
+                    className="w-full px-2.5 py-1.5 bg-white border border-[#D5D5D0] text-xs text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              {/* Styling Notes */}
+              <div>
+                <label className="text-[11px] font-mono text-[#5A5A55] block mb-1 font-semibold">
+                  Styling Notes / Outfitting Formula
+                </label>
+                <input
+                  type="text"
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder="e.g. Layer over chunky knitwear, pairs with selvedge denim"
+                  className="w-full px-2.5 py-1.5 bg-white border border-[#D5D5D0] text-xs text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none"
+                />
+              </div>
             </div>
+          )}
 
-            <div>
-              <label className="text-[11px] font-mono text-[#5A5A55] block mb-1 font-semibold">
-                Size
-              </label>
-              <input
-                type="text"
-                value={size}
-                onChange={(e) => setSize(e.target.value)}
-                placeholder="e.g. M, 38R, 32W/32L, UK 9"
-                className="w-full px-2.5 py-1.5 bg-white border border-[#D5D5D0] text-xs text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none"
-              />
+          {/* ========================================================= */}
+          {/* TAB 2: HOMEWARE, ELECTRONICS & HOBBIES FIELDS             */}
+          {/* ========================================================= */}
+          {activeTab === 'homeware' && (
+            <div className="space-y-4 pt-1 border-t border-[#E5E5E1]">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-mono uppercase tracking-wider text-[#8C7355] font-semibold flex items-center gap-1">
+                  <Tv className="w-3.5 h-3.5" /> Homeware, Tech &amp; Hobby Specifications
+                </span>
+                <span className="text-[10px] font-mono text-[#767670]">Hardware, Furniture &amp; Gear</span>
+              </div>
+
+              {/* Quick Preset Selector Chips */}
+              <div>
+                <label className="text-[11px] font-mono text-[#5A5A55] block mb-1.5 font-semibold">
+                  Quick Category Presets
+                </label>
+                <div className="flex flex-wrap gap-1.5">
+                  {HOMEWARE_QUICK_PRESETS.map((preset) => {
+                    const IconComp = preset.icon;
+                    const isSelected = category === preset.category;
+                    return (
+                      <button
+                        key={preset.id}
+                        type="button"
+                        onClick={() => handleApplyPreset(preset)}
+                        className={`px-2.5 py-1 text-xs border rounded-xs flex items-center gap-1.5 transition-all cursor-pointer ${
+                          isSelected
+                            ? 'bg-[#8C7355] text-white border-[#8C7355] font-medium shadow-2xs'
+                            : 'bg-[#F8F7F4] text-[#5A5A55] border-[#E5E5E1] hover:border-[#8C7355] hover:text-[#1A1A1A]'
+                        }`}
+                      >
+                        <IconComp className="w-3 h-3" />
+                        <span>{preset.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Brand & Item Name */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[11px] font-mono text-[#5A5A55] block mb-1 font-semibold">
+                    Maker / Brand / Manufacturer *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={brand}
+                    onChange={(e) => setBrand(e.target.value)}
+                    placeholder="e.g. Braun, Sony, Leica, Vitra, Teenage Engineering"
+                    className="w-full px-2.5 py-1.5 bg-white border border-[#D5D5D0] text-xs text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-mono text-[#5A5A55] block mb-1 font-semibold">
+                    Item Name / Title *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="e.g. SK4 Record Player, A7 IV Mirrorless, Eames Chair"
+                    className="w-full px-2.5 py-1.5 bg-white border border-[#D5D5D0] text-xs text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              {/* Category & Model Number */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-[11px] font-mono text-[#5A5A55] font-semibold">
+                      Category *
+                    </label>
+                    {!isAddingCategory ? (
+                      <button
+                        type="button"
+                        onClick={() => setIsAddingCategory(true)}
+                        className="text-[10px] font-mono text-[#8C7355] hover:text-[#1A1A1A] hover:underline cursor-pointer"
+                      >
+                        + New Category
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setIsAddingCategory(false)}
+                        className="text-[10px] font-mono text-[#767670] hover:text-[#1A1A1A] cursor-pointer"
+                      >
+                        Cancel
+                      </button>
+                    )}
+                  </div>
+
+                  {isAddingCategory ? (
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        type="text"
+                        value={newCategoryName}
+                        onChange={(e) => setNewCategoryName(e.target.value)}
+                        placeholder="Category name..."
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            const clean = newCategoryName.trim();
+                            if (clean) {
+                              addCategory(clean);
+                              setCategory(clean);
+                              setNewCategoryName('');
+                              setIsAddingCategory(false);
+                            }
+                          }
+                          if (e.key === 'Escape') setIsAddingCategory(false);
+                        }}
+                        autoFocus
+                        className="flex-1 px-2.5 py-1.5 bg-white border border-[#8C7355] text-xs text-[#1A1A1A] focus:outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const clean = newCategoryName.trim();
+                          if (clean) {
+                            addCategory(clean);
+                            setCategory(clean);
+                            setNewCategoryName('');
+                            setIsAddingCategory(false);
+                          }
+                        }}
+                        disabled={!newCategoryName.trim()}
+                        className="px-2.5 py-1.5 bg-[#8C7355] text-white text-xs font-mono disabled:opacity-50 cursor-pointer"
+                      >
+                        Save
+                      </button>
+                    </div>
+                  ) : (
+                    <select
+                      value={category}
+                      onChange={(e) => setCategory(e.target.value)}
+                      className="w-full px-2.5 py-1.5 bg-white border border-[#D5D5D0] text-xs text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none"
+                    >
+                      {category && !safeCategories.includes(category) && (
+                        <option value={category}>{category}</option>
+                      )}
+                      <optgroup label="Homeware, Tech &amp; Hobbies">
+                        {safeCategories
+                          .filter((cat) => isHomewareCategory(cat))
+                          .map((cat) => (
+                            <option key={cat} value={cat}>
+                              {cat}
+                            </option>
+                          ))}
+                      </optgroup>
+                      <optgroup label="Apparel &amp; Other Categories">
+                        {safeCategories
+                          .filter((cat) => !isHomewareCategory(cat))
+                          .map((cat) => (
+                            <option key={cat} value={cat}>
+                              {cat}
+                            </option>
+                          ))}
+                      </optgroup>
+                    </select>
+                  )}
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-mono text-[#5A5A55] block mb-1 font-semibold">
+                    Model No. / Serial / Edition
+                  </label>
+                  <input
+                    type="text"
+                    value={modelNumber}
+                    onChange={(e) => setModelNumber(e.target.value)}
+                    placeholder="e.g. WH-1000XM5, S/N: 9482103, 1st Edition"
+                    className="w-full px-2.5 py-1.5 bg-white border border-[#D5D5D0] text-xs text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none font-mono"
+                  />
+                </div>
+              </div>
+
+              {/* Room Location & Color / Finish */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[11px] font-mono text-[#5A5A55] block mb-1 font-semibold">
+                    Room / Placement in Home
+                  </label>
+                  <input
+                    type="text"
+                    value={roomLocation}
+                    onChange={(e) => setRoomLocation(e.target.value)}
+                    placeholder="e.g. Home Studio Desk, Living Room Credenza, Audio Rack"
+                    className="w-full px-2.5 py-1.5 bg-white border border-[#D5D5D0] text-xs text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-mono text-[#5A5A55] block mb-1 font-semibold">
+                    Color / Finish
+                  </label>
+                  <input
+                    type="text"
+                    value={color}
+                    onChange={(e) => setColor(e.target.value)}
+                    placeholder="e.g. Matte Black, Brushed Aluminum, Oiled Walnut"
+                    className="w-full px-2.5 py-1.5 bg-white border border-[#D5D5D0] text-xs text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              {/* Dimensions & Weight */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[11px] font-mono text-[#5A5A55] block mb-1 font-semibold">
+                    Dimensions (W × D × H)
+                  </label>
+                  <input
+                    type="text"
+                    value={dimensions}
+                    onChange={(e) => setDimensions(e.target.value)}
+                    placeholder="e.g. 450 × 320 × 90 mm or 120 × 60 × 74 cm"
+                    className="w-full px-2.5 py-1.5 bg-white border border-[#D5D5D0] text-xs text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none font-mono"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-mono text-[#5A5A55] block mb-1 font-semibold">
+                    Weight
+                  </label>
+                  <input
+                    type="text"
+                    value={weight}
+                    onChange={(e) => setWeight(e.target.value)}
+                    placeholder="e.g. 2.4 kg, 350g, 15 lbs"
+                    className="w-full px-2.5 py-1.5 bg-white border border-[#D5D5D0] text-xs text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none font-mono"
+                  />
+                </div>
+              </div>
+
+              {/* Power Specs & Connectivity */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[11px] font-mono text-[#5A5A55] block mb-1 font-semibold">
+                    Power &amp; Battery Specs
+                  </label>
+                  <input
+                    type="text"
+                    value={powerSpecs}
+                    onChange={(e) => setPowerSpecs(e.target.value)}
+                    placeholder="e.g. USB-C 100W PD, 240V UK Mains, Li-Ion 40h, Passive"
+                    className="w-full px-2.5 py-1.5 bg-white border border-[#D5D5D0] text-xs text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-mono text-[#5A5A55] block mb-1 font-semibold">
+                    Connectivity &amp; Ports
+                  </label>
+                  <input
+                    type="text"
+                    value={connectivity}
+                    onChange={(e) => setConnectivity(e.target.value)}
+                    placeholder="e.g. Bluetooth 5.3, Wi-Fi 6, 3.5mm Aux, USB-C, Optical"
+                    className="w-full px-2.5 py-1.5 bg-white border border-[#D5D5D0] text-xs text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              {/* Materials & Warranty */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[11px] font-mono text-[#5A5A55] block mb-1 font-semibold">
+                    Materials &amp; Build Construction
+                  </label>
+                  <input
+                    type="text"
+                    value={homewareMaterial}
+                    onChange={(e) => setHomewareMaterial(e.target.value)}
+                    placeholder="e.g. Anodized Aluminum, Solid Walnut, Borosilicate Glass"
+                    className="w-full px-2.5 py-1.5 bg-white border border-[#D5D5D0] text-xs text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-mono text-[#5A5A55] block mb-1 font-semibold">
+                    Warranty &amp; Service History
+                  </label>
+                  <input
+                    type="text"
+                    value={warrantyInfo}
+                    onChange={(e) => setWarrantyInfo(e.target.value)}
+                    placeholder="e.g. 2-Year Warranty until Nov 2027, Serviced May 2025"
+                    className="w-full px-2.5 py-1.5 bg-white border border-[#D5D5D0] text-xs text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              {/* Included Accessories & Box */}
+              <div>
+                <label className="text-[11px] font-mono text-[#5A5A55] block mb-1 font-semibold">
+                  Included Accessories &amp; Packaging
+                </label>
+                <input
+                  type="text"
+                  value={includedAccessories}
+                  onChange={(e) => setIncludedAccessories(e.target.value)}
+                  placeholder="e.g. Original retail box, power adapter, manual, travel case, extra cables"
+                  className="w-full px-2.5 py-1.5 bg-white border border-[#D5D5D0] text-xs text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none"
+                />
+              </div>
+
+              {/* Usage & Project Notes */}
+              <div>
+                <label className="text-[11px] font-mono text-[#5A5A55] block mb-1 font-semibold">
+                  Usage, Audio/Tech Configuration &amp; Project Notes
+                </label>
+                <input
+                  type="text"
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder="e.g. Connected to DAC via optical cable; firmware v2.1 installed"
+                  className="w-full px-2.5 py-1.5 bg-white border border-[#D5D5D0] text-xs text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none"
+                />
+              </div>
             </div>
-          </div>
+          )}
 
-          {/* Season Selector */}
-          <div>
-            <label className="text-[11px] font-mono text-[#5A5A55] block mb-1.5 font-semibold">
-              Wearable Seasons
-            </label>
-            <div className="flex flex-wrap gap-1.5">
-              {ALL_SEASONS.map((s) => (
-                <button
-                  type="button"
-                  key={s}
-                  onClick={() => toggleSeason(s)}
-                  className={`px-3 py-1 text-xs border transition-all cursor-pointer ${
-                    (Array.isArray(seasons) ? seasons : []).includes(s)
-                      ? 'bg-[#1A1A1A] text-white font-semibold border-[#1A1A1A]'
-                      : 'bg-[#F8F7F4] text-[#5A5A55] border-[#E5E5E1] hover:text-[#1A1A1A]'
-                  }`}
+          {/* ========================================================= */}
+          {/* SHARED PRICING, VALUATION & METADATA SECTION              */}
+          {/* ========================================================= */}
+          <div className="pt-2 border-t border-[#E5E5E1] space-y-3">
+            <span className="text-[10px] font-mono uppercase tracking-wider text-[#8C7355] font-semibold block">
+              Financial Valuation &amp; Acquisition Record
+            </span>
+
+            {/* Price, RRP & Purchase Date */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              <div>
+                <label className="text-[11px] font-mono text-[#5A5A55] block mb-1 font-semibold">
+                  Purchase Price (£ GBP)
+                </label>
+                <div className="relative">
+                  <span className="absolute left-2.5 top-1.5 text-xs text-[#8C7355] font-mono font-bold">£</span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={purchasePrice}
+                    onChange={(e) => setPurchasePrice(e.target.value)}
+                    placeholder="299"
+                    className="w-full pl-6 pr-2.5 py-1.5 bg-white border border-[#D5D5D0] text-xs font-mono text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none font-semibold"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[11px] font-mono text-[#5A5A55] block mb-1 font-semibold">
+                  RRP Retail Price (£ GBP)
+                </label>
+                <div className="relative">
+                  <span className="absolute left-2.5 top-1.5 text-xs text-[#8C7355] font-mono font-bold">£</span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={rrp}
+                    onChange={(e) => setRrp(e.target.value)}
+                    placeholder="380"
+                    className="w-full pl-6 pr-2.5 py-1.5 bg-white border border-[#D5D5D0] text-xs font-mono text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none font-semibold"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[11px] font-mono text-[#5A5A55] block mb-1 font-semibold">
+                  Purchase Date
+                </label>
+                <input
+                  type="date"
+                  value={purchaseDate}
+                  onChange={(e) => setPurchaseDate(e.target.value)}
+                  className="w-full px-2 py-1.5 bg-white border border-[#D5D5D0] text-xs text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="text-[11px] font-mono text-[#5A5A55] block mb-1 font-semibold">
+                  Condition State
+                </label>
+                <select
+                  value={condition}
+                  onChange={(e) => setCondition(e.target.value as Condition)}
+                  className="w-full px-2 py-1.5 bg-white border border-[#D5D5D0] text-xs text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none"
                 >
-                  {s}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Care & Tags */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="text-[11px] font-mono text-[#5A5A55] block mb-1 font-semibold">
-                Care &amp; Cleaning
-              </label>
-              <input
-                type="text"
-                value={careNotes}
-                onChange={(e) => setCareNotes(e.target.value)}
-                placeholder="e.g. Sponge clean only, re-wax annually"
-                className="w-full px-2.5 py-1.5 bg-white border border-[#D5D5D0] text-xs text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none"
-              />
+                  <option value="Pristine / New">Pristine / New</option>
+                  <option value="Excellent">Excellent</option>
+                  <option value="Good">Good</option>
+                  <option value="Needs Repair">Needs Repair</option>
+                </select>
+              </div>
             </div>
 
+            {/* Live RRP Savings Indicator if applicable */}
+            {(() => {
+              const p = parseFloat(purchasePrice);
+              const r = parseFloat(rrp);
+              if (!isNaN(p) && !isNaN(r) && r > p) {
+                const savings = calculateRrpSavings(p, r);
+                return (
+                  <div className="flex items-center justify-between text-xs bg-[#EBF3ED] text-[#245934] border border-[#BBDBC2] px-3 py-1.5">
+                    <span className="font-mono font-medium">
+                      Saving vs RRP: <strong>{savings.formattedSavings}</strong> ({savings.formattedDiscount})
+                    </span>
+                    <span className="text-[11px] text-[#2E7D32]/80 uppercase tracking-wider font-mono">Retail discount recorded</span>
+                  </div>
+                );
+              }
+              return null;
+            })()}
+
+            {/* Tags */}
             <div>
               <label className="text-[11px] font-mono text-[#5A5A55] block mb-1 font-semibold">
                 Tags (comma separated)
@@ -861,56 +1532,41 @@ export const ItemFormModal: React.FC<ItemFormModalProps> = ({
                 type="text"
                 value={tagsInput}
                 onChange={(e) => setTagsInput(e.target.value)}
-                placeholder="e.g. heritage, outerwear, weatherproof"
+                placeholder={
+                  activeTab === 'clothing'
+                    ? 'e.g. heritage, outerwear, weatherproof, tailoring'
+                    : 'e.g. vintage-audio, studio, hi-fi, EDC, photography'
+                }
                 className="w-full px-2.5 py-1.5 bg-white border border-[#D5D5D0] text-xs text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none"
               />
             </div>
           </div>
 
-          {/* Storage & Notes */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="text-[11px] font-mono text-[#5A5A55] block mb-1 font-semibold">
-                Storage Location
-              </label>
-              <input
-                type="text"
-                value={storageLocation}
-                onChange={(e) => setStorageLocation(e.target.value)}
-                placeholder="e.g. Main Wardrobe, Hallway Rail, Cedar Chest"
-                className="w-full px-2.5 py-1.5 bg-white border border-[#D5D5D0] text-xs text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none"
-              />
+          {/* Footer Actions */}
+          <div className="pt-3 border-t border-[#E5E5E1] flex items-center justify-between">
+            <div className="flex items-center gap-2 text-[11px] text-[#767670] font-mono">
+              <span className="inline-block w-2 h-2 rounded-full bg-[#8C7355]"></span>
+              <span>
+                Saving as: <strong>{activeTab === 'clothing' ? 'Clothing & Wearables' : 'Homeware & Tech'}</strong>
+              </span>
             </div>
 
-            <div>
-              <label className="text-[11px] font-mono text-[#5A5A55] block mb-1 font-semibold">
-                Styling Notes
-              </label>
-              <input
-                type="text"
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                placeholder="e.g. Layer over chunky knitwear"
-                className="w-full px-2.5 py-1.5 bg-white border border-[#D5D5D0] text-xs text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none"
-              />
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-4 py-2 text-xs font-medium border border-[#D5D5D0] text-[#5A5A55] hover:bg-[#F2F1ED] cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="px-5 py-2 text-xs font-medium uppercase tracking-wider bg-[#8C7355] hover:bg-[#735D43] text-white shadow-xs transition-all cursor-pointer flex items-center gap-1.5"
+              >
+                <Check className="w-3.5 h-3.5" />
+                <span>{initialItem ? 'Save Updates' : 'Add to Inventory'}</span>
+              </button>
             </div>
-          </div>
-
-          {/* Footer Submit */}
-          <div className="pt-3 border-t border-[#E5E5E1] flex items-center justify-end gap-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 text-xs font-medium border border-[#D5D5D0] text-[#5A5A55] hover:bg-[#F2F1ED] cursor-pointer"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="px-5 py-2 text-xs font-medium uppercase tracking-wider bg-[#8C7355] hover:bg-[#735D43] text-white shadow-xs transition-all cursor-pointer"
-            >
-              {initialItem ? 'Save Updates' : 'Add to Wardrobe'}
-            </button>
           </div>
         </form>
       </div>

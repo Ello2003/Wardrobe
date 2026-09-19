@@ -34,12 +34,197 @@ export interface AppReleaseIteration {
 
 export const APP_ITERATIONS_LOG: AppReleaseIteration[] = [
   {
+    version: 'v5.3',
+    releaseDate: 'September 2026',
+    title: 'Floating Quick Note Capture Widget with Site-Wide Hover Presence',
+    summary:
+      'Engineered a persistent, floating quick note capture widget that hovers seamlessly across every view and screen of the studio. Features single-click expandable scratchpad, quick categorization pills (Style Idea, To Buy, Fit & Sizing, Care & Alteration, Homeware & Tech, General), instant pinned notes, one-click "Convert to Wishlist" integration, keyboard shortcut (Alt+N), dock position switcher (bottom-right / bottom-left), and local storage persistence.',
+    isLatest: true,
+    tags: [
+      'FLOATING HOVER WIDGET',
+      'QUICK NOTE CAPTURE',
+      'SCRATCHPAD & MEMOS',
+      'ONE-CLICK WISHLIST CONVERT',
+      'KEYBOARD SHORTCUTS',
+      'LOCAL PERSISTENCE',
+    ],
+    changes: {
+      features: [
+        'Persistent Hover Widget: Discreet floating action pill fixed at the bottom edge of the viewport that stays accessible across Dashboard, Wardrobe, Lookbook, Shopping, Selling, Analytics, and Tools views.',
+        'Instant Note Capture: Quick-input form supporting multi-line thoughts, styling formulas, alteration reminders, or prospective purchases with keyboard submission (Enter / ⌘Enter).',
+        'Sartorial Categorization: Six dedicated category badges with curated aesthetic color-coding (Style Idea, To Buy, Fit & Sizing, Care & Alteration, Homeware & Tech, General).',
+        'Direct Wishlist Integration: One-click "Add to Wishlist" action converts any captured thought or prospective purchase into a tracked ShoppingItem in the shopping pipeline.',
+        'Pin & Prioritize: Star/pin critical notes to keep them anchored at the top of the scratchpad, with an animated visual indicator on the collapsed pill.',
+        'Global Shortcut & Navigation Trigger: Alt+N (or Option+N) immediately summons and focuses the widget from anywhere; also integrated into the top navigation header bar.',
+        'Dock Switcher & Filtering: Easily flip widget dock between bottom-right and bottom-left, filter by Active/Pinned/Completed, and search notes in real-time.',
+      ],
+      fixes: [
+        'Prevented floating notification overlaps by elevating the undo toast notification above the hover widget.',
+      ],
+      improvements: [
+        'Inline note editing via double-click, one-click clipboard copying, and bulk export to clipboard.',
+        'Safe localStorage synchronization with initial sartorial starter notes.',
+      ],
+    },
+    affectedModules: [
+      'QuickNoteWidget.tsx',
+      'App.tsx',
+      'Navigation.tsx',
+      'types.ts',
+      'VersionIterationsLog.tsx',
+    ],
+  },
+  {
+    version: 'v5.2',
+    releaseDate: 'September 2026',
+    title: 'Single Source of Truth Edit Item Window with Dual-Tab Architecture',
+    summary:
+      'Refactored the master inventory edit and creation window into a single source of truth featuring 2 dedicated tabs: one with criteria for clothing & wearables (sizing, fabric composition, wearable seasons, styling notes, care directives), and an expansive new tab for recording homeware, electronics, tech, audio, optics, and hobbies (model/serial numbers, dimensions, weight, power/battery specs, connectivity/ports, room location, warranty & service history, and included accessories).',
+    isLatest: false,
+    tags: [
+      'SINGLE SOURCE OF TRUTH',
+      'DUAL-TAB EDIT WINDOW',
+      'CLOTHING & APPAREL',
+      'HOMEWARE & ELECTRONICS',
+      'HOBBIES & TECH SPECS',
+      'HARDWARE ATTRIBUTES',
+    ],
+    changes: {
+      features: [
+        'Single Source of Truth Edit Window: Unified all inventory item creation and modification into a single modal with a dedicated 2-tab navigation architecture.',
+        'Tab 1 — Clothing & Wearables: Preserves all specialized sartorial fields including garment category, sizing & fit, fabric/material composition, seasonal badges (Autumn, Winter, Spring, Summer, All-Season), care & cleaning directives, and outfitting styling formulas.',
+        'Tab 2 — Homeware, Electronics & Hobbies: Introduces comprehensive hardware & lifestyle criteria including quick category presets (Audio & Tech, Electronics, Cameras & Optics, Furniture, Hobbies & Gear, Tableware, Tools & EDC), model/serial number, room/household placement, dimensions (W × D × H), weight, power/battery specs, connectivity/ports, build materials, warranty & service records, and included accessories & box.',
+        'Smart Automatic Tab Detection: Automatically routes to the correct tab when editing an item based on category, itemType, or existing hardware attributes, with fluid real-time tab switching.',
+        'Hardware & Specs Detail View: Enhanced ItemDetailModal to dynamically render hardware, electronics, and lifestyle specification cards when viewing recorded homeware and hobby items.',
+      ],
+      fixes: [
+        'Eliminated divergent item editing pathways across the application by standardizing all inventory edits onto ItemFormModal.',
+        'Prevented category mismatch by intelligently grouping apparel and homeware categories in dropdown selectors.',
+      ],
+      improvements: [
+        'Shared photo upload (drag & drop, clipboard paste, direct URL, file upload) and valuation calculator persist seamlessly across both tabs.',
+        'Full backwards and forwards compatibility with existing wardrobe and homeware items.',
+      ],
+    },
+    affectedModules: [
+      'ItemFormModal.tsx',
+      'ItemDetailModal.tsx',
+      'types.ts',
+      'VersionIterationsLog.tsx',
+    ],
+  },
+  {
+    version: 'v5.1',
+    releaseDate: 'September 2026',
+    title: 'Duplicated Garment & Homeware Category Sections & Independent Filtering',
+    summary:
+      'Preserved the dedicated Garment categories & collections filter section while duplicating and establishing a fully independent Homeware Categories & Collections section. Features independent filter bars, scoped category tags, custom category creator/editor, and integrated clear-all reset controls.',
+    isLatest: false,
+    tags: ['DUPLICATED CATEGORY SECTIONS', 'INDEPENDENT FILTERING', 'GARMENT & HOMEWARE', 'INDEPENDENT TAGS', 'INVENTORY CONTROLS'],
+    changes: {
+      features: [
+        'Dedicated Garment Categories Section: Maintained the original category manager with garment collections (Outerwear, Knitwear, Tops & Shirts, Bottoms, Footwear, Tailoring, Bags & Leather, Accessories) with independent category creation, editing, deletion, and default resets.',
+        'Duplicated Homeware Categories Section: Established a mirrored, dedicated category manager section with distinct Homeware & Lifestyle collections (Kitchenware, Tableware, Ceramics & Pottery, Home Decor, Furniture, Lighting, Soft Furnishings, Vinyl & Music) with independent controls.',
+        'Independent Scoped Tags: Generated separate tag clouds for garments and homeware items so lifestyle pieces and garments each display relevant, non-polluted tag filters.',
+        'Synchronized Global & Scoped Reset: Added reactive active-filter banners with single-click "View All Pieces" and unified "Clear All Filters" supporting independent garment and homeware filter scopes.',
+      ],
+      fixes: [
+        'Prevented selecting a homeware category from inadvertently masking garment filter states or causing conflicts in multi-attribute inventory searches.',
+        'Ensured category rename and delete prompts operate strictly on their respective garment or homeware taxonomy domain.',
+      ],
+      improvements: [
+        'Crystal-clear visual separation between wardrobe clothing items and design homeware objects.',
+        'Seamless dual-domain navigation with instant reactive filtering and persistent localStorage memory.',
+      ],
+    },
+    affectedModules: [
+      'WardrobeView.tsx',
+      'WardrobeContext.tsx',
+      'types.ts',
+      'initialData.ts',
+      'VersionIterationsLog.tsx',
+    ],
+  },
+  {
+    version: 'v5.0',
+    releaseDate: 'September 2026',
+    title: 'Wardrobe to Inventory Evolution & First-Class Homeware Category System',
+    summary:
+      'Officially transitioned the platform from single-scope wardrobe terminology to unified "Inventory" management. Added dedicated first-class Homeware & Lifestyle category taxonomy (Homeware, Vinyl, Shoe Care, Art & Books, Audio & Tech, Textiles, Decor, Furniture, Dining) with independent filtering, optgroup selection, and tailored wear/play usage metrics.',
+    isLatest: false,
+    tags: ['INVENTORY EVOLUTION', 'HOMEWARE SYSTEM', 'CATEGORY TAXONOMY', 'LIFESTYLE & VINYL', 'FILTER SYSTEM'],
+    changes: {
+      features: [
+        'Universal "Inventory" Terminology: Updated all primary navigation, header badges, database toolbars, search placeholders, statistics panels, and export/import modals to standard Inventory terminology.',
+        'First-Class Homeware & Lifestyle Taxonomy: Integrated complete homeware categories (Homeware, Vinyl, Shoe Care, Art & Books, Audio & Tech, Textiles & Bedding, Tableware & Dining, Lighting & Lamps, Decor & Vases, Furniture & Living) alongside apparel categories.',
+        'Independent Homeware & Apparel Segment Filtering: Added dedicated quick-segment filters in Inventory view for "All Pieces", "Apparel", and "Homeware & Lifestyle" in addition to individual category chips.',
+        'Organized Category Selectors: Added grouped optgroups in item forms and quick selectors distinguishing "Apparel & Garments" from "Homeware & Lifestyle".',
+        'Adaptive Homeware Metrics: Tailored item details and wear trackers to display "Times Used / Played" and "Log Use / Play (+1)" for non-apparel items, and excluded homeware from the daily outfit wear logger.',
+      ],
+      fixes: [
+        'Prevented category reset and initialization from overwriting or losing existing homeware, vinyl, and shoe care items from database backups.',
+        'Ensured full compatibility across table inline editing, bulk batch editing, and search filtering for both garments and lifestyle items.',
+      ],
+      improvements: [
+        'Unified category taxonomy that accommodates both luxury clothing collections and design homeware, vinyl records, and object collections in one seamless system.',
+        'Immediate reactive category filtering with zero latency and full persistence.',
+      ],
+    },
+    affectedModules: [
+      'WardrobeView.tsx',
+      'Navigation.tsx',
+      'types.ts',
+      'initialData.ts',
+      'WardrobeContext.tsx',
+      'ItemFormModal.tsx',
+      'ItemDetailModal.tsx',
+      'DashboardView.tsx',
+      'InventoryDatabaseTable.tsx',
+    ],
+  },
+  {
+    version: 'v4.9',
+    releaseDate: 'September 2026',
+    title: 'Pipeline State Sync & Universal Inline Editing Across All Views',
+    summary:
+      'Resolved state synchronization between pipeline workflow bars and status filter dropdowns in both Shopping & Wishlist Manager and Sales & Resale Studio with unified SSOT architecture. Implemented comprehensive inline editing across all cards and database tables for Color, Size, Brand, Price, Name, and Notes.',
+    isLatest: false,
+    tags: ['STATE SYNCHRONIZATION', 'SINGLE SOURCE OF TRUTH', 'INLINE EDITING', 'PIPELINE SYNC', 'REACTIVE UI'],
+    changes: {
+      features: [
+        'Universal Inline Editing for Sales & Resale Studio: Implemented interactive inline editing in both Card Grid view and Database Table view for Brand, Price, Garment Name, Color (with live hex swatches), Size, and Notes/Description with immediate reactive updates.',
+        'Bidirectional Pipeline & Status Filter Sync (Sales & Resale Studio): Unified salesPipelineStage and status tab dropdown under a single source of truth with automated localStorage persistence (sales_resale_pipeline_stage and sales_selected_status_tab).',
+        'Bidirectional Pipeline & Status Filter Sync (Shopping & Wishlist Manager): Bound pipelineTab and selectedStatus under a synchronized setter with persistent localStorage caching (shopping_pipeline_tab and shopping_selected_status).',
+        'Universal Color Swatches: Integrated getColorHex across all inline editable color fields in wardrobe, shopping, and resale tables and cards.',
+      ],
+      fixes: [
+        'Fixed state mismatch where changing the active pipeline stage in the workflow bar did not update the status dropdown in the filter panel.',
+        'Fixed filtering desynchronization where independent status states caused conflicting or missing records during pipeline filtering.',
+        'Resolved non-editable colour and size fields across resale card grid and database views.',
+      ],
+      improvements: [
+        'Pure Single Source of Truth architecture eliminates out-of-sync filter configurations.',
+        'Zero friction inline modifications without requiring modal dialogues.',
+        'Full keyboard navigation support (Enter to save, Escape to cancel) across all inline inputs.',
+      ],
+    },
+    affectedModules: [
+      'SellingView.tsx',
+      'SellingDatabaseTable.tsx',
+      'ShoppingView.tsx',
+      'ShoppingDatabaseTable.tsx',
+      'InventoryDatabaseTable.tsx',
+      'WardrobeView.tsx',
+      'statusUtils.ts',
+    ],
+  },
+  {
     version: 'v4.8',
     releaseDate: 'September 2026',
     title: 'DRY Status Architecture & Single Source of Truth Refactoring',
     summary:
       'Eliminated duplicated status definitions, hardcoded select options, redundant switch-case badge styles, and fragmented tag reconciliation across the application into a unified statusUtils architecture.',
-    isLatest: true,
+    isLatest: false,
     tags: ['DRY REFACTORING', 'ARCHITECTURE', 'SINGLE SOURCE OF TRUTH', 'STATUS UTILS', 'CODE QUALITY'],
     changes: {
       features: [

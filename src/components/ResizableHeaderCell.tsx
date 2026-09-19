@@ -29,10 +29,10 @@ export const ResizableHeaderCell: React.FC<ResizableHeaderCellProps> = ({
     <th
       style={{
         width: width ? `${width}px` : undefined,
-        minWidth: `${minWidth}px`,
+        minWidth: width ? `${Math.max(minWidth, width)}px` : `${minWidth}px`,
         maxWidth: width ? `${width}px` : undefined,
       }}
-      className={`relative select-none group/th px-3 py-2.5 transition-colors ${
+      className={`relative select-none group/th px-3 py-2.5 transition-colors overflow-hidden ${
         align === 'right'
           ? 'text-right'
           : align === 'center'
