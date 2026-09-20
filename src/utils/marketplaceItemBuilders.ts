@@ -14,6 +14,7 @@
 
 import { WardrobeItem, ShoppingItem, SaleItem, Condition } from '../types';
 import { determineLifecycleTags, isCancelledStatus } from './tagUtils';
+import { extractColorFromTitleAndDesc } from './garmentAttributeExtractor';
 
 /** The minimal shape any marketplace order needs to provide. Both VintedOrder
  * and EbayOrder already satisfy this structurally. */
@@ -37,6 +38,7 @@ export interface MarketplaceOrderLike {
   seller?: string;
   buyer?: string;
   notes?: string;
+  description?: string;
 }
 
 export interface MarketplacePlatformConfig {
@@ -100,7 +102,9 @@ function deriveCommonFields(
     inferredBrand: platform.inferBrand(order, orderTitle),
     inferredCategory: platform.inferCategory(order, orderTitle, categories),
     inferredSize: platform.inferSize ? platform.inferSize(order, orderTitle) : order.size || undefined,
-    inferredColor: platform.inferColor ? platform.inferColor(order) : order.color || order.colour || undefined,
+    inferredColor: platform.inferColor
+      ? platform.inferColor(order)
+      : (order.color || order.colour || extractColorFromTitleAndDesc(orderTitle, order.notes || order.description) || undefined),
     inferredCondition: platform.inferCondition
       ? platform.inferCondition(order)
       : ('Good' as Condition),
@@ -235,15 +239,16 @@ export function buildMarketplaceWardrobeItem(
     brand: f.inferredBrand,
     category: f.inferredCategory,
     size: f.inferredSize,
-    color: f.inferredColor || 'Various',
+    color: f.inferredColor || extractColorFromTitleAndDesc(f.orderTitle, order.notes || order.description) || 'Neutral',
     season: ['All-Season'],
     purchasePrice: f.orderPrice,
-    rrp: f.orderRrp,
+    rrp: f.orderRrp !== undefined && f.orderRrp > 0 ? f.orderRrp : f.orderPrice,
     purchaseDate: f.rawDate,
     wearCount: 0,
     imageUrl: order.image || '',
     retailerName: platform.platformLabel,
     orderNumber: f.orderId,
+    seller: order.seller || undefined,
     targetStoreUrl: platform.buildItemUrl(order),
     condition: f.inferredCondition,
     isFavorite: false,

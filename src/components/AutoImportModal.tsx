@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { useWardrobe } from '../context/WardrobeContext';
 import { Category, Season, Condition, SellingStatus, ShoppingStatus, normalizeCategoryName } from '../types';
 import { GarmentImage } from './GarmentImage';
@@ -56,6 +56,13 @@ import {
   Play,
   CheckCircle2,
   User,
+  Search,
+  Filter,
+  ArrowUpDown,
+  ChevronLeft,
+  ChevronRight,
+  Palette,
+  RotateCcw,
 } from 'lucide-react';
 
 export interface ExtractedGarmentItem {
@@ -64,7 +71,9 @@ export interface ExtractedGarmentItem {
   brand: string;
   category: Category;
   purchasePrice: number;
+  rrp?: number;
   color?: string;
+  originalListingColor?: string;
   material?: string;
   size?: string;
   season?: string[];
@@ -76,6 +85,8 @@ export interface ExtractedGarmentItem {
   allCandidateImages?: string[];
   targetStoreUrl?: string;
   retailerName?: string;
+  orderNumber?: string;
+  vintedUrl?: string;
   orderStatus?: string;
   orderDate?: string;
   lastUpdatedDate?: string;
@@ -87,6 +98,7 @@ export interface ExtractedGarmentItem {
   sourceFile?: string;
   selectedForImport?: boolean;
   destination?: 'wardrobe' | 'shopping' | 'selling';
+  engineUsed?: string;
 }
 
 export interface VintedStagedFile {
@@ -154,6 +166,12 @@ export const AutoImportModal: React.FC<AutoImportModalProps> = ({
   const [vintedAccountProgress, setVintedAccountProgress] = useState<string | null>(null);
   const [scrapedUserData, setScrapedUserData] = useState<{ username?: string; id?: string; photo?: string; itemsCount?: number } | null>(null);
   const [previewTagFilter, setPreviewTagFilter] = useState<'all' | 'Bought' | 'Sold' | 'Listed' | 'Cancelled'>('all');
+  const [importSearchQuery, setImportSearchQuery] = useState('');
+  const [importDestinationFilter, setImportDestinationFilter] = useState<'all' | 'wardrobe' | 'shopping' | 'selling'>('all');
+  const [importCategoryFilter, setImportCategoryFilter] = useState<string>('all');
+  const [importSortBy, setImportSortBy] = useState<'original' | 'price-desc' | 'price-asc' | 'brand-asc' | 'title-asc' | 'selected-first'>('original');
+  const [importPageSize, setImportPageSize] = useState<number>(20);
+  const [importCurrentPage, setImportCurrentPage] = useState<number>(1);
 
   const [vintedSyncType, setVintedSyncType] = useState<'all' | 'purchased' | 'sold' | 'active'>('all');
   const [vintedSyncProgress, setVintedSyncProgress] = useState<string | null>(null);
@@ -196,6 +214,26 @@ export const AutoImportModal: React.FC<AutoImportModalProps> = ({
   const [globalDestination, setGlobalDestination] = useState<'wardrobe' | 'shopping' | 'selling'>(defaultDestination);
   const [saveSuccessMessage, setSaveSuccessMessage] = useState<string | null>(null);
   const [isSavingBatch, setIsSavingBatch] = useState(false);
+  const [scraperEngineStatus, setScraperEngineStatus] = useState<{
+    activeEngine: string;
+    firecrawlConfigured: boolean;
+  } | null>(null);
+
+  // Fetch scraper status when modal opens
+  useEffect(() => {
+    if (isOpen) {
+      safeApiFetch<{ status: string; activeEngine: string; firecrawlConfigured: boolean }>('/api/scraper/status')
+        .then((res) => {
+          if (res.success && res.data) {
+            setScraperEngineStatus({
+              activeEngine: res.data.activeEngine,
+              firecrawlConfigured: res.data.firecrawlConfigured,
+            });
+          }
+        })
+        .catch(() => {});
+    }
+  }, [isOpen]);
 
   // Reset and auto-trigger on initialUrl when opening
   useEffect(() => {
@@ -520,24 +558,61 @@ export const AutoImportModal: React.FC<AutoImportModalProps> = ({
         resolvedBrand = 'Pre-Loved Brand';
       }
 
-      const resolvedColor = attrs.color || raw.color || raw.colour || 'Neutral';
+      // Parse purchase price: always preserve the price paid!
+      let resolvedPrice = 0;
+      if (raw.purchasePrice !== undefined && raw.purchasePrice !== null && raw.purchasePrice !== '') {
+        resolvedPrice = typeof raw.purchasePrice === 'number' ? raw.purchasePrice : parseFloat(String(raw.purchasePrice).replace(/[^0-9.]/g, '')) || 0;
+      } else if (raw.price !== undefined && raw.price !== null && raw.price !== '') {
+        resolvedPrice = typeof raw.price === 'number' ? raw.price : parseFloat(String(raw.price).replace(/[^0-9.]/g, '')) || 0;
+      } else if (raw.orderValue !== undefined && raw.orderValue !== null && raw.orderValue !== '') {
+        resolvedPrice = typeof raw.orderValue === 'number' ? raw.orderValue : parseFloat(String(raw.orderValue).replace(/[^0-9.]/g, '')) || 0;
+      } else if (raw.pricePaid !== undefined && raw.pricePaid !== null && raw.pricePaid !== '') {
+        resolvedPrice = typeof raw.pricePaid === 'number' ? raw.pricePaid : parseFloat(String(raw.pricePaid).replace(/[^0-9.]/g, '')) || 0;
+      }
+
+      // Default to rrp price when importing
+      let resolvedRrp: number = resolvedPrice;
+      if (raw.rrp !== undefined && raw.rrp !== null && raw.rrp !== '') {
+        const parsedRrp = typeof raw.rrp === 'number' ? raw.rrp : parseFloat(String(raw.rrp).replace(/[^0-9.]/g, '')) || 0;
+        if (parsedRrp > 0) resolvedRrp = parsedRrp;
+      } else if (raw.retailPrice !== undefined && raw.retailPrice !== null && raw.retailPrice !== '') {
+        const parsedRetail = typeof raw.retailPrice === 'number' ? raw.retailPrice : parseFloat(String(raw.retailPrice).replace(/[^0-9.]/g, '')) || 0;
+        if (parsedRetail > 0) resolvedRrp = parsedRetail;
+      }
+
+      // Original listing color vs default
+      const originalListingColor = raw.color || raw.colour || raw.color_title || '';
+      const resolvedColor = attrs.color || originalListingColor || 'Neutral';
       const resolvedMaterial = attrs.material || raw.material || 'Natural Fiber / Blend';
       const resolvedSize = attrs.size || raw.size || '';
       const resolvedRetailer = raw.retailerName || (raw.targetStoreUrl?.includes('vinted') || activeTab === 'vinted' ? 'Vinted' : retailer) || 'Vinted';
+
+      // Preserve notes and never overwrite these notes or details
+      const noteCandidates = [
+        raw.notes,
+        raw.description && raw.description !== raw.notes ? raw.description : '',
+        raw.careNotes && raw.careNotes !== raw.notes ? raw.careNotes : '',
+        raw.seller ? `Seller: @${String(raw.seller).replace(/^@/, '')}` : '',
+        raw.buyer ? `Buyer: @${String(raw.buyer).replace(/^@/, '')}` : '',
+        raw.orderStatus ? `Status: ${raw.orderStatus}` : '',
+      ].filter(Boolean);
+      const combinedNotes = Array.from(new Set(noteCandidates)).join(' · ');
 
       return {
         id: `extracted-${Date.now()}-${idx}`,
         name: raw.name || raw.title || `Garment #${idx + 1}`,
         brand: resolvedBrand,
         category: validCategory,
-        purchasePrice: Number(raw.purchasePrice) || 80,
+        purchasePrice: resolvedPrice,
+        rrp: resolvedRrp,
         color: resolvedColor,
+        originalListingColor: originalListingColor || undefined,
         material: resolvedMaterial,
         size: resolvedSize,
         season: Array.isArray(raw.season) && raw.season.length > 0 ? raw.season : ['Autumn', 'Winter'],
         condition: raw.condition || 'Pristine / New',
         careNotes: raw.careNotes || '',
-        notes: raw.notes || '',
+        notes: combinedNotes,
         tags,
         imageUrl: (raw.imageUrl && !raw.imageUrl.includes('unsplash.com')) ? raw.imageUrl.trim() : '',
         allCandidateImages: Array.isArray(raw.allCandidateImages)
@@ -545,21 +620,26 @@ export const AutoImportModal: React.FC<AutoImportModalProps> = ({
           : (raw.imageUrl && !raw.imageUrl.includes('unsplash.com') ? [raw.imageUrl] : []),
         targetStoreUrl: raw.targetStoreUrl || (activeTab === 'url' ? urlInput : undefined),
         retailerName: resolvedRetailer,
+        orderNumber: raw.orderNumber || raw.orderId || raw.order_id || undefined,
+        vintedUrl: raw.vintedUrl || raw.targetStoreUrl || undefined,
         orderStatus: raw.orderStatus || undefined,
         orderDate: raw.orderDate || undefined,
         lastUpdatedDate: raw.lastUpdatedDate || undefined,
         seller: raw.seller || undefined,
         buyer: raw.buyer || undefined,
-        orderValue: Number(raw.orderValue) || undefined,
+        orderValue: Number(raw.orderValue) || (resolvedPrice > 0 ? resolvedPrice : undefined),
         walletAmount: Number(raw.walletAmount) || undefined,
         transactionType: raw.transactionType || (isSale ? 'Sale' : undefined),
         sourceFile: raw.sourceFile || undefined,
         selectedForImport: true,
         destination: itemDestination,
+        engineUsed: raw.engineUsed || undefined,
       };
     });
 
     setExtractedItems(list);
+    setImportSearchQuery('');
+    setImportCurrentPage(1);
     setBasketSummary({
       isBasket: isBasket || list.length > 1,
       basketTotalGbp: Number(totalGbp) || list.reduce((sum, it) => sum + it.purchasePrice, 0),
@@ -1390,6 +1470,121 @@ export const AutoImportModal: React.FC<AutoImportModalProps> = ({
     setExtractedItems((prev) => prev.filter((_, i) => i !== index));
   };
 
+  // Computed & Memoized search, filter, and pagination list
+  const filteredAndSortedItems = useMemo(() => {
+    let list = extractedItems.map((item, originalIdx) => ({ item, originalIdx }));
+
+    // 1. Text Search Filter (name, brand, category, seller, buyer, color, notes, tags, orderNumber, orderStatus)
+    const q = importSearchQuery.trim().toLowerCase();
+    if (q) {
+      list = list.filter(({ item }) => {
+        const name = (item.name || '').toLowerCase();
+        const brand = (item.brand || '').toLowerCase();
+        const category = (item.category || '').toLowerCase();
+        const color = (item.color || '').toLowerCase();
+        const seller = (item.seller || '').toLowerCase();
+        const buyer = (item.buyer || '').toLowerCase();
+        const notes = (item.notes || '').toLowerCase();
+        const orderNum = (item.orderNumber || '').toLowerCase();
+        const orderStatus = (item.orderStatus || '').toLowerCase();
+        const retailer = (item.retailerName || '').toLowerCase();
+        const tags = (item.tags || []).join(' ').toLowerCase();
+
+        return (
+          name.includes(q) ||
+          brand.includes(q) ||
+          category.includes(q) ||
+          color.includes(q) ||
+          seller.includes(q) ||
+          buyer.includes(q) ||
+          notes.includes(q) ||
+          orderNum.includes(q) ||
+          orderStatus.includes(q) ||
+          retailer.includes(q) ||
+          tags.includes(q)
+        );
+      });
+    }
+
+    // 2. Lifecycle Tag Filter
+    if (previewTagFilter !== 'all') {
+      list = list.filter(({ item }) => (item.tags || []).includes(previewTagFilter));
+    }
+
+    // 3. Destination Filter
+    if (importDestinationFilter !== 'all') {
+      list = list.filter(({ item }) => item.destination === importDestinationFilter);
+    }
+
+    // 4. Category Filter
+    if (importCategoryFilter !== 'all') {
+      list = list.filter(({ item }) => item.category === importCategoryFilter);
+    }
+
+    // 5. Sorting
+    if (importSortBy === 'price-desc') {
+      list.sort((a, b) => (b.item.purchasePrice || 0) - (a.item.purchasePrice || 0));
+    } else if (importSortBy === 'price-asc') {
+      list.sort((a, b) => (a.item.purchasePrice || 0) - (b.item.purchasePrice || 0));
+    } else if (importSortBy === 'brand-asc') {
+      list.sort((a, b) => (a.item.brand || '').localeCompare(b.item.brand || ''));
+    } else if (importSortBy === 'title-asc') {
+      list.sort((a, b) => (a.item.name || '').localeCompare(b.item.name || ''));
+    } else if (importSortBy === 'selected-first') {
+      list.sort((a, b) => (b.item.selectedForImport ? 1 : 0) - (a.item.selectedForImport ? 1 : 0));
+    }
+
+    return list;
+  }, [
+    extractedItems,
+    importSearchQuery,
+    previewTagFilter,
+    importDestinationFilter,
+    importCategoryFilter,
+    importSortBy,
+  ]);
+
+  // Unique categories currently present in extractedItems for the category dropdown
+  const presentCategories = useMemo(() => {
+    const cats = new Set<string>();
+    for (const it of extractedItems) {
+      if (it.category) cats.add(it.category);
+    }
+    return Array.from(cats).sort();
+  }, [extractedItems]);
+
+  // Pagination calculation
+  const totalFilteredCount = filteredAndSortedItems.length;
+  const totalPages = importPageSize > 0 ? Math.ceil(totalFilteredCount / importPageSize) : 1;
+  const effectiveCurrentPage = Math.min(Math.max(1, importCurrentPage), Math.max(1, totalPages));
+  const pagedItems = importPageSize > 0
+    ? filteredAndSortedItems.slice((effectiveCurrentPage - 1) * importPageSize, effectiveCurrentPage * importPageSize)
+    : filteredAndSortedItems;
+
+  // Helper actions for filtered items
+  const handleSelectFiltered = (selected: boolean) => {
+    const idsToToggle = new Set(filteredAndSortedItems.map((entry) => entry.originalIdx));
+    setExtractedItems((prev) =>
+      prev.map((it, idx) => (idsToToggle.has(idx) ? { ...it, selectedForImport: selected } : it))
+    );
+  };
+
+  const handleRouteFiltered = (dest: 'wardrobe' | 'shopping' | 'selling') => {
+    const idsToRoute = new Set(filteredAndSortedItems.map((entry) => entry.originalIdx));
+    setExtractedItems((prev) =>
+      prev.map((it, idx) => (idsToRoute.has(idx) ? { ...it, destination: dest } : it))
+    );
+  };
+
+  const handleResetFilters = () => {
+    setImportSearchQuery('');
+    setPreviewTagFilter('all');
+    setImportDestinationFilter('all');
+    setImportCategoryFilter('all');
+    setImportSortBy('original');
+    setImportCurrentPage(1);
+  };
+
   // Batch Save Handler: creates separate listings for each extracted garment
   const handleSaveSelectedItems = async () => {
     const selectedItems = extractedItems.filter((it) => it.selectedForImport);
@@ -1421,6 +1616,7 @@ export const AutoImportModal: React.FC<AutoImportModalProps> = ({
           purchaseDate: item.orderDate || new Date().toISOString().split('T')[0],
           purchasePrice: Number(item.purchasePrice) || 0,
           currentValuation: Number(item.purchasePrice) || 0,
+          rrp: Number(item.rrp) || Number(item.purchasePrice) || undefined,
           condition: (item.condition as Condition) || 'Vintage / Well-Loved',
           tags: determineLifecycleTags({
             destination: 'wardrobe',
@@ -1433,9 +1629,12 @@ export const AutoImportModal: React.FC<AutoImportModalProps> = ({
           imageUrl: item.imageUrl || '',
           isFavorite: false,
           isArchived: false,
-          notes: `Imported piece.${item.material ? ` Material: ${item.material}.` : ''}${item.retailerName ? ` Retailer: ${item.retailerName}.` : ''} ${item.notes || ''}`.trim(),
+          notes: item.notes || `Imported piece.${item.material ? ` Material: ${item.material}.` : ''}${item.retailerName ? ` Retailer: ${item.retailerName}.` : ''}`.trim(),
+          retailerName: item.retailerName || (isVinted ? 'Vinted' : 'Online Retailer'),
           seller: item.seller || undefined,
           buyer: item.buyer || undefined,
+          orderNumber: item.orderNumber || undefined,
+          vintedUrl: item.vintedUrl || item.targetStoreUrl || undefined,
           orderStatus: item.orderStatus || (isVinted ? 'Order completed!' : undefined),
           orderDate: item.orderDate || undefined,
           lastUpdatedDate: item.lastUpdatedDate || undefined,
@@ -1486,7 +1685,7 @@ export const AutoImportModal: React.FC<AutoImportModalProps> = ({
           }),
           listedDate: item.orderDate || new Date().toISOString().split('T')[0],
           buyerUsername: item.buyer && item.buyer !== 'user' && item.buyer !== 'No data' ? item.buyer : undefined,
-          notes: item.sourceFile ? `Imported from Vinted (${item.sourceFile}).` : 'Imported from Vinted listing.',
+          notes: item.notes || (item.sourceFile ? `Imported from Vinted (${item.sourceFile}).` : 'Imported from Vinted listing.'),
         });
       } else {
         const cleanStatus = (item.orderStatus || '').toLowerCase();
@@ -1529,6 +1728,7 @@ export const AutoImportModal: React.FC<AutoImportModalProps> = ({
           category: item.category || categories[0] || 'Outerwear',
           estimatedPrice: Number(item.purchasePrice) || 0,
           actualPricePaid: isPurchased ? (Number(item.orderValue) || Number(item.purchasePrice) || 0) : undefined,
+          rrp: Number(item.rrp) || Number(item.purchasePrice) || undefined,
           priority: 'High',
           status: itemStatus,
           season: (item.season?.[0] as Season) || 'Autumn',
@@ -1549,6 +1749,8 @@ export const AutoImportModal: React.FC<AutoImportModalProps> = ({
           purchasedDate: isPurchased ? (item.orderDate || new Date().toISOString().split('T')[0]) : undefined,
           seller: item.seller || undefined,
           buyer: item.buyer || undefined,
+          orderNumber: item.orderNumber || undefined,
+          vintedUrl: item.vintedUrl || item.targetStoreUrl || undefined,
           orderStatus: item.orderStatus || (isVinted ? 'Order completed!' : undefined),
           orderDate: item.orderDate || undefined,
           lastUpdatedDate: item.lastUpdatedDate || undefined,
@@ -1778,6 +1980,17 @@ export const AutoImportModal: React.FC<AutoImportModalProps> = ({
                     </>
                   )}
                 </button>
+              </div>
+
+              {/* Single Source of Truth Scraper Engine Indicator */}
+              <div className="flex items-center justify-between pt-1 text-[10px] font-mono">
+                <span className="text-[#767670] flex items-center gap-1.5">
+                  <span className={`inline-block w-1.5 h-1.5 rounded-full ${scraperEngineStatus?.activeEngine === 'firecrawl' ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500'}`}></span>
+                  Unified Scraper Single Source of Truth: {scraperEngineStatus?.activeEngine === 'firecrawl' ? 'Firecrawl Headless JS Engine (Anti-bot Bypass)' : 'Unified Stealth Engine (HTML / JSON-LD / OpenGraph)'}
+                </span>
+                <span className="text-[#8C7355] font-semibold uppercase">
+                  {scraperEngineStatus?.activeEngine === 'firecrawl' ? '🔥 Firecrawl Active' : '⚡ Unified Active'}
+                </span>
               </div>
             </div>
           )}
@@ -3275,14 +3488,87 @@ export const AutoImportModal: React.FC<AutoImportModalProps> = ({
                 <span>Tip: Drag &amp; drop an image onto any garment photo box below to replace its picture or re-extract details.</span>
               </div>
 
-              {/* Lifecycle Tag Filter Bar */}
-              <div className="bg-[#FAF9F7] border border-[#E5E5E1] px-3.5 py-2 flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <Tag className="w-3.5 h-3.5 text-[#007782]" />
-                  <span className="text-[11px] font-mono font-semibold uppercase tracking-wider text-[#5A5A55]">
-                    Filter by Tag:
-                  </span>
+              {/* Search, Filter, Sort, and Batch Action Toolbar */}
+              <div className="bg-[#FAF9F7] border border-[#E5E5E1] p-3.5 space-y-3">
+                {/* Row 1: Search, Category Filter, and Sorters */}
+                <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-center">
+                  <div className="sm:col-span-6 relative">
+                    <Search className="w-3.5 h-3.5 text-[#767670] absolute left-2.5 top-2.5" />
+                    <input
+                      type="text"
+                      value={importSearchQuery}
+                      onChange={(e) => {
+                        setImportSearchQuery(e.target.value);
+                        setImportCurrentPage(1);
+                      }}
+                      placeholder={`Search ${extractedItems.length} items by title, brand, seller, color, notes...`}
+                      className="w-full pl-8 pr-7 py-1.5 text-xs bg-white border border-[#D5D5D0] focus:outline-none focus:border-[#8C7355] text-[#1A1A1A] placeholder-[#A5A59E]"
+                    />
+                    {importSearchQuery && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setImportSearchQuery('');
+                          setImportCurrentPage(1);
+                        }}
+                        className="absolute right-2 top-2 text-[#767670] hover:text-[#1A1A1A] cursor-pointer"
+                        title="Clear search"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="sm:col-span-3">
+                    <div className="flex items-center gap-1.5">
+                      <Filter className="w-3.5 h-3.5 text-[#767670] shrink-0" />
+                      <select
+                        value={importCategoryFilter}
+                        onChange={(e) => {
+                          setImportCategoryFilter(e.target.value);
+                          setImportCurrentPage(1);
+                        }}
+                        className="w-full px-2 py-1.5 text-xs bg-white border border-[#D5D5D0] text-[#1A1A1A] focus:outline-none focus:border-[#8C7355]"
+                      >
+                        <option value="all">All Categories ({extractedItems.length})</option>
+                        {presentCategories.map((cat) => {
+                          const count = extractedItems.filter((it) => it.category === cat).length;
+                          return (
+                            <option key={cat} value={cat}>
+                              {cat} ({count})
+                            </option>
+                          );
+                        })}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="sm:col-span-3">
+                    <div className="flex items-center gap-1.5">
+                      <ArrowUpDown className="w-3.5 h-3.5 text-[#767670] shrink-0" />
+                      <select
+                        value={importSortBy}
+                        onChange={(e) => setImportSortBy(e.target.value as any)}
+                        className="w-full px-2 py-1.5 text-xs bg-white border border-[#D5D5D0] text-[#1A1A1A] focus:outline-none focus:border-[#8C7355]"
+                      >
+                        <option value="original">Original Order</option>
+                        <option value="price-desc">Price: High to Low</option>
+                        <option value="price-asc">Price: Low to High</option>
+                        <option value="brand-asc">Brand: A to Z</option>
+                        <option value="title-asc">Title: A to Z</option>
+                        <option value="selected-first">Selected First</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Row 2: Lifecycle Tag and Destination Filters */}
+                <div className="flex flex-wrap items-center justify-between gap-2.5 pt-2 border-t border-[#EAEAE6]">
+                  {/* Tag chips */}
                   <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="text-[10px] font-mono uppercase font-semibold text-[#767670] mr-1">
+                      Tag:
+                    </span>
                     {(['all', 'Bought', 'Sold', 'Listed', 'Cancelled'] as const).map((filter) => {
                       const count =
                         filter === 'all'
@@ -3295,19 +3581,22 @@ export const AutoImportModal: React.FC<AutoImportModalProps> = ({
                         <button
                           key={filter}
                           type="button"
-                          onClick={() => setPreviewTagFilter(filter)}
-                          className={`px-2.5 py-1 text-xs font-mono transition-colors cursor-pointer flex items-center gap-1.5 rounded-xs ${
+                          onClick={() => {
+                            setPreviewTagFilter(filter);
+                            setImportCurrentPage(1);
+                          }}
+                          className={`px-2 py-0.5 text-xs font-mono transition-colors cursor-pointer flex items-center gap-1 rounded-xs ${
                             isSelected
                               ? 'bg-[#1A1A1A] text-white font-bold shadow-xs'
                               : 'bg-white border border-[#D5D5D0] text-[#5A5A55] hover:text-[#1A1A1A] hover:bg-[#F2F1ED]'
                           }`}
                         >
                           {filter !== 'all' && tagColors && (
-                            <span className={`w-2 h-2 rounded-full ${tagColors.dot}`} />
+                            <span className={`w-1.5 h-1.5 rounded-full ${tagColors.dot}`} />
                           )}
-                          <span>{filter === 'all' ? 'All Items' : filter}</span>
+                          <span>{filter === 'all' ? 'All' : filter}</span>
                           <span
-                            className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                            className={`text-[9px] px-1 py-0.2 rounded-full font-bold ${
                               isSelected ? 'bg-white/20 text-white' : 'bg-stone-100 text-[#767670]'
                             }`}
                           >
@@ -3317,25 +3606,179 @@ export const AutoImportModal: React.FC<AutoImportModalProps> = ({
                       );
                     })}
                   </div>
+
+                  {/* Destination Filter */}
+                  <div className="flex items-center gap-1">
+                    <span className="text-[10px] font-mono uppercase font-semibold text-[#767670] mr-1">
+                      Route:
+                    </span>
+                    {(['all', 'wardrobe', 'shopping', 'selling'] as const).map((dest) => {
+                      const isSelected = importDestinationFilter === dest;
+                      const label =
+                        dest === 'all'
+                          ? 'All'
+                          : dest === 'wardrobe'
+                          ? 'Wardrobe'
+                          : dest === 'shopping'
+                          ? 'Wishlist'
+                          : 'Resale';
+                      return (
+                        <button
+                          key={dest}
+                          type="button"
+                          onClick={() => {
+                            setImportDestinationFilter(dest);
+                            setImportCurrentPage(1);
+                          }}
+                          className={`px-2 py-0.5 text-[11px] font-medium rounded-xs cursor-pointer transition-colors ${
+                            isSelected
+                              ? 'bg-[#8C7355] text-white font-semibold'
+                              : 'bg-white border border-[#D5D5D0] text-[#5A5A55] hover:text-[#1A1A1A]'
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
 
-                {previewTagFilter !== 'all' && (
-                  <button
-                    type="button"
-                    onClick={() => setPreviewTagFilter('all')}
-                    className="text-[10px] font-mono text-[#007782] hover:underline cursor-pointer"
-                  >
-                    Reset Filter
-                  </button>
-                )}
+                {/* Row 3: Filtered Summary, Batch Controls, and Pagination */}
+                <div className="flex flex-wrap items-center justify-between gap-2.5 pt-2 border-t border-[#EAEAE6] text-xs">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-mono text-[#5A5A55]">
+                      Showing <strong>{totalFilteredCount}</strong> of {extractedItems.length} items
+                    </span>
+
+                    {/* Batch Actions on Current Filtered View */}
+                    <div className="inline-flex items-center gap-1 pl-2 border-l border-[#D5D5D0]">
+                      <button
+                        type="button"
+                        onClick={() => handleSelectFiltered(true)}
+                        className="px-2 py-0.5 text-[11px] font-mono border border-[#D5D5D0] bg-white hover:bg-[#F2F1ED] text-[#1A1A1A] cursor-pointer"
+                        title="Select all currently visible/filtered items"
+                      >
+                        Select Filtered ({totalFilteredCount})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleSelectFiltered(false)}
+                        className="px-2 py-0.5 text-[11px] font-mono border border-[#D5D5D0] bg-white hover:bg-[#F2F1ED] text-[#767670] hover:text-[#1A1A1A] cursor-pointer"
+                        title="Deselect all currently visible/filtered items"
+                      >
+                        Deselect Filtered
+                      </button>
+
+                      {/* Route filtered dropdown */}
+                      <div className="inline-flex border border-[#D5D5D0] bg-white text-[11px] font-mono">
+                        <span className="px-1.5 py-0.5 text-[#767670] bg-[#F2F1ED] border-r border-[#D5D5D0]">
+                          Route To:
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleRouteFiltered('wardrobe')}
+                          className="px-1.5 py-0.5 hover:bg-[#F2F1ED] text-[#1A1A1A] cursor-pointer"
+                          title="Move filtered items to Wardrobe"
+                        >
+                          Wardrobe
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleRouteFiltered('shopping')}
+                          className="px-1.5 py-0.5 hover:bg-[#F2F1ED] text-[#1A1A1A] border-l border-[#D5D5D0] cursor-pointer"
+                          title="Move filtered items to Wishlist"
+                        >
+                          Wishlist
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleRouteFiltered('selling')}
+                          className="px-1.5 py-0.5 hover:bg-teal-50 text-[#007782] border-l border-[#D5D5D0] cursor-pointer font-semibold"
+                          title="Move filtered items to Resale / Sales"
+                        >
+                          Resale
+                        </button>
+                      </div>
+                    </div>
+
+                    {(importSearchQuery ||
+                      previewTagFilter !== 'all' ||
+                      importDestinationFilter !== 'all' ||
+                      importCategoryFilter !== 'all' ||
+                      importSortBy !== 'original') && (
+                      <button
+                        type="button"
+                        onClick={handleResetFilters}
+                        className="text-[11px] font-mono text-[#007782] hover:underline cursor-pointer flex items-center gap-1"
+                      >
+                        <RotateCcw className="w-3 h-3" />
+                        Reset All Filters
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Pagination Controls */}
+                  <div className="flex items-center gap-2 font-mono text-xs">
+                    <span className="text-[#767670] text-[11px]">Per page:</span>
+                    <select
+                      value={importPageSize}
+                      onChange={(e) => {
+                        setImportPageSize(Number(e.target.value));
+                        setImportCurrentPage(1);
+                      }}
+                      className="px-1.5 py-0.5 bg-white border border-[#D5D5D0] text-[11px] text-[#1A1A1A] focus:outline-none"
+                    >
+                      <option value={10}>10</option>
+                      <option value={20}>20</option>
+                      <option value={50}>50</option>
+                      <option value={100}>100</option>
+                      <option value={0}>All</option>
+                    </select>
+
+                    {totalPages > 1 && (
+                      <div className="flex items-center gap-1 pl-2 border-l border-[#D5D5D0]">
+                        <button
+                          type="button"
+                          disabled={effectiveCurrentPage <= 1}
+                          onClick={() => setImportCurrentPage((p) => Math.max(1, p - 1))}
+                          className="p-1 border border-[#D5D5D0] bg-white disabled:opacity-40 hover:bg-[#F2F1ED] text-[#1A1A1A] cursor-pointer disabled:cursor-not-allowed"
+                          title="Previous page"
+                        >
+                          <ChevronLeft className="w-3.5 h-3.5" />
+                        </button>
+                        <span className="text-[11px] text-[#5A5A55] px-1">
+                          {effectiveCurrentPage} / {totalPages}
+                        </span>
+                        <button
+                          type="button"
+                          disabled={effectiveCurrentPage >= totalPages}
+                          onClick={() => setImportCurrentPage((p) => Math.min(totalPages, p + 1))}
+                          className="p-1 border border-[#D5D5D0] bg-white disabled:opacity-40 hover:bg-[#F2F1ED] text-[#1A1A1A] cursor-pointer disabled:cursor-not-allowed"
+                          title="Next page"
+                        >
+                          <ChevronRight className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
 
               {/* Items List - Each item as a separate listing candidate */}
-              <div className="space-y-3">
-                {extractedItems
-                  .map((item, idx) => ({ item, idx }))
-                  .filter(({ item }) => previewTagFilter === 'all' || (item.tags || []).includes(previewTagFilter))
-                  .map(({ item, idx }) => {
+              {pagedItems.length === 0 ? (
+                <div className="p-8 text-center bg-white border border-[#E5E5E1] space-y-2">
+                  <p className="text-sm text-[#5A5A55]">No items match the current search or filter criteria.</p>
+                  <button
+                    type="button"
+                    onClick={handleResetFilters}
+                    className="px-3 py-1 bg-[#1A1A1A] text-white text-xs font-mono uppercase tracking-wider cursor-pointer"
+                  >
+                    Reset Filters
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {pagedItems.map(({ item, originalIdx: idx }) => {
                   const isCardDragging = draggingCardIdx === idx;
                   return (
                     <div
@@ -3378,6 +3821,11 @@ export const AutoImportModal: React.FC<AutoImportModalProps> = ({
                           <span className="text-xs font-mono font-semibold text-[#1A1A1A]">
                             Item #{idx + 1}: {item.brand} {item.name}
                           </span>
+                          {item.engineUsed && (
+                            <span className="text-[10px] uppercase font-mono px-1.5 py-0.5 bg-[#FAF9F7] text-[#8C7355] border border-[#8C7355]/30">
+                              {item.engineUsed === 'firecrawl' ? '🔥 Firecrawl' : '⚡ Unified'}
+                            </span>
+                          )}
                         </div>
 
                         <div className="flex items-center gap-2">
@@ -3569,21 +4017,41 @@ export const AutoImportModal: React.FC<AutoImportModalProps> = ({
                             />
                           </div>
 
-                          {/* Price */}
-                          <div>
-                            <label className="text-[10px] font-mono text-[#767670] uppercase font-semibold">
-                              Price (£ GBP)
-                            </label>
-                            <div className="relative">
-                              <span className="absolute left-2 top-1 text-xs text-[#8C7355] font-mono font-bold">£</span>
-                              <input
-                                type="number"
-                                step="0.01"
-                                value={item.purchasePrice || ''}
-                                onChange={(e) => handleUpdateItemField(idx, 'purchasePrice', parseFloat(e.target.value) || 0)}
-                                className="w-full pl-5 pr-2 py-1 border border-[#D5D5D0] bg-white text-xs font-mono font-bold text-[#1A1A1A] focus:outline-none focus:border-[#8C7355]"
-                                placeholder="120"
-                              />
+                          {/* Pricing: Price Paid and RRP */}
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <label className="text-[10px] font-mono text-[#767670] uppercase font-semibold">
+                                Price Paid (£)
+                              </label>
+                              <div className="relative">
+                                <span className="absolute left-2 top-1 text-xs text-[#8C7355] font-mono font-bold">£</span>
+                                <input
+                                  type="number"
+                                  step="0.01"
+                                  value={item.purchasePrice || ''}
+                                  onChange={(e) => handleUpdateItemField(idx, 'purchasePrice', parseFloat(e.target.value) || 0)}
+                                  className="w-full pl-5 pr-1 py-1 border border-[#D5D5D0] bg-white text-xs font-mono font-bold text-[#1A1A1A] focus:outline-none focus:border-[#8C7355]"
+                                  placeholder="80"
+                                />
+                              </div>
+                            </div>
+
+                            <div>
+                              <label className="text-[10px] font-mono text-[#767670] uppercase font-semibold flex items-center justify-between">
+                                <span>RRP (£)</span>
+                                <span className="text-[8px] text-[#A5A59E] lowercase font-normal">retail val</span>
+                              </label>
+                              <div className="relative">
+                                <span className="absolute left-2 top-1 text-xs text-[#767670] font-mono font-bold">£</span>
+                                <input
+                                  type="number"
+                                  step="0.01"
+                                  value={item.rrp !== undefined ? item.rrp : (item.purchasePrice || '')}
+                                  onChange={(e) => handleUpdateItemField(idx, 'rrp', parseFloat(e.target.value) || 0)}
+                                  className="w-full pl-5 pr-1 py-1 border border-[#D5D5D0] bg-white text-xs font-mono text-[#1A1A1A] focus:outline-none focus:border-[#8C7355]"
+                                  placeholder="150"
+                                />
+                              </div>
                             </div>
                           </div>
 
@@ -3635,9 +4103,22 @@ export const AutoImportModal: React.FC<AutoImportModalProps> = ({
 
                           {/* Color */}
                           <div>
-                            <label className="text-[10px] font-mono text-[#767670] uppercase font-semibold">
-                              Color / Tone
-                            </label>
+                            <div className="flex items-center justify-between">
+                              <label className="text-[10px] font-mono text-[#767670] uppercase font-semibold">
+                                Color / Tone
+                              </label>
+                              {item.originalListingColor && item.originalListingColor.toLowerCase() !== (item.color || '').toLowerCase() && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleUpdateItemField(idx, 'color', item.originalListingColor)}
+                                  className="text-[9px] font-mono text-[#007782] hover:underline cursor-pointer flex items-center gap-1"
+                                  title={`Reset to original scraped color: "${item.originalListingColor}"`}
+                                >
+                                  <RotateCcw className="w-2.5 h-2.5" />
+                                  Original: {item.originalListingColor}
+                                </button>
+                              )}
+                            </div>
                             <input
                               type="text"
                               value={item.color || ''}
@@ -3661,16 +4142,51 @@ export const AutoImportModal: React.FC<AutoImportModalProps> = ({
                             />
                           </div>
 
+                          {/* Notes & Preserved Description */}
+                          <div className="sm:col-span-2">
+                            <label className="text-[10px] font-mono text-[#767670] uppercase font-semibold">
+                              Notes &amp; Description
+                            </label>
+                            <textarea
+                              value={item.notes || ''}
+                              onChange={(e) => handleUpdateItemField(idx, 'notes', e.target.value)}
+                              rows={2}
+                              className="w-full px-2 py-1 border border-[#D5D5D0] bg-white text-xs text-[#1A1A1A] focus:outline-none focus:border-[#8C7355] font-sans"
+                              placeholder="Garment provenance, condition notes, care instructions..."
+                            />
+                          </div>
+
                           {/* Vinted Provenance Details (if available or in Vinted mode) */}
-                          {(item.seller || item.orderStatus || item.transactionType || item.orderDate || activeTab === 'vinted') && (
+                          {(item.seller || item.orderStatus || item.transactionType || item.orderDate || item.orderNumber || item.vintedUrl || activeTab === 'vinted') && (
                             <div className="sm:col-span-2 bg-[#F0F8F8] border border-[#BCE4E6] p-2.5 space-y-2 rounded-xs">
                               <div className="flex items-center justify-between text-[10px] font-mono text-[#007782] font-semibold uppercase tracking-wider">
-                                <span>Vinted Export Provenance</span>
-                                {item.transactionType && (
-                                  <span className="px-1.5 py-0.2 bg-[#007782] text-white rounded-xs">
-                                    {item.transactionType}
-                                  </span>
-                                )}
+                                <div className="flex items-center gap-1.5">
+                                  <span>Vinted Export Provenance</span>
+                                  {item.orderNumber && (
+                                    <span className="text-[9px] font-mono text-[#00606A] bg-[#E0F2F3] px-1 py-0.2 rounded-xs">
+                                      #{item.orderNumber}
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-1.5">
+                                  {item.vintedUrl && (
+                                    <a
+                                      href={item.vintedUrl}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-[9px] font-mono text-[#007782] hover:underline flex items-center gap-0.5"
+                                      title="Open listing on Vinted"
+                                    >
+                                      <ExternalLink className="w-2.5 h-2.5" />
+                                      Listing
+                                    </a>
+                                  )}
+                                  {item.transactionType && (
+                                    <span className="px-1.5 py-0.2 bg-[#007782] text-white rounded-xs">
+                                      {item.transactionType}
+                                    </span>
+                                  )}
+                                </div>
                               </div>
 
                               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
@@ -3762,6 +4278,34 @@ export const AutoImportModal: React.FC<AutoImportModalProps> = ({
                   );
                 })}
               </div>
+              )}
+
+              {/* Bottom Pagination if multiple pages */}
+              {totalPages > 1 && pagedItems.length > 0 && (
+                <div className="flex items-center justify-between px-3 py-2 bg-[#FAF9F7] border border-[#E5E5E1] text-xs font-mono">
+                  <span className="text-[#767670]">
+                    Showing Page {effectiveCurrentPage} of {totalPages} ({totalFilteredCount} matching items)
+                  </span>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      disabled={effectiveCurrentPage <= 1}
+                      onClick={() => setImportCurrentPage((p) => Math.max(1, p - 1))}
+                      className="px-2 py-1 border border-[#D5D5D0] bg-white disabled:opacity-40 hover:bg-[#F2F1ED] text-[#1A1A1A] cursor-pointer disabled:cursor-not-allowed"
+                    >
+                      Previous
+                    </button>
+                    <button
+                      type="button"
+                      disabled={effectiveCurrentPage >= totalPages}
+                      onClick={() => setImportCurrentPage((p) => Math.min(totalPages, p + 1))}
+                      className="px-2 py-1 border border-[#D5D5D0] bg-white disabled:opacity-40 hover:bg-[#F2F1ED] text-[#1A1A1A] cursor-pointer disabled:cursor-not-allowed"
+                    >
+                      Next
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>

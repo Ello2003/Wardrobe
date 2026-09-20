@@ -162,32 +162,40 @@ const KNOWN_BRANDS: Array<{ pattern: RegExp; canonical: string }> = [
 // Rich color palette definitions
 const KNOWN_COLORS: Array<{ pattern: RegExp; canonical: string }> = [
   { pattern: /\b(?:black|noir|nero|schwarz)\b/i, canonical: 'Black' },
-  { pattern: /\b(?:charcoal|anthracite|dark\s*grey|dark\s*gray)\b/i, canonical: 'Charcoal' },
-  { pattern: /\b(?:grey|gray|gris|grau)\b/i, canonical: 'Grey' },
+  { pattern: /\b(?:charcoal|anthracite|dark\s*grey|dark\s*gray|graphite|gunmetal)\b/i, canonical: 'Charcoal' },
+  { pattern: /\b(?:grey|gray|gris|grau|mottled\s*grey)\b/i, canonical: 'Grey' },
+  { pattern: /\b(?:slate|slate\s*grey)\b/i, canonical: 'Slate' },
   { pattern: /\b(?:white|blanc|blanco|weiss)\b/i, canonical: 'White' },
   { pattern: /\b(?:off-?white|broken\s*white)\b/i, canonical: 'Off-White' },
   { pattern: /\b(?:cream|cr[eè]me|ivory)\b/i, canonical: 'Cream' },
   { pattern: /\b(?:ecru|[eé]cru)\b/i, canonical: 'Ecru' },
-  { pattern: /\b(?:navy|dark\s*blue|bleu\s*marine|marine)\b/i, canonical: 'Navy' },
+  { pattern: /\b(?:oatmeal)\b/i, canonical: 'Oatmeal' },
+  { pattern: /\b(?:stone|sandstone)\b/i, canonical: 'Stone' },
+  { pattern: /\b(?:taupe)\b/i, canonical: 'Taupe' },
+  { pattern: /\b(?:navy|dark\s*blue|bleu\s*marine|marine|midnight\s*blue)\b/i, canonical: 'Navy' },
   { pattern: /\b(?:royal\s*blue|cobalt)\b/i, canonical: 'Royal Blue' },
-  { pattern: /\b(?:indigo)\b/i, canonical: 'Indigo' },
-  { pattern: /\b(?:sky\s*blue|light\s*blue|baby\s*blue)\b/i, canonical: 'Sky Blue' },
+  { pattern: /\b(?:indigo|dark\s*wash)\b/i, canonical: 'Indigo' },
+  { pattern: /\b(?:sky\s*blue|light\s*blue|baby\s*blue|bleu\s*ciel)\b/i, canonical: 'Sky Blue' },
+  { pattern: /\b(?:teal|petrol|cyan)\b/i, canonical: 'Teal' },
   { pattern: /\b(?:blue|bleu|azul|blau)\b/i, canonical: 'Blue' },
-  { pattern: /\b(?:olive|olive\s*green)\b/i, canonical: 'Olive' },
+  { pattern: /\b(?:olive|olive\s*green|vert\s*olive)\b/i, canonical: 'Olive' },
   { pattern: /\b(?:sage|sage\s*green)\b/i, canonical: 'Sage' },
   { pattern: /\b(?:khaki)\b/i, canonical: 'Khaki' },
-  { pattern: /\b(?:forest\s*green|bottle\s*green|dark\s*green|pine)\b/i, canonical: 'Forest Green' },
+  { pattern: /\b(?:forest\s*green|bottle\s*green|dark\s*green|pine|racing\s*green)\b/i, canonical: 'Forest Green' },
+  { pattern: /\b(?:emerald|emerald\s*green)\b/i, canonical: 'Emerald' },
+  { pattern: /\b(?:mint|mint\s*green)\b/i, canonical: 'Mint' },
   { pattern: /\b(?:green|vert|verde|grün)\b/i, canonical: 'Green' },
   { pattern: /\b(?:chocolate|espresso|dark\s*brown)\b/i, canonical: 'Chocolate' },
   { pattern: /\b(?:brown|marron|braun)\b/i, canonical: 'Brown' },
   { pattern: /\b(?:camel)\b/i, canonical: 'Camel' },
   { pattern: /\b(?:tan|cognac)\b/i, canonical: 'Tan' },
-  { pattern: /\b(?:beige|sand|taupe)\b/i, canonical: 'Beige' },
+  { pattern: /\b(?:terracotta|copper|rust|burnt\s*orange)\b/i, canonical: 'Rust' },
+  { pattern: /\b(?:beige|sand)\b/i, canonical: 'Beige' },
   { pattern: /\b(?:burgundy|maroon|wine|bordeaux|oxblood)\b/i, canonical: 'Burgundy' },
   { pattern: /\b(?:red|rouge|rojo|rot)\b/i, canonical: 'Red' },
   { pattern: /\b(?:pink|rose|rosa|blush)\b/i, canonical: 'Pink' },
+  { pattern: /\b(?:peach|coral)\b/i, canonical: 'Peach' },
   { pattern: /\b(?:orange|tangerine)\b/i, canonical: 'Orange' },
-  { pattern: /\b(?:rust|terracotta|burnt\s*orange)\b/i, canonical: 'Rust' },
   { pattern: /\b(?:mustard|ochre)\b/i, canonical: 'Mustard' },
   { pattern: /\b(?:yellow|jaune|gelb)\b/i, canonical: 'Yellow' },
   { pattern: /\b(?:purple|violet|plum|aubergine)\b/i, canonical: 'Purple' },
@@ -313,6 +321,7 @@ export function extractBrandFromTitleAndDesc(
 
 /**
  * Extract colour from title, description, or payload
+ * CRITICAL: Prioritizes taking exact colour from original listing specifications rather than generic defaults.
  */
 export function extractColorFromTitleAndDesc(
   title?: string,
@@ -325,30 +334,44 @@ export function extractColorFromTitleAndDesc(
     !/^various$/i.test(cleanExisting) &&
     !/^neutral$/i.test(cleanExisting) &&
     !/^unknown$/i.test(cleanExisting) &&
-    !/^none$/i.test(cleanExisting)
+    !/^unspecified$/i.test(cleanExisting) &&
+    !/^none$/i.test(cleanExisting) &&
+    !/^other$/i.test(cleanExisting)
   ) {
+    // Check if existingColor matches known palette (e.g. French 'noir' -> 'Black', 'bleu ciel' -> 'Sky Blue')
+    for (const { pattern, canonical } of KNOWN_COLORS) {
+      if (pattern.test(cleanExisting)) {
+        return canonical;
+      }
+    }
+    // Preserve the original listing's exact colour name (e.g. "Racing Green", "Dark Ecru", "Washed Clay")
     return cleanExisting;
   }
 
   const combined = `${cleanText(title)} ${cleanText(desc)}`;
 
-  // 1. Check explicit color tag in description (e.g. "Color: Sage Olive", "Couleur: Noir", "Farbe: Blau")
+  // 1. Check explicit color tag in description (e.g. "Color: Sage Olive", "Couleur: Noir", "Farbe: Blau", "Colore: Marrone")
   const explicitColorMatch = combined.match(/(?:color|colour|couleur|farbe|colore)\s*[:\-–]\s*([a-zA-Z0-9\s/-]+?)(?:\s*(?:[,\n\r\t•|;]|\.|$))/i);
   if (explicitColorMatch && explicitColorMatch[1]) {
     const cand = explicitColorMatch[1].trim();
-    if (cand.length >= 3 && cand.length <= 30 && !/^various/i.test(cand)) {
+    if (cand.length >= 3 && cand.length <= 30 && !/^various/i.test(cand) && !/^neutral/i.test(cand)) {
+      for (const { pattern, canonical } of KNOWN_COLORS) {
+        if (pattern.test(cand)) {
+          return canonical;
+        }
+      }
       return cand;
     }
   }
 
-  // 2. Check dictionary of known colors
+  // 2. Check dictionary of known colors in title and description
   for (const { pattern, canonical } of KNOWN_COLORS) {
     if (pattern.test(combined)) {
       return canonical;
     }
   }
 
-  return cleanExisting || 'Neutral';
+  return cleanExisting || '';
 }
 
 /**
@@ -477,8 +500,12 @@ export function extractAllGarmentAttributes(input: {
   description?: string;
   brand?: string;
   color?: string;
+  colour?: string;
+  color_title?: string;
   material?: string;
+  fabric?: string;
   size?: string;
+  size_title?: string;
   seller?: string;
   notes?: string;
   isOrder?: boolean;
@@ -487,17 +514,21 @@ export function extractAllGarmentAttributes(input: {
   const description = cleanText(input.description);
   const notes = cleanText(input.notes);
 
+  const rawColor = input.color || input.colour || input.color_title;
+  const rawMaterial = input.material || input.fabric;
+  const rawSize = input.size || input.size_title;
+
   const brand = extractBrandFromTitleAndDesc(title, `${description} ${notes}`, input.brand);
-  const color = extractColorFromTitleAndDesc(title, `${description} ${notes}`, input.color);
-  const material = extractMaterialFromTitleAndDesc(title, `${description} ${notes}`, input.material);
-  const size = extractSizeFromTitleAndDesc(title, `${description} ${notes}`, input.size);
+  const color = extractColorFromTitleAndDesc(title, `${description} ${notes}`, rawColor);
+  const material = extractMaterialFromTitleAndDesc(title, `${description} ${notes}`, rawMaterial);
+  const size = extractSizeFromTitleAndDesc(title, `${description} ${notes}`, rawSize);
   const seller = extractSellerFromOrder(input, input.seller);
 
   return {
     brand,
-    color,
-    material,
-    size,
+    color: color || rawColor || 'Neutral',
+    material: material || rawMaterial || 'Natural Fiber / Blend',
+    size: size || rawSize || '',
     seller,
     retailerName: 'Vinted', // Retailer/Platform is Vinted, but brand is the actual garment brand!
   };

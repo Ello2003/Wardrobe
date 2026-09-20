@@ -175,6 +175,8 @@ export const ItemFormModal: React.FC<ItemFormModalProps> = ({
   const [isExtracting, setIsExtracting] = useState(false);
   const [extractError, setExtractError] = useState<string | null>(null);
   const [extractSuccess, setExtractSuccess] = useState(false);
+  const [scraperEngineUsed, setScraperEngineUsed] = useState<string | null>(null);
+  const [originalListingColor, setOriginalListingColor] = useState<string>('');
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -387,14 +389,30 @@ export const ItemFormModal: React.FC<ItemFormModalProps> = ({
           if (item.name) setName(item.name);
           if (item.brand) setBrand(item.brand);
           if (item.category && categories.includes(item.category)) setCategory(item.category);
+          // Prioritize original listing color over defaults
           if (item.color) setColor(item.color);
           if (item.material) {
             setClothingMaterial(item.material);
             setHomewareMaterial(item.material);
           }
-          if (item.purchasePrice) setPurchasePrice(item.purchasePrice.toString());
-          if (item.rrp) setRrp(item.rrp.toString());
-          if (item.notes) setNotes(item.notes);
+          // Rule: Always preserve the price paid when autofilling details for an item
+          if (item.purchasePrice) {
+            setPurchasePrice((prev) => (prev && parseFloat(prev) > 0 ? prev : item.purchasePrice.toString()));
+          }
+          // Rule: Default to rrp price when importing
+          if (item.rrp) {
+            setRrp(item.rrp.toString());
+          } else if (item.purchasePrice) {
+            setRrp((prev) => (prev && parseFloat(prev) > 0 ? prev : item.purchasePrice.toString()));
+          }
+          // Rule: Preserve notes and never overwrite these notes
+          if (item.notes) {
+            setNotes((prev) => {
+              if (!prev || !prev.trim()) return item.notes;
+              if (prev.includes(item.notes)) return prev;
+              return `${prev.trim()}\n\n[Imported Notes]: ${item.notes}`;
+            });
+          }
           if (item.season && Array.isArray(item.season)) setSeasons(item.season);
           if (item.tags && Array.isArray(item.tags)) setTagsInput(item.tags.join(', '));
           setExtractSuccess(true);
@@ -430,16 +448,35 @@ export const ItemFormModal: React.FC<ItemFormModalProps> = ({
       if (item.name) setName(item.name);
       if (item.brand) setBrand(item.brand);
       if (item.category) setCategory(item.category);
+      // Prioritize original listing color over defaults
       if (item.color) setColor(item.color);
+      if (item.originalListingColor) setOriginalListingColor(item.originalListingColor);
+      else if (item.color) setOriginalListingColor(item.color);
+      if (item.engineUsed) setScraperEngineUsed(item.engineUsed);
       if (item.material) {
         setClothingMaterial(item.material);
         setHomewareMaterial(item.material);
       }
-      if (item.purchasePrice) setPurchasePrice(item.purchasePrice.toString());
-      if (item.rrp) setRrp(item.rrp.toString());
+      // Rule: Always preserve the price paid when autofilling details for an item
+      if (item.purchasePrice) {
+        setPurchasePrice((prev) => (prev && parseFloat(prev) > 0 ? prev : item.purchasePrice.toString()));
+      }
+      // Rule: Default to rrp price when importing
+      if (item.rrp) {
+        setRrp(item.rrp.toString());
+      } else if (item.purchasePrice) {
+        setRrp((prev) => (prev && parseFloat(prev) > 0 ? prev : item.purchasePrice.toString()));
+      }
       if (item.imageUrl) setImageUrl(item.imageUrl);
       if (item.careNotes) setCareNotes(item.careNotes);
-      if (item.notes) setNotes(item.notes);
+      // Rule: Preserve notes and never overwrite these notes
+      if (item.notes) {
+        setNotes((prev) => {
+          if (!prev || !prev.trim()) return item.notes;
+          if (prev.includes(item.notes)) return prev;
+          return `${prev.trim()}\n\n[Imported Notes]: ${item.notes}`;
+        });
+      }
       if (item.season && Array.isArray(item.season)) {
         setSeasons(item.season);
       }
@@ -491,6 +528,17 @@ export const ItemFormModal: React.FC<ItemFormModalProps> = ({
           tags,
           imageUrl: finalImageUrl,
           itemType: 'clothing',
+          originalListingColor: originalListingColor.trim() || initialItem?.originalListingColor,
+          engineUsed: scraperEngineUsed || initialItem?.engineUsed,
+          // Preserve marketplace/Vinted purchase details
+          retailerName: initialItem?.retailerName,
+          orderNumber: initialItem?.orderNumber,
+          vintedUrl: initialItem?.vintedUrl,
+          seller: initialItem?.seller,
+          trackingNumber: initialItem?.trackingNumber,
+          carrier: initialItem?.carrier,
+          shippingStatus: initialItem?.shippingStatus,
+          targetStoreUrl: initialItem?.targetStoreUrl,
         };
 
         if (initialItem) {
@@ -535,6 +583,17 @@ export const ItemFormModal: React.FC<ItemFormModalProps> = ({
           roomLocation: roomLocation.trim() || undefined,
           warrantyInfo: warrantyInfo.trim() || undefined,
           includedAccessories: includedAccessories.trim() || undefined,
+          originalListingColor: originalListingColor.trim() || initialItem?.originalListingColor,
+          engineUsed: scraperEngineUsed || initialItem?.engineUsed,
+          // Preserve marketplace/Vinted purchase details
+          retailerName: initialItem?.retailerName,
+          orderNumber: initialItem?.orderNumber,
+          vintedUrl: initialItem?.vintedUrl,
+          seller: initialItem?.seller,
+          trackingNumber: initialItem?.trackingNumber,
+          carrier: initialItem?.carrier,
+          shippingStatus: initialItem?.shippingStatus,
+          targetStoreUrl: initialItem?.targetStoreUrl,
         };
 
         if (initialItem) {
@@ -704,9 +763,16 @@ export const ItemFormModal: React.FC<ItemFormModalProps> = ({
             </div>
           )}
           {extractSuccess && (
-            <p className="text-[11px] text-emerald-700 mt-1 font-mono flex items-center gap-1">
-              <Check className="w-3 h-3" /> Auto-populated specs and details!
-            </p>
+            <div className="text-[11px] text-emerald-700 mt-1.5 font-mono flex items-center justify-between">
+              <span className="flex items-center gap-1">
+                <Check className="w-3 h-3" /> Auto-populated specs and details!
+              </span>
+              {scraperEngineUsed && (
+                <span className="text-[10px] uppercase font-semibold text-[#8C7355] bg-white px-2 py-0.5 border border-[#8C7355]/30 flex items-center gap-1">
+                  {scraperEngineUsed === 'firecrawl' ? '🔥 Scraped via Firecrawl' : '⚡ Scraped via Unified Engine'}
+                </span>
+              )}
+            </div>
           )}
         </div>
 

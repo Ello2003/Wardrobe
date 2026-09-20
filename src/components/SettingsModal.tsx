@@ -30,12 +30,13 @@ import {
   KeyRound,
   ExternalLink,
   Copy,
+  Loader2,
 } from 'lucide-react';
 import { useWardrobe } from '../context/WardrobeContext';
 import { AppSettings, DEFAULT_APP_SETTINGS } from '../types';
 import { safeConfirm } from '../utils/safeConfirm';
 import { testWorkerConnection } from '../services/vintedWorkerService';
-import { getApiBaseUrl, setApiBaseUrl, isStaticHosting } from '../utils/apiHelper';
+import { getApiBaseUrl, setApiBaseUrl, isStaticHosting, safeApiFetch } from '../utils/apiHelper';
 import {
   InventoryDisplaySettings,
   DEFAULT_INVENTORY_DISPLAY_SETTINGS,
@@ -156,6 +157,25 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   const [vintedTestResult, setVintedTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [vintedSaveSuccess, setVintedSaveSuccess] = useState(false);
 
+  // Unified Scraper & Firecrawl Status State
+  const [scraperStatus, setScraperStatus] = useState<{
+    activeEngine: string;
+    firecrawlConfigured: boolean;
+  } | null>(null);
+  const [probeUrl, setProbeUrl] = useState('');
+  const [isTestingProbe, setIsTestingProbe] = useState(false);
+  const [probeResult, setProbeResult] = useState<{
+    success: boolean;
+    engineUsed?: string;
+    title?: string;
+    brand?: string;
+    price?: number;
+    rrp?: number;
+    color?: string;
+    material?: string;
+    error?: string;
+  } | null>(null);
+
   // Sync settings when opened
   useEffect(() => {
     if (isOpen) {
@@ -185,8 +205,54 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
       } catch (e) {
         console.error('Error reloading settings in modal', e);
       }
+
+      // Fetch unified scraper engine status
+      safeApiFetch<{ status: string; activeEngine: string; firecrawlConfigured: boolean }>('/api/scraper/status')
+        .then((res) => {
+          if (res.success && res.data) {
+            setScraperStatus({
+              activeEngine: res.data.activeEngine,
+              firecrawlConfigured: res.data.firecrawlConfigured,
+            });
+          }
+        })
+        .catch(() => {});
     }
   }, [isOpen]);
+
+  const handleTestScrapeProbe = async () => {
+    if (!probeUrl.trim()) return;
+    setIsTestingProbe(true);
+    setProbeResult(null);
+    try {
+      const res = await safeApiFetch<any>('/api/gemini/extract-from-url', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: probeUrl.trim() }),
+      });
+      if (!res.success || !res.data?.item) {
+        throw new Error(res.error || 'Extraction probe returned no item data.');
+      }
+      const it = res.data.item;
+      setProbeResult({
+        success: true,
+        engineUsed: it.engineUsed || res.data.engineUsed || 'unified',
+        title: it.name,
+        brand: it.brand,
+        price: it.purchasePrice,
+        rrp: it.rrp,
+        color: it.originalListingColor || it.color,
+        material: it.material,
+      });
+    } catch (err: any) {
+      setProbeResult({
+        success: false,
+        error: err?.message || 'Scraping probe failed.',
+      });
+    } finally {
+      setIsTestingProbe(false);
+    }
+  };
 
   const updateInventoryDisplay = (updated: InventoryDisplaySettings) => {
     setInvSettings(updated);
@@ -665,6 +731,90 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                     {apiSavedNotice}
                   </p>
                 )}
+              </div>
+
+              {/* Unified Web Scraper & Firecrawl Single Source of Truth */}
+              <div className="pt-4 border-t border-[#E5E5E1] space-y-3">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <h3 className="text-xs font-mono font-semibold text-[#1A1A1A] uppercase tracking-wider flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5 text-[#8C7355]" />
+                      Unified Web Scraper &amp; Firecrawl Engine (Single Source of Truth)
+                    </h3>
+                    <p className="text-xs text-[#767670] mt-0.5">
+                      All item autofill, URL extractions, and shopping list imports across the entire app use the Unified Scraper architecture. When <code>FIRECRAWL_API_KEY</code> is configured in your environment, headless JavaScript execution and anti-bot bypass are automatically enabled.
+                    </p>
+                  </div>
+                  <span
+                    className={`text-[10px] font-mono px-2 py-0.5 border uppercase tracking-wider font-semibold ${
+                      scraperStatus?.activeEngine === 'firecrawl'
+                        ? 'bg-amber-50 text-amber-800 border-amber-300'
+                        : 'bg-emerald-50 text-emerald-800 border-emerald-300'
+                    }`}
+                  >
+                    {scraperStatus?.activeEngine === 'firecrawl' ? '🔥 Firecrawl Active' : '⚡ Unified Stealth Active'}
+                  </span>
+                </div>
+
+                <div className="p-3 bg-[#FAF9F7] border border-[#E5E5E1] space-y-2.5">
+                  <div className="text-[11px] font-mono text-[#5A5A55] font-semibold">
+                    Test Scraper Extraction Probe
+                  </div>
+                  <div className="flex gap-2">
+                    <input
+                      type="url"
+                      value={probeUrl}
+                      onChange={(e) => setProbeUrl(e.target.value)}
+                      placeholder="Paste any product URL (Barbour, Mulberry, Zara, etc.) to test..."
+                      className="flex-1 text-xs font-mono bg-white border border-[#D5D5D0] px-2.5 py-1.5 focus:border-[#8C7355] focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleTestScrapeProbe}
+                      disabled={isTestingProbe || !probeUrl.trim()}
+                      className="px-3 py-1.5 bg-[#8C7355] text-white text-xs font-mono font-medium hover:bg-[#735D43] disabled:opacity-50 transition-colors cursor-pointer flex items-center gap-1 shrink-0"
+                    >
+                      {isTestingProbe ? (
+                        <>
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                          Testing...
+                        </>
+                      ) : (
+                        'Run Probe'
+                      )}
+                    </button>
+                  </div>
+
+                  {probeResult && (
+                    <div
+                      className={`p-2.5 border text-xs font-mono ${
+                        probeResult.success
+                          ? 'bg-emerald-50/80 border-emerald-300 text-emerald-900'
+                          : 'bg-rose-50/80 border-rose-300 text-rose-900'
+                      }`}
+                    >
+                      {probeResult.success ? (
+                        <div className="space-y-1">
+                          <div className="flex items-center justify-between font-bold">
+                            <span>Probe Succeeded!</span>
+                            <span className="uppercase text-[10px] px-1.5 py-0.5 bg-white border border-emerald-300">
+                              Engine: {probeResult.engineUsed}
+                            </span>
+                          </div>
+                          <div><strong>Title:</strong> {probeResult.title || 'N/A'}</div>
+                          <div><strong>Brand:</strong> {probeResult.brand || 'N/A'}</div>
+                          <div><strong>Price:</strong> {probeResult.price ? `£${probeResult.price}` : 'N/A'} {probeResult.rrp ? `(RRP £${probeResult.rrp})` : ''}</div>
+                          <div><strong>Original Color:</strong> {probeResult.color || 'N/A'}</div>
+                          <div><strong>Material:</strong> {probeResult.material || 'N/A'}</div>
+                        </div>
+                      ) : (
+                        <div>
+                          <strong>Extraction Error:</strong> {probeResult.error}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           )}

@@ -34,12 +34,137 @@ export interface AppReleaseIteration {
 
 export const APP_ITERATIONS_LOG: AppReleaseIteration[] = [
   {
+    version: 'v5.6',
+    releaseDate: 'September 2026',
+    title: 'Gemini Model Resilience & Fallback Engine: Active Models & 503 Spike Protection',
+    summary:
+      'Replaced deprecated Gemini models with modern, supported endpoints (gemini-3.8-flash, gemini-3.6-flash, gemini-flash-latest, gemini-3.1-flash-lite) across all AI extraction and vision pathways. Added automated backoff retry handling for transient 503 high-demand spikes and 429 rate limits, ensuring zero downtime during peak loads.',
+    isLatest: true,
+    tags: [
+      'GEMINI MODELS',
+      'FALLBACK RESILIENCE',
+      'HIGH-DEMAND 503 RETRY',
+      'GEMINI-3.6-FLASH',
+      'VISION EXTRACTION',
+      'ZERO DOWNTIME',
+    ],
+    changes: {
+      features: [
+        'Modernized Gemini Fallback Rotation: Standardized on active models [gemini-3.8-flash, gemini-3.6-flash, gemini-flash-latest, gemini-3.1-flash-lite] across all server-side AI endpoints.',
+        'Automatic 503/429 Jitter Backoff: Implemented intelligent backoff retry for transient 503 (high demand spikes) and 429 rate limits before cycling to fallback model pools.',
+        'Unified Vision & PDF Fallbacks: Migrated multimodal image basket detection and Vinted PDF receipt parsers to the unified generateContentWithFallback engine.',
+      ],
+      fixes: [
+        'Fixed 404 NOT_FOUND errors triggered by decommissioned gemini-2.5-flash and prohibited gemini-1.5-flash models.',
+        'Fixed failover cascades during temporary gemini-3.8-flash high demand spikes by routing seamlessly to gemini-3.6-flash.',
+        'Added fallback protection to editorial research and style recommendations.',
+      ],
+      improvements: [
+        'Centralized all server-side model configuration into a single resilient helper function.',
+        'Immediate failover on non-transient 404 errors with zero blocking delays.',
+      ],
+    },
+    affectedModules: [
+      'server.ts',
+      'VersionIterationsLog.tsx',
+    ],
+  },
+  {
+    version: 'v5.5',
+    releaseDate: 'September 2026',
+    title: 'Site-Wide Unified Scraper: Firecrawl Engine Integration & Single Source of Truth',
+    summary:
+      'Architected and implemented a unified web scraping service across the entire platform powered by Firecrawl (headless JS rendering and anti-bot bypass) with an intelligent stealth browser fallback. Established a single source of truth for all URL extractions and autofill flows in ItemFormModal, ShoppingFormModal, and AutoImportModal, with complete engine provenance tracking and a live extraction probe in Settings.',
+    isLatest: false,
+    tags: [
+      'UNIFIED SCRAPER',
+      'FIRECRAWL JS',
+      'SINGLE SOURCE OF TRUTH',
+      'ANTI-BOT BYPASS',
+      'PRODUCT AUTOFILL',
+      'SETTINGS PROBE',
+      'PROVENANCE TRACKING',
+    ],
+    changes: {
+      features: [
+        'Single Source of Truth Scraper: Created unifiedScraper.ts service providing centralized, resilient web scraping across all frontend and backend entry points.',
+        'Firecrawl Integration: Integrated @mendable/firecrawl-js supporting headless JavaScript rendering, dynamic DOM evaluation, and anti-bot bypass for JavaScript-rendered e-commerce stores.',
+        'Intelligent Fallback Architecture: Automatically uses Firecrawl when FIRECRAWL_API_KEY is configured, gracefully falling back to our stealth browser engine with JSON-LD, Microdata, and OpenGraph extraction.',
+        'Engine & Color Provenance: Captures engineUsed and originalListingColor across ItemFormModal, AutoImportModal, and ShoppingFormModal, persisting provenance into WardrobeItem and ShoppingItem entities.',
+        'Live Scraper Settings Probe: Added an interactive scraper probe in General Settings to test URL extraction in real-time, verifying title, brand, price, RRP, color, and engine response.',
+        'Visual Engine Indicators: Displays Firecrawl vs Unified engine badges in autofill modals and candidate import cards upon successful extraction.',
+      ],
+      fixes: [
+        'Eliminated scattered, divergent fetch mechanisms by routing all URL extractions through scrapeUrlUnified.',
+        'Ensured extracted item prices, RRP discounts, and original product colors are preserved during modal autofill.',
+      ],
+      improvements: [
+        'Added FIRECRAWL_API_KEY declaration in .env.example with clear documentation.',
+        'Exposed /api/scraper/status and /api/scraper/scrape-url endpoints for health checks and external integrations.',
+      ],
+    },
+    affectedModules: [
+      'unifiedScraper.ts',
+      'server.ts',
+      'ItemFormModal.tsx',
+      'ShoppingFormModal.tsx',
+      'AutoImportModal.tsx',
+      'SettingsModal.tsx',
+      'types.ts',
+      'package.json',
+      '.env.example',
+      'VersionIterationsLog.tsx',
+    ],
+  },
+  {
+    version: 'v5.4',
+    releaseDate: 'September 2026',
+    title: 'AutoImport Review Suite: Search, Categorical Filters, Sorters, Batch Routing & Expanded Listing Fields',
+    summary:
+      'Supercharged the multi-item AutoImport and Vinted extract review workspace with high-performance real-time search, category and route filters, lifecycle tag chips, multi-criteria sorting, batch selection and routing actions, responsive pagination, and expanded garment fields including RRP, 1-click original scraped color restoration, provenance order links, and multi-line notes.',
+    isLatest: false,
+    tags: [
+      'AUTO-IMPORT WORKSPACE',
+      'SEARCH & FILTERING',
+      'BATCH ROUTING',
+      'PAGINATION CONTROLS',
+      'RRP & SAVINGS',
+      'PROVENANCE DETAILS',
+      'COLOR RESTORATION',
+    ],
+    changes: {
+      features: [
+        'Real-Time Text Search: Instantly filters candidate garments by title, brand, seller handle, color, or notes as you type, with a 1-click clear search button.',
+        'Multi-Dimensional Filtering: Filter candidate items by present categories, destination routes (Wardrobe, Wishlist, Resale), and lifecycle status tags (Bought, Sold, Listed, Cancelled) with dynamic counter badges.',
+        'Multi-Criteria Sorters: Sort candidate lists by Original Order, Price (High to Low / Low to High), Brand (A to Z), Title (A to Z), or Selected First.',
+        'Batch Actions on Filtered Views: Added "Select Filtered", "Deselect Filtered", and 1-click bulk routing to Wardrobe, Wishlist, or Resale for currently filtered subsets.',
+        'Responsive Pagination: Support for page sizes (10, 20, 50, 100, or All) with synchronous top and bottom page navigators and matching item counters.',
+        'Expanded Garment Fields: Side-by-side Price Paid vs RRP inputs with auto-fallback, 1-click restore button for original scraped color, dedicated multi-line notes textarea, and direct link to source marketplace listing.',
+      ],
+      fixes: [
+        'Resolved type definitions for trackingNumber, carrier, and shippingStatus on WardrobeItem.',
+        'Added rrp and description support to VintedOrder and MarketplaceOrderLike interfaces.',
+      ],
+      improvements: [
+        'Zero-item empty state with 1-click "Reset Filters" action.',
+        'Preserved per-item drag-and-drop image replacement and Vision AI re-analysis within paginated views.',
+      ],
+    },
+    affectedModules: [
+      'AutoImportModal.tsx',
+      'types.ts',
+      'vintedWorkerService.ts',
+      'marketplaceItemBuilders.ts',
+      'VersionIterationsLog.tsx',
+    ],
+  },
+  {
     version: 'v5.3',
     releaseDate: 'September 2026',
     title: 'Floating Quick Note Capture Widget with Site-Wide Hover Presence',
     summary:
       'Engineered a persistent, floating quick note capture widget that hovers seamlessly across every view and screen of the studio. Features single-click expandable scratchpad, quick categorization pills (Style Idea, To Buy, Fit & Sizing, Care & Alteration, Homeware & Tech, General), instant pinned notes, one-click "Convert to Wishlist" integration, keyboard shortcut (Alt+N), dock position switcher (bottom-right / bottom-left), and local storage persistence.',
-    isLatest: true,
+    isLatest: false,
     tags: [
       'FLOATING HOVER WIDGET',
       'QUICK NOTE CAPTURE',

@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
+    "@mendable/firecrawl-js": "^4.41.0",
     "dotenv": "^17.2.3",
     "express": "^4.21.2",
     "firebase": "^12.19.0",

@@ -59,6 +59,10 @@ import {
 } from '../utils/tagUtils';
 import { reconcileSaleItemTagsForStatus } from '../utils/statusUtils';
 import {
+  extractBrandFromTitleAndDesc,
+  extractColorFromTitleAndDesc,
+} from '../utils/garmentAttributeExtractor';
+import {
   saveLogsSafely,
   saveSnapshotsSafely,
   saveEntitySafely,
@@ -4105,8 +4109,11 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         const inferredCategory = order.category
           ? normalizeCategoryName(order.category, categories)
           : normalizeCategoryName(inferCategoryFromTitle(orderTitle), categories);
-        const inferredBrand = order.brand || 'Vinted';
-        const inferredColor = order.color || order.colour || 'Various';
+        const inferredBrand = (order.brand && !/^vinted/i.test(order.brand))
+          ? order.brand
+          : extractBrandFromTitleAndDesc(orderTitle, order.description || '', order.brand);
+        const inferredColor = order.color || order.colour || extractColorFromTitleAndDesc(orderTitle, order.description || '') || 'Neutral';
+        const orderRrp = order.rrp ? (typeof order.rrp === 'number' ? order.rrp : parseFloat(String(order.rrp).replace(/[^0-9.]/g, '')) || orderPrice) : orderPrice;
 
         if (order.type === 'sold' || (order.type as any) === 'active' || order.status === 'Listed') {
           if (skipDuplicates && orderId && existingSaleOrderIds.has(orderId)) {
@@ -4185,6 +4192,7 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
               category: inferredCategory,
               estimatedPrice: orderPrice,
               actualPricePaid: orderPrice,
+              rrp: orderRrp,
               priority: 'Essential / Must-Have',
               status: isCancelled ? 'Cancelled' : 'Purchased',
               season: 'All-Season',
@@ -4197,6 +4205,7 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
               createdAt: now,
               purchasedDate: rawDate,
               orderNumber: orderId,
+              seller: order.seller || undefined,
               vintedUrl: orderId ? `https://www.vinted.${domain}/items/${orderId}` : '',
             };
             newShoppingItems.push(shopItem);
@@ -4225,19 +4234,21 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
               color: inferredColor,
               season: ['All-Season'],
               purchasePrice: orderPrice,
+              rrp: orderRrp,
               purchaseDate: rawDate,
               wearCount: 0,
               imageUrl: order.image || '',
               retailerName: 'Vinted',
               orderNumber: orderId,
+              seller: order.seller || undefined,
               vintedUrl: orderId ? `https://www.vinted.${domain}/items/${orderId}` : '',
               condition: 'Good',
               isFavorite: false,
               isArchived: false,
               tags: wardrobeTags,
               notes: order.transactionStatus
-                ? `Vinted order #${orderId} · ${order.transactionStatus}`
-                : `Vinted order #${orderId}`,
+                ? `Vinted order #${orderId} · ${order.transactionStatus}${order.seller ? ` · Seller: ${order.seller}` : ''}`
+                : `Vinted order #${orderId}${order.seller ? ` · Seller: ${order.seller}` : ''}`,
               createdAt: now,
               updatedAt: now,
             };

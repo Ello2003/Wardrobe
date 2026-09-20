@@ -5,6 +5,7 @@ export interface VintedOrder {
   orderId: string;
   title: string;
   price: string | number;
+  rrp?: string | number;
   currency?: string;
   status?: string;
   transactionStatus?: string;

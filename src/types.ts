@@ -394,6 +394,9 @@ export interface WardrobeItem {
   retailerName?: string;
   targetStoreUrl?: string;
   orderNumber?: string;
+  trackingNumber?: string;
+  carrier?: string;
+  shippingStatus?: ShippingStatus;
   // Vinted & Acquisition Metadata
   seller?: string;
   buyer?: string;
@@ -403,6 +406,8 @@ export interface WardrobeItem {
   orderValue?: number;
   walletAmount?: number;
   lastUpdatedDate?: string;
+  originalListingColor?: string;
+  engineUsed?: string;
   // Homeware, Electronics & Hobbies Extended Criteria
   itemType?: 'clothing' | 'homeware_lifestyle' | string;
   modelNumber?: string;
@@ -511,6 +516,8 @@ export interface ShoppingItem {
   orderValue?: number;
   walletAmount?: number;
   lastUpdatedDate?: string;
+  originalListingColor?: string;
+  engineUsed?: string;
 }
 
 export type SellingPlatform =
@@ -775,5 +782,34 @@ export interface GoogleAiEditorialResearchResult {
   searchQueries?: string[];
   userNotes?: string;
   isSaved?: boolean;
+}
+
+export interface UnifiedScraperStatus {
+  firecrawlConfigured: boolean;
+  activeEngine: 'firecrawl' | 'stealth-fallback';
+  message: string;
+}
+
+export interface UnifiedScrapeResult {
+  url: string;
+  engineUsed: 'firecrawl' | 'stealth-fallback';
+  success: boolean;
+  statusCode?: number;
+  title?: string;
+  description?: string;
+  siteName?: string;
+  brand?: string;
+  price?: string | number;
+  rrp?: string | number;
+  currency?: string;
+  color?: string;
+  originalListingColor?: string;
+  material?: string;
+  markdown?: string;
+  cleanSnippet?: string;
+  candidateImages: string[];
+  mainImage?: string;
+  jsonLd?: any[];
+  error?: string;
 }
 

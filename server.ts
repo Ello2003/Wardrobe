@@ -4,6 +4,10 @@ import dotenv from 'dotenv';
 import Parser from 'rss-parser';
 import { GoogleGenAI, Type } from '@google/genai';
 import { extractAllGarmentAttributes } from './src/utils/garmentAttributeExtractor.ts';
+import {
+  scrapeUrlUnified,
+  getScraperEngineStatus,
+} from './src/services/unifiedScraper.ts';
 
 dotenv.config();
 
@@ -39,36 +43,81 @@ function getGeminiClient(): GoogleGenAI | null {
   });
 }
 
-// Helper to call Gemini with model fallback if a model experiences 503/demand spikes
+// Centralized active Gemini fallback model list
+const DEFAULT_GEMINI_FALLBACK_MODELS = [
+  'gemini-3.8-flash',
+  'gemini-3.6-flash',
+  'gemini-flash-latest',
+  'gemini-3.1-flash-lite',
+];
+
+// Helper to call Gemini with model fallback and automatic retry for 503/429 demand spikes
 async function generateContentWithFallback(
   ai: GoogleGenAI,
   prompt: string | any[],
   systemInstruction: string,
   schema?: any,
-  temperature: number = 0.7
+  temperature: number = 0.7,
+  extraConfig?: { tools?: any[]; [key: string]: any }
 ) {
-  const modelsToTry = ['gemini-3.8-flash', 'gemini-flash-latest', 'gemini-2.5-flash'];
+  const modelsToTry = DEFAULT_GEMINI_FALLBACK_MODELS;
   let lastError: any = null;
 
   for (const model of modelsToTry) {
-    try {
-      const config: any = {
-        systemInstruction,
-        temperature,
-      };
-      if (schema) {
-        config.responseMimeType = 'application/json';
-        config.responseSchema = schema;
+    // Attempt up to 2 times for transient errors (e.g. 503 high demand or 429 rate limits)
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const config: any = {
+          systemInstruction,
+          temperature,
+          ...(extraConfig || {}),
+        };
+        if (schema) {
+          config.responseMimeType = 'application/json';
+          config.responseSchema = schema;
+        }
+        const response = await ai.models.generateContent({
+          model,
+          contents: prompt,
+          config,
+        });
+        return response;
+      } catch (err: any) {
+        lastError = err;
+        const errMsg = err?.message || JSON.stringify(err);
+        const isUnavailableOrRateLimit =
+          err?.status === 503 ||
+          err?.code === 503 ||
+          err?.status === 429 ||
+          err?.code === 429 ||
+          errMsg.includes('503') ||
+          errMsg.includes('429') ||
+          errMsg.includes('high demand') ||
+          errMsg.includes('UNAVAILABLE') ||
+          errMsg.includes('quota') ||
+          errMsg.includes('Resource exhausted');
+
+        console.warn(`Model ${model} (attempt ${attempt + 1}) failed, trying next fallback:`, errMsg);
+
+        // If 404 (model deprecated/unavailable) or bad request, do not retry this model; proceed to next model
+        if (
+          err?.status === 404 ||
+          err?.code === 404 ||
+          errMsg.includes('404') ||
+          errMsg.includes('no longer available') ||
+          errMsg.includes('NOT_FOUND')
+        ) {
+          break;
+        }
+
+        // If transient 503 or 429 on first attempt, wait briefly with backoff
+        if (isUnavailableOrRateLimit && attempt === 0) {
+          await new Promise((resolve) => setTimeout(resolve, 800));
+          continue;
+        }
+
+        break;
       }
-      const response = await ai.models.generateContent({
-        model,
-        contents: prompt,
-        config,
-      });
-      return response;
-    } catch (err: any) {
-      lastError = err;
-      console.warn(`Model ${model} failed, trying next fallback:`, err?.message || err);
     }
   }
 
@@ -91,7 +140,28 @@ app.get('/api/health', (req, res) => {
     currency: '£',
     timestamp: new Date().toISOString(),
     aiEnabled: !!process.env.GEMINI_API_KEY,
+    scraperEngine: getScraperEngineStatus(),
   });
+});
+
+// Single Source of Truth Scraper Endpoint: Scrape single URL via Firecrawl with stealth fallback
+app.post('/api/scraper/scrape-url', async (req, res) => {
+  try {
+    const { url } = req.body;
+    if (!url || typeof url !== 'string' || !url.trim()) {
+      return res.status(400).json({ success: false, error: 'A valid URL is required.' });
+    }
+    const result = await scrapeUrlUnified(url.trim());
+    return res.json({ success: true, result });
+  } catch (err: any) {
+    console.error('Unified scraper endpoint error:', err);
+    return res.status(500).json({ success: false, error: err?.message || 'Failed to scrape URL.' });
+  }
+});
+
+// Single Source of Truth Scraper Status: Detect active engine (Firecrawl vs Stealth Fallback)
+app.get('/api/scraper/status', (req, res) => {
+  return res.json(getScraperEngineStatus());
 });
 
 // Gemini Endpoint 3: Smart Outfit Generator / Lookbook Builder
@@ -184,39 +254,14 @@ app.post('/api/gemini/extract-lookbook-idea', async (req, res) => {
           inspirationSource = 'Direct Photo URL';
         }
       } else {
-        // Scrape web page metadata
+        // Scrape web page metadata using unified single source of truth scraper (Firecrawl + stealth fallback)
         try {
-          const fetchRes = await fetch(cleanUrl, {
-            headers: {
-              'User-Agent':
-                'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
-              Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/*,*/*;q=0.8',
-            },
-            signal: AbortSignal.timeout(6000),
-          });
-
-          if (fetchRes.ok) {
-            const html = await fetchRes.text();
-            const ogTitleMatch = html.match(/<meta\s+(?:property|name)=["'](?:og:title|twitter:title)["']\s+content=["'](.*?)["']/i);
-            const ogImageMatch = html.match(/<meta\s+(?:property|name)=["'](?:og:image|twitter:image)["']\s+content=["'](.*?)["']/i);
-            const ogDescMatch = html.match(/<meta\s+(?:property|name)=["'](?:og:description|twitter:description|description)["']\s+content=["'](.*?)["']/i);
-            const ogSiteMatch = html.match(/<meta\s+(?:property|name)=["']og:site_name["']\s+content=["'](.*?)["']/i);
-
-            if (ogImageMatch && ogImageMatch[1]) {
-              resolvedImageUrl = cleanImageUrl(ogImageMatch[1], cleanUrl) || '';
-            }
-            if (ogSiteMatch && ogSiteMatch[1]) {
-              inspirationSource = ogSiteMatch[1];
-            } else {
-              try {
-                inspirationSource = new URL(cleanUrl).hostname.replace('www.', '');
-              } catch {
-                inspirationSource = 'Web Link';
-              }
-            }
-
-            pageContext = `Page Title: ${ogTitleMatch ? ogTitleMatch[1] : ''}\nDescription: ${ogDescMatch ? ogDescMatch[1] : ''}\nSource: ${inspirationSource}\nURL: ${cleanUrl}`;
+          const scraped = await scrapeUrlUnified(cleanUrl);
+          if (scraped.mainImage) {
+            resolvedImageUrl = scraped.mainImage;
           }
+          inspirationSource = scraped.siteName || scraped.brand || inferBrandFromUrl(cleanUrl);
+          pageContext = `Page Title: ${scraped.title || ''}\nDescription: ${scraped.description || ''}\nSource: ${inspirationSource}\nURL: ${cleanUrl}\nScraper Engine: ${scraped.engineUsed}\nSnippet: ${(scraped.cleanSnippet || scraped.markdown || '').slice(0, 1500)}`;
         } catch (scrapeErr) {
           console.warn('Scraping URL failed, proceeding with URL string:', scrapeErr);
           try {
@@ -433,20 +478,19 @@ ${JSON.stringify(closetSummary, null, 2)}
 
 Search the web for real runway references, contemporary streetwear, lookbook formulas, and textile compositions.`;
 
-    const config: any = {
-      systemInstruction,
-      temperature: 0.6,
-    };
-
+    const extraConfig: any = {};
     if (enableGoogleSearch !== false) {
-      config.tools = [{ googleSearch: {} }];
+      extraConfig.tools = [{ googleSearch: {} }];
     }
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
-      contents: userPrompt,
-      config,
-    });
+    const response = await generateContentWithFallback(
+      ai,
+      userPrompt,
+      systemInstruction,
+      undefined,
+      0.6,
+      extraConfig
+    );
 
     const fullText = response.text || '';
 
@@ -894,144 +938,48 @@ app.post('/api/gemini/extract-from-url', async (req, res) => {
 
     const effectiveUrls = urlList.length > 0 ? urlList : [rawInput.trim()];
 
-    // Fetch and extract metadata from each URL
+    // Single Source of Truth: Scrape and extract metadata from each URL via unified scraper
     const fetchedResults: any[] = [];
 
     for (let i = 0; i < Math.min(effectiveUrls.length, 6); i++) {
       const currentUrl = effectiveUrls[i];
-      let pageHtml = '';
-      const extractedMeta: Record<string, any> = {};
-      const candidateImages: string[] = [];
-
       try {
-        const fetchResponse = await fetch(currentUrl, {
-          headers: {
-            'User-Agent':
-              'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
-            Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-            'Accept-Language': 'en-GB,en-US;q=0.9,en;q=0.8',
+        const scraped = await scrapeUrlUnified(currentUrl);
+        fetchedResults.push({
+          url: currentUrl,
+          engineUsed: scraped.engineUsed,
+          pageHtmlSnippet: scraped.cleanSnippet || (scraped.markdown ? scraped.markdown.slice(0, 3000) : ''),
+          markdown: scraped.markdown ? scraped.markdown.slice(0, 3000) : undefined,
+          extractedMeta: {
+            title: scraped.title,
+            description: scraped.description,
+            brand: scraped.brand,
+            price: scraped.price,
+            rrp: scraped.rrp,
+            currency: scraped.currency,
+            color: scraped.color,
+            originalListingColor: scraped.originalListingColor || scraped.color,
+            material: scraped.material,
+            siteName: scraped.siteName,
+            engineUsed: scraped.engineUsed,
+            image: scraped.mainImage,
+            candidateImages: scraped.candidateImages,
           },
-          redirect: 'follow',
-          signal: AbortSignal.timeout(8000),
+          candidateImages: scraped.candidateImages,
         });
-
-        if (fetchResponse.ok) {
-          pageHtml = await fetchResponse.text();
-
-          // 1. Open Graph & Twitter tags
-          const ogTitleMatch = pageHtml.match(/<meta\s+(?:property|name)=["'](?:og:title|twitter:title)["']\s+content=["'](.*?)["']/i) ||
-                               pageHtml.match(/<meta\s+content=["'](.*?)["']\s+(?:property|name)=["'](?:og:title|twitter:title)["']/i);
-          const ogImageMatches = [
-            ...pageHtml.matchAll(/<meta\s+(?:property|name)=["'](?:og:image|og:image:secure_url|twitter:image|twitter:image:src)["']\s+content=["'](.*?)["']/gi),
-            ...pageHtml.matchAll(/<meta\s+content=["'](.*?)["']\s+(?:property|name)=["'](?:og:image|og:image:secure_url|twitter:image|twitter:image:src)["']/gi)
-          ];
-          const linkImageMatch = pageHtml.match(/<link\s+rel=["'](?:image_src|preload)["'](?:\s+as=["']image["'])?\s+href=["'](.*?)["']/i);
-          const ogDescMatch = pageHtml.match(/<meta\s+(?:property|name)=["'](?:og:description|twitter:description|description)["']\s+content=["'](.*?)["']/i) ||
-                              pageHtml.match(/<meta\s+content=["'](.*?)["']\s+(?:property|name)=["'](?:og:description|twitter:description|description)["']/i);
-          const ogSiteMatch = pageHtml.match(/<meta\s+(?:property|name)=["'](?:og:site_name|twitter:site)["']\s+content=["'](.*?)["']/i) ||
-                              pageHtml.match(/<meta\s+content=["'](.*?)["']\s+(?:property|name)=["'](?:og:site_name|twitter:site)["']/i);
-          const ogPriceMatch = pageHtml.match(/<meta\s+property=["'](?:og:price:amount|product:price:amount)["']\s+content=["'](.*?)["']/i);
-          const titleTagMatch = pageHtml.match(/<title[^>]*>(.*?)<\/title>/i);
-
-          if (ogTitleMatch) extractedMeta.title = ogTitleMatch[1];
-          if (titleTagMatch && !extractedMeta.title) extractedMeta.title = titleTagMatch[1];
-          if (ogDescMatch) extractedMeta.description = ogDescMatch[1];
-          if (ogSiteMatch) extractedMeta.siteName = ogSiteMatch[1];
-          if (ogPriceMatch) extractedMeta.price = ogPriceMatch[1];
-
-          for (const m of ogImageMatches) {
-            const img = cleanImageUrl(m[1], currentUrl);
-            if (img && !candidateImages.includes(img)) candidateImages.push(img);
-          }
-          if (linkImageMatch) {
-            const img = cleanImageUrl(linkImageMatch[1], currentUrl);
-            if (img && !candidateImages.includes(img)) candidateImages.push(img);
-          }
-
-          // 2. JSON-LD parsing (Product, Cart, Order, or ItemList)
-          const jsonLdMatches = pageHtml.match(/<script\s+[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi);
-          if (jsonLdMatches) {
-            for (const match of jsonLdMatches) {
-              try {
-                const rawJson = match.replace(/<script\s+[^>]*type=["']application\/ld\+json["'][^>]*>/i, '').replace(/<\/script>/i, '').trim();
-                const parsed = JSON.parse(rawJson);
-                const itemsToCheck = Array.isArray(parsed)
-                  ? parsed
-                  : parsed['@graph'] && Array.isArray(parsed['@graph'])
-                  ? parsed['@graph']
-                  : [parsed];
-
-                for (const p of itemsToCheck) {
-                  if (p['@type'] === 'Product' || p['@type']?.includes?.('Product') || p.offers || p.image || p.name) {
-                    if (p.name && !extractedMeta.title) extractedMeta.title = p.name;
-                    if (p.description && !extractedMeta.description) extractedMeta.description = p.description;
-                    if (p.brand) {
-                      extractedMeta.brand = typeof p.brand === 'string' ? p.brand : p.brand.name;
-                    }
-                    if (p.image) {
-                      const rawImgs = Array.isArray(p.image) ? p.image : [p.image];
-                      for (const rawImg of rawImgs) {
-                        const imgUrl = typeof rawImg === 'string' ? rawImg : rawImg?.url || rawImg?.contentUrl;
-                        const cleaned = cleanImageUrl(imgUrl, currentUrl);
-                        if (cleaned && !candidateImages.includes(cleaned)) candidateImages.push(cleaned);
-                      }
-                    }
-                    if (p.offers) {
-                      const offer = Array.isArray(p.offers) ? p.offers[0] : p.offers;
-                      if (offer?.price) extractedMeta.price = offer.price;
-                      if (offer?.priceCurrency) extractedMeta.currency = offer.priceCurrency;
-                    }
-                    if (p.color) extractedMeta.color = p.color;
-                    if (p.material) extractedMeta.material = p.material;
-                  }
-                }
-              } catch {
-                // ignore
-              }
-            }
-          }
-
-          // 3. Fallback product images from HTML
-          if (candidateImages.length === 0) {
-            const imgTagMatches = pageHtml.matchAll(/<img[^>]+src=["']([^"']+)["'][^>]*>/gi);
-            for (const imgMatch of imgTagMatches) {
-              const src = imgMatch[1];
-              if (src && (src.includes('/products/') || src.includes('product') || src.includes('cdn.shopify.com') || src.includes('media') || src.includes('uploads')) && !src.includes('icon') && !src.includes('logo') && !src.includes('svg')) {
-                const cleaned = cleanImageUrl(src, currentUrl);
-                if (cleaned && !candidateImages.includes(cleaned)) candidateImages.push(cleaned);
-              }
-              if (candidateImages.length >= 6) break;
-            }
-          }
-
-          if (candidateImages.length > 0) {
-            extractedMeta.image = candidateImages[0];
-            extractedMeta.candidateImages = candidateImages;
-          }
-
-          // 4. Price regex fallback
-          if (!extractedMeta.price) {
-            const gbpMatch = pageHtml.match(/£\s*([0-9]{1,4}(?:\.[0-9]{2})?)/);
-            if (gbpMatch) {
-              extractedMeta.price = gbpMatch[1];
-            } else {
-              const eurMatch = pageHtml.match(/€\s*([0-9]{1,4}(?:\.[0-9]{2})?)/);
-              if (eurMatch) extractedMeta.price = (parseFloat(eurMatch[1]) * 0.85).toFixed(2);
-              const usdMatch = pageHtml.match(/\$\s*([0-9]{1,4}(?:\.[0-9]{2})?)/);
-              if (usdMatch) extractedMeta.price = (parseFloat(usdMatch[1]) * 0.79).toFixed(2);
-            }
-          }
-        }
-      } catch (fetchErr) {
-        console.warn('URL fetch notice for:', currentUrl, fetchErr);
+      } catch (scrapeErr: any) {
+        console.warn('URL scraping notice for:', currentUrl, scrapeErr);
+        fetchedResults.push({
+          url: currentUrl,
+          engineUsed: 'stealth-fallback',
+          pageHtmlSnippet: '',
+          extractedMeta: {
+            brand: inferBrandFromUrl(currentUrl),
+            engineUsed: 'stealth-fallback',
+          },
+          candidateImages: [],
+        });
       }
-
-      fetchedResults.push({
-        url: currentUrl,
-        pageHtmlSnippet: (pageHtml || '').slice(0, 3000).replace(/<[^>]*>?/gm, ' ').replace(/\s+/g, ' '),
-        extractedMeta,
-        candidateImages,
-      });
     }
 
     const ai = getGeminiClient();
@@ -1049,6 +997,7 @@ Requirements for each item:
 - brand: The fashion brand / designer (e.g. "Barbour", "Arket", "COS", "Toast", "Zara", "Reiss", "Sézane", "Toteme").
 - category: Exactly one of: 'Outerwear', 'Knitwear', 'Tops', 'Bottoms', 'Dresses & Jumpsuits', 'Shoes', 'Bags', 'Accessories'.
 - purchasePrice: Number in British Pounds (£ GBP). If original was $ or €, convert to £. If missing, estimate realistic retail price.
+- rrp: Original recommended retail price in £ GBP. If item is on sale, rrp should be the original price; otherwise same as purchasePrice.
 - color: Primary color shade.
 - material: Composition if known (e.g. "100% Cashmere", "100% Waxed Cotton", "Italian Leather").
 - season: Array of wearable seasons from ['Autumn', 'Winter', 'Spring', 'Summer', 'All-Season'].
@@ -1078,6 +1027,10 @@ Requirements for each item:
                     description: 'Outerwear, Knitwear, Tops, Bottoms, Dresses & Jumpsuits, Shoes, Bags, or Accessories',
                   },
                   purchasePrice: { type: Type.NUMBER },
+                  rrp: {
+                    type: Type.NUMBER,
+                    description: 'Original recommended retail price / valuation in £ GBP',
+                  },
                   color: { type: Type.STRING },
                   material: { type: Type.STRING },
                   season: {
@@ -1128,6 +1081,9 @@ Requirements for each item:
             }
           }
 
+          const parsedPurchasePrice = Number(item.purchasePrice) || 120;
+          const parsedRrp = Number(item.rrp) || Number(correspondingFetch.extractedMeta?.rrp) || parsedPurchasePrice;
+
           return {
             ...item,
             id: `imported-item-${Date.now()}-${idx}`,
@@ -1135,7 +1091,11 @@ Requirements for each item:
             allCandidateImages: cImages.length > 0 ? cImages : (finalImg ? [finalImg] : []),
             targetStoreUrl: item.targetStoreUrl || correspondingFetch.url || effectiveUrls[0],
             retailerName: item.retailerName || correspondingFetch.extractedMeta?.siteName || inferBrandFromUrl(effectiveUrls[0]),
-            purchasePrice: Number(item.purchasePrice) || 120,
+            purchasePrice: parsedPurchasePrice,
+            rrp: parsedRrp,
+            color: item.color || correspondingFetch.extractedMeta?.color || 'Neutral',
+            originalListingColor: correspondingFetch.extractedMeta?.originalListingColor || correspondingFetch.extractedMeta?.color || item.color || '',
+            engineUsed: correspondingFetch.engineUsed || 'stealth-fallback',
             condition: item.condition || 'Pristine / New',
             season: Array.isArray(item.season) && item.season.length > 0 ? item.season : ['Autumn', 'Winter'],
             tags: Array.isArray(item.tags) && item.tags.length > 0 ? item.tags : ['imported', item.category?.toLowerCase() || 'staple'],
@@ -1159,7 +1119,7 @@ Requirements for each item:
       }
     }
 
-    // High Quality Deterministic Multi-Item Fallback
+    // High Quality Deterministic Multi-Item Fallback using Unified Scraper
     const fallbackItems: any[] = fetchedResults.map((fr, idx) => {
       const inferredBrand = fr.extractedMeta.brand || inferBrandFromUrl(fr.url, fr.extractedMeta.siteName);
       const cleanedTitle = (fr.extractedMeta.title || 'Curated Wardrobe Piece')
@@ -1168,6 +1128,7 @@ Requirements for each item:
         .trim();
       const inferredCategory = inferCategoryFromText(cleanedTitle + ' ' + (fr.extractedMeta.description || '') + ' ' + fr.url);
       const parsedPrice = parseFloat(fr.extractedMeta.price || '120') || 120;
+      const parsedRrp = parseFloat(fr.extractedMeta.rrp || fr.extractedMeta.price || '120') || parsedPrice;
       const finalImg = fr.extractedMeta.image || (fr.candidateImages.length > 0 ? fr.candidateImages[0] : '');
 
       return {
@@ -1176,7 +1137,9 @@ Requirements for each item:
         brand: inferredBrand,
         category: inferredCategory,
         purchasePrice: parsedPrice,
+        rrp: parsedRrp,
         color: fr.extractedMeta.color || 'Neutral',
+        originalListingColor: fr.extractedMeta.originalListingColor || fr.extractedMeta.color || '',
         material: fr.extractedMeta.material || 'Natural Fiber / Blend',
         season: ['Autumn', 'Winter', 'Spring'],
         condition: 'Pristine / New',
@@ -1184,6 +1147,7 @@ Requirements for each item:
         allCandidateImages: fr.candidateImages.length > 0 ? fr.candidateImages : (finalImg ? [finalImg] : []),
         retailerName: fr.extractedMeta.siteName || inferBrandFromUrl(fr.url),
         targetStoreUrl: fr.url,
+        engineUsed: fr.engineUsed || 'stealth-fallback',
         careNotes: 'Check garment care label.',
         notes: fr.extractedMeta.description || `Extracted garment specifications from ${inferredBrand}.`,
         tags: ['auto-imported', inferredCategory.toLowerCase(), 'capsule'],
@@ -1308,40 +1272,34 @@ Tasks:
       required: ['items'],
     };
 
-    const modelsToTry = ['gemini-3.7-flash', 'gemini-2.5-flash', 'gemini-1.5-flash'];
     let parsed: any = null;
 
-    for (const model of modelsToTry) {
-      try {
-        const response = await ai.models.generateContent({
-          model,
-          contents: [
-            {
-              role: 'user',
-              parts: [
-                {
-                  inlineData: {
-                    data: cleanBase64,
-                    mimeType: actualMime,
-                  },
+    try {
+      const response = await generateContentWithFallback(
+        ai,
+        [
+          {
+            role: 'user',
+            parts: [
+              {
+                inlineData: {
+                  data: cleanBase64,
+                  mimeType: actualMime,
                 },
-                {
-                  text: prompt,
-                },
-              ],
-            },
-          ],
-          config: {
-            systemInstruction: 'You are an elite fashion archivist and computer vision specialist. Accurately detect all garments in shopping baskets, carts, and photos in British Pounds (£ GBP).',
-            responseMimeType: 'application/json',
-            responseSchema: schema,
+              },
+              {
+                text: prompt,
+              },
+            ],
           },
-        });
-        parsed = JSON.parse(response.text || '{}');
-        break;
-      } catch (err: any) {
-        console.warn(`Vision model ${model} retry:`, err?.message || err);
-      }
+        ],
+        'You are an elite fashion archivist and computer vision specialist. Accurately detect all garments in shopping baskets, carts, and photos in British Pounds (£ GBP).',
+        schema,
+        0.2
+      );
+      parsed = JSON.parse(response.text || '{}');
+    } catch (err: any) {
+      console.warn('Vision extraction fallback error:', err?.message || err);
     }
 
     let extractedItems: any[] = parsed && Array.isArray(parsed.items) && parsed.items.length > 0 ? parsed.items : [];
@@ -2323,43 +2281,34 @@ Requirements:
   * tags: 3-5 tags including 'vinted', 'resale', 'second-hand'
   * notes: Capsule styling notes and order/listing details`;
 
-            const modelsToTry = ['gemini-3.7-flash', 'gemini-2.5-flash', 'gemini-1.5-flash'];
             let pdfParsed: any = null;
 
-            for (const model of modelsToTry) {
-              try {
-                const response = await ai.models.generateContent({
-                  model,
-                  contents: [
-                    {
-                      role: 'user',
-                      parts: [
-                        {
-                          inlineData: {
-                            data: cleanBase64,
-                            mimeType: 'application/pdf',
-                          },
+            try {
+              const response = await generateContentWithFallback(
+                ai,
+                [
+                  {
+                    role: 'user',
+                    parts: [
+                      {
+                        inlineData: {
+                          data: cleanBase64,
+                          mimeType: 'application/pdf',
                         },
-                        {
-                          text: pdfPrompt,
-                        },
-                      ],
-                    },
-                  ],
-                  config: {
-                    systemInstruction:
-                      'You are an expert fashion archivist specializing in Vinted receipts, invoice PDFs, and pre-loved garment acquisition records in British Pounds (£ GBP).',
-                    responseMimeType: 'application/json',
-                    responseSchema: schema,
+                      },
+                      {
+                        text: pdfPrompt,
+                      },
+                    ],
                   },
-                });
-                pdfParsed = JSON.parse(response.text || '{}');
-                if (pdfParsed && Array.isArray(pdfParsed.items) && pdfParsed.items.length > 0) {
-                  break;
-                }
-              } catch (pdfErr: any) {
-                console.warn(`PDF model ${model} retry:`, pdfErr?.message || pdfErr);
-              }
+                ],
+                'You are an expert fashion archivist specializing in Vinted receipts, invoice PDFs, and pre-loved garment acquisition records in British Pounds (£ GBP).',
+                schema,
+                0.2
+              );
+              pdfParsed = JSON.parse(response.text || '{}');
+            } catch (pdfErr: any) {
+              console.warn('PDF AI parse error:', pdfErr?.message || pdfErr);
             }
 
             if (pdfParsed && Array.isArray(pdfParsed.items) && pdfParsed.items.length > 0) {

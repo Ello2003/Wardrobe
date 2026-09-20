@@ -48,6 +48,8 @@ export const ShoppingFormModal: React.FC<ShoppingFormModalProps> = ({
   const [isExtracting, setIsExtracting] = useState(false);
   const [extractError, setExtractError] = useState<string | null>(null);
   const [extractSuccess, setExtractSuccess] = useState(false);
+  const [scraperEngineUsed, setScraperEngineUsed] = useState<string | null>(null);
+  const [originalListingColor, setOriginalListingColor] = useState<string>('');
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -200,6 +202,8 @@ export const ShoppingFormModal: React.FC<ShoppingFormModalProps> = ({
       if (item?.targetStoreUrl) setTargetStoreUrl(item.targetStoreUrl);
       if (item?.retailerName) setRetailerName(item.retailerName);
       if (item?.notes) setReasonOrGap(item.notes);
+      if (item?.color) setOriginalListingColor(item.originalListingColor || item.color);
+      if (item?.engineUsed) setScraperEngineUsed(item.engineUsed);
       if (Array.isArray(item?.tags)) setTagsInput(item.tags.join(', '));
       setExtractSuccess(true);
     } catch (error) {
@@ -237,6 +241,8 @@ export const ShoppingFormModal: React.FC<ShoppingFormModalProps> = ({
       matchingWardrobeItemIds: matchingItemIds,
       imageUrl: imageUrl.trim(),
       tags,
+      originalListingColor: originalListingColor || initialShoppingItem?.originalListingColor,
+      engineUsed: scraperEngineUsed || initialShoppingItem?.engineUsed,
     };
 
     if (initialShoppingItem) {
@@ -272,7 +278,16 @@ export const ShoppingFormModal: React.FC<ShoppingFormModalProps> = ({
           <div className="p-3.5 bg-[#F2F1ED] border-b border-[#E5E5E1] space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-[11px] font-mono font-semibold text-[#8C7355] flex items-center gap-1.5"><Sparkles className="w-3.5 h-3.5" />Auto-Fill from Product Link</span>
-              {extractSuccess && <span className="text-[11px] font-mono text-emerald-800 flex items-center gap-1 font-semibold"><Check className="w-3.5 h-3.5" />Product Details Extracted</span>}
+              {extractSuccess && (
+                <div className="flex items-center gap-1.5 font-mono text-[11px]">
+                  <span className="text-emerald-800 flex items-center gap-1 font-semibold"><Check className="w-3.5 h-3.5" />Product Extracted</span>
+                  {scraperEngineUsed && (
+                    <span className="text-[10px] text-[#8C7355] bg-white px-1.5 py-0.5 border border-[#8C7355]/30">
+                      {scraperEngineUsed === 'firecrawl' ? '🔥 Firecrawl' : '⚡ Unified'}
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
             <div className="flex gap-2">
               <div className="relative flex-1">
