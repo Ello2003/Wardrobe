@@ -1,9 +1,9 @@
 import React, { useMemo, useState, useEffect, useRef } from 'react';
-import { X, Calculator, Link2, Sparkles, Loader2, Check, Upload, Image as ImageIcon, ClipboardPaste } from 'lucide-react';
-import { ShoppingItem, ShoppingPriority, ShoppingStatus, Category, Season } from '../types';
+import { X, Calculator, Link2, Sparkles, Loader2, Check, Upload, Image as ImageIcon, ClipboardPaste, ShieldCheck, ExternalLink } from 'lucide-react';
+import { ShoppingItem, ShoppingPriority, ShoppingStatus, Category, Season, ShippingStatus } from '../types';
 import { useWardrobe } from '../context/WardrobeContext';
 import { GarmentImage } from './GarmentImage';
-import { calculateRrpSavings } from '../utils/formatters';
+import { calculateRrpSavings, formatGbp } from '../utils/formatters';
 
 interface ShoppingFormModalProps {
   isOpen: boolean;
@@ -44,6 +44,22 @@ export const ShoppingFormModal: React.FC<ShoppingFormModalProps> = ({
   const [tagsInput, setTagsInput] = useState('');
   const [isPhotoDragging, setIsPhotoDragging] = useState(false);
 
+  // Preserved Vinted & Marketplace Acquisition Metadata
+  const [vintedUrl, setVintedUrl] = useState('');
+  const [orderNumber, setOrderNumber] = useState('');
+  const [seller, setSeller] = useState('');
+  const [buyer, setBuyer] = useState('');
+  const [orderStatus, setOrderStatus] = useState('');
+  const [orderDate, setOrderDate] = useState('');
+  const [orderValue, setOrderValue] = useState<number | undefined>(undefined);
+  const [walletAmount, setWalletAmount] = useState<number | undefined>(undefined);
+  const [actualPricePaid, setActualPricePaid] = useState<number | undefined>(undefined);
+  const [purchasedDate, setPurchasedDate] = useState('');
+  const [transactionType, setTransactionType] = useState<'Purchase' | 'Sale' | undefined>(undefined);
+  const [trackingNumber, setTrackingNumber] = useState('');
+  const [carrier, setCarrier] = useState('');
+  const [shippingStatus, setShippingStatus] = useState<ShippingStatus | undefined>(undefined);
+
   const [importUrl, setImportUrl] = useState('');
   const [isExtracting, setIsExtracting] = useState(false);
   const [extractError, setExtractError] = useState<string | null>(null);
@@ -55,15 +71,29 @@ export const ShoppingFormModal: React.FC<ShoppingFormModalProps> = ({
 
   useEffect(() => {
     if (initialShoppingItem) {
+      const initialIsVinted = Boolean(
+        initialShoppingItem.vintedUrl ||
+        initialShoppingItem.orderNumber ||
+        initialShoppingItem.seller ||
+        initialShoppingItem.buyer ||
+        initialShoppingItem.orderStatus ||
+        initialShoppingItem.transactionType ||
+        initialShoppingItem.orderValue !== undefined ||
+        initialShoppingItem.walletAmount !== undefined ||
+        initialShoppingItem.retailerName === 'Vinted' ||
+        (initialShoppingItem.targetStoreUrl && initialShoppingItem.targetStoreUrl.toLowerCase().includes('vinted')) ||
+        (initialShoppingItem.tags || []).some((t) => t.toLowerCase().includes('vinted'))
+      );
+
       setName(initialShoppingItem.name || '');
       setBrand(initialShoppingItem.brand || '');
       setCategory(initialShoppingItem.category || safeCategories[0] || 'Outerwear');
       setEstimatedPrice(initialShoppingItem.estimatedPrice != null ? String(initialShoppingItem.estimatedPrice) : '');
       setRrp(initialShoppingItem.rrp != null ? String(initialShoppingItem.rrp) : '');
       setPriority(initialShoppingItem.priority || 'High');
-      setStatus(initialShoppingItem.status || 'Researching');
+      setStatus(initialShoppingItem.status || (initialIsVinted ? 'Purchased' : 'Researching'));
       setTargetStoreUrl(initialShoppingItem.targetStoreUrl || '');
-      setRetailerName(initialShoppingItem.retailerName || '');
+      setRetailerName(initialShoppingItem.retailerName || (initialIsVinted ? 'Vinted' : ''));
       setSeason(
         Array.isArray(initialShoppingItem.season)
           ? initialShoppingItem.season[0] || 'Autumn'
@@ -80,6 +110,22 @@ export const ShoppingFormModal: React.FC<ShoppingFormModalProps> = ({
             ? initialShoppingItem.tags
             : ''
       );
+
+      // Preserve Vinted metadata
+      setVintedUrl(initialShoppingItem.vintedUrl || (initialShoppingItem.targetStoreUrl?.toLowerCase().includes('vinted') ? initialShoppingItem.targetStoreUrl : ''));
+      setOrderNumber(initialShoppingItem.orderNumber || '');
+      setSeller(initialShoppingItem.seller || '');
+      setBuyer(initialShoppingItem.buyer || '');
+      setOrderStatus(initialShoppingItem.orderStatus || '');
+      setOrderDate(initialShoppingItem.orderDate || '');
+      setOrderValue(initialShoppingItem.orderValue);
+      setWalletAmount(initialShoppingItem.walletAmount);
+      setActualPricePaid(initialShoppingItem.actualPricePaid);
+      setPurchasedDate(initialShoppingItem.purchasedDate || '');
+      setTransactionType(initialShoppingItem.transactionType || (initialIsVinted ? 'Purchase' : undefined));
+      setTrackingNumber(initialShoppingItem.trackingNumber || '');
+      setCarrier(initialShoppingItem.carrier || '');
+      setShippingStatus(initialShoppingItem.shippingStatus);
     } else {
       setName('');
       setBrand('');
@@ -96,11 +142,43 @@ export const ShoppingFormModal: React.FC<ShoppingFormModalProps> = ({
       setMatchingItemIds([]);
       setImageUrl('');
       setTagsInput('');
+
+      // Reset Vinted fields
+      setVintedUrl('');
+      setOrderNumber('');
+      setSeller('');
+      setBuyer('');
+      setOrderStatus('');
+      setOrderDate('');
+      setOrderValue(undefined);
+      setWalletAmount(undefined);
+      setActualPricePaid(undefined);
+      setPurchasedDate('');
+      setTransactionType(undefined);
+      setTrackingNumber('');
+      setCarrier('');
+      setShippingStatus(undefined);
     }
     setImportUrl('');
     setExtractError(null);
     setExtractSuccess(false);
   }, [initialShoppingItem, isOpen, safeCategories]);
+
+  // Provenance flag: whether this item originated from or has Vinted marketplace metadata
+  const hasVintedProvenance = Boolean(
+    vintedUrl ||
+    orderNumber ||
+    seller ||
+    buyer ||
+    orderStatus ||
+    transactionType ||
+    orderValue !== undefined ||
+    walletAmount !== undefined ||
+    retailerName === 'Vinted' ||
+    (targetStoreUrl && targetStoreUrl.toLowerCase().includes('vinted')) ||
+    (initialShoppingItem?.tags || []).some((t) => t.toLowerCase().includes('vinted')) ||
+    tagsInput.toLowerCase().includes('vinted')
+  );
 
   if (!isOpen) return null;
 
@@ -183,6 +261,17 @@ export const ShoppingFormModal: React.FC<ShoppingFormModalProps> = ({
     setExtractError(null);
     setExtractSuccess(false);
 
+    const isVintedLink = url.toLowerCase().includes('vinted');
+    if (isVintedLink) {
+      setVintedUrl(url);
+      setRetailerName('Vinted');
+      setTransactionType((prev) => prev || 'Purchase');
+      const idMatch = url.match(/\/items\/(\d+)/) || url.match(/[?&]id=(\d+)/);
+      if (idMatch && idMatch[1]) {
+        setOrderNumber((prev) => prev || idMatch[1]);
+      }
+    }
+
     try {
       const response = await fetch('/api/gemini/extract-from-url', {
         method: 'POST',
@@ -204,7 +293,27 @@ export const ShoppingFormModal: React.FC<ShoppingFormModalProps> = ({
       if (item?.notes) setReasonOrGap(item.notes);
       if (item?.color) setOriginalListingColor(item.originalListingColor || item.color);
       if (item?.engineUsed) setScraperEngineUsed(item.engineUsed);
-      if (Array.isArray(item?.tags)) setTagsInput(item.tags.join(', '));
+      if (Array.isArray(item?.tags)) {
+        setTagsInput((prev) => {
+          const existing = prev ? prev.split(',').map((t) => t.trim()).filter(Boolean) : [];
+          const incoming = item.tags.map((t: string) => t.trim()).filter(Boolean);
+          if (hasVintedProvenance || isVintedLink) {
+            if (!existing.some((t) => t.toLowerCase() === 'vinted') && !incoming.some((t) => t.toLowerCase() === 'vinted')) {
+              existing.unshift('vinted');
+            }
+          }
+          const merged = Array.from(new Set([...existing, ...incoming]));
+          return merged.join(', ');
+        });
+      } else if (hasVintedProvenance || isVintedLink) {
+        setTagsInput((prev) => {
+          const existing = prev ? prev.split(',').map((t) => t.trim()).filter(Boolean) : [];
+          if (!existing.some((t) => t.toLowerCase() === 'vinted')) {
+            existing.unshift('vinted');
+          }
+          return existing.join(', ');
+        });
+      }
       setExtractSuccess(true);
     } catch (error) {
       setExtractError(error instanceof Error ? error.message : 'Could not extract product details.');
@@ -225,6 +334,11 @@ export const ShoppingFormModal: React.FC<ShoppingFormModalProps> = ({
       .map((tag) => tag.trim().toLowerCase().replace(/^#/, ''))
       .filter(Boolean);
 
+    // Guaranteed: strictly keep 'vinted' tag if the item has Vinted provenance
+    if (hasVintedProvenance && !tags.some((t) => t.toLowerCase() === 'vinted')) {
+      tags.unshift('vinted');
+    }
+
     const data = {
       name: name.trim(),
       brand: brand.trim(),
@@ -233,8 +347,8 @@ export const ShoppingFormModal: React.FC<ShoppingFormModalProps> = ({
       rrp: rrpNum,
       priority,
       status,
-      targetStoreUrl: targetStoreUrl.trim() || undefined,
-      retailerName: retailerName.trim() || undefined,
+      targetStoreUrl: targetStoreUrl.trim() || vintedUrl.trim() || initialShoppingItem?.targetStoreUrl || initialShoppingItem?.vintedUrl || undefined,
+      retailerName: retailerName.trim() || initialShoppingItem?.retailerName || (hasVintedProvenance ? 'Vinted' : undefined),
       season,
       reasonOrGap: reasonOrGap.trim() || 'Capsule wardrobe staple research.',
       estimatedWearsPerYear: wearsNum,
@@ -243,6 +357,22 @@ export const ShoppingFormModal: React.FC<ShoppingFormModalProps> = ({
       tags,
       originalListingColor: originalListingColor || initialShoppingItem?.originalListingColor,
       engineUsed: scraperEngineUsed || initialShoppingItem?.engineUsed,
+      // Preserved marketplace & Vinted acquisition metadata
+      vintedUrl: vintedUrl.trim() || initialShoppingItem?.vintedUrl || (initialShoppingItem?.targetStoreUrl?.toLowerCase().includes('vinted') ? initialShoppingItem.targetStoreUrl : undefined),
+      orderNumber: orderNumber.trim() || initialShoppingItem?.orderNumber || undefined,
+      seller: seller.trim() || initialShoppingItem?.seller || undefined,
+      buyer: buyer.trim() || initialShoppingItem?.buyer || undefined,
+      orderStatus: orderStatus.trim() || initialShoppingItem?.orderStatus || (hasVintedProvenance ? 'Order completed!' : undefined),
+      orderDate: orderDate.trim() || initialShoppingItem?.orderDate || undefined,
+      orderValue: orderValue !== undefined ? orderValue : initialShoppingItem?.orderValue,
+      walletAmount: walletAmount !== undefined ? walletAmount : initialShoppingItem?.walletAmount,
+      actualPricePaid: actualPricePaid !== undefined ? actualPricePaid : initialShoppingItem?.actualPricePaid || (status === 'Purchased' ? priceNum : undefined),
+      purchasedDate: purchasedDate || initialShoppingItem?.purchasedDate || (status === 'Purchased' ? (orderDate || new Date().toISOString().split('T')[0]) : undefined),
+      transactionType: transactionType || initialShoppingItem?.transactionType || (hasVintedProvenance ? 'Purchase' : undefined),
+      trackingNumber: trackingNumber.trim() || initialShoppingItem?.trackingNumber || undefined,
+      carrier: carrier.trim() || initialShoppingItem?.carrier || undefined,
+      shippingStatus: shippingStatus || initialShoppingItem?.shippingStatus || undefined,
+      lastUpdatedDate: initialShoppingItem?.lastUpdatedDate,
     };
 
     if (initialShoppingItem) {
@@ -274,31 +404,92 @@ export const ShoppingFormModal: React.FC<ShoppingFormModalProps> = ({
           </button>
         </div>
 
-        {!initialShoppingItem && (
-          <div className="p-3.5 bg-[#F2F1ED] border-b border-[#E5E5E1] space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-mono font-semibold text-[#8C7355] flex items-center gap-1.5"><Sparkles className="w-3.5 h-3.5" />Auto-Fill from Product Link</span>
-              {extractSuccess && (
-                <div className="flex items-center gap-1.5 font-mono text-[11px]">
-                  <span className="text-emerald-800 flex items-center gap-1 font-semibold"><Check className="w-3.5 h-3.5" />Product Extracted</span>
-                  {scraperEngineUsed && (
-                    <span className="text-[10px] text-[#8C7355] bg-white px-1.5 py-0.5 border border-[#8C7355]/30">
-                      {scraperEngineUsed === 'firecrawl' ? '🔥 Firecrawl' : '⚡ Unified'}
-                    </span>
-                  )}
-                </div>
-              )}
-            </div>
-            <div className="flex gap-2">
-              <div className="relative flex-1">
-                <input type="url" placeholder="Paste product URL..." value={importUrl} onChange={(event) => setImportUrl(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); handleExtractFromUrl(); } }} className="w-full pl-8 pr-2.5 py-1.5 bg-white border border-[#D5D5D0] text-xs text-[#1A1A1A] focus:outline-none focus:border-[#8C7355]" />
-                <Link2 className="w-3.5 h-3.5 text-[#8C7355] absolute left-2.5 top-2" />
+        {/* Quick Link Autofill Banner */}
+        <div className="p-3.5 bg-[#F2F1ED] border-b border-[#E5E5E1] space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-mono font-semibold text-[#8C7355] flex items-center gap-1.5"><Sparkles className="w-3.5 h-3.5" />Auto-Fill from Product Link</span>
+            {extractSuccess && (
+              <div className="flex items-center gap-1.5 font-mono text-[11px]">
+                <span className="text-emerald-800 flex items-center gap-1 font-semibold"><Check className="w-3.5 h-3.5" />Product Extracted</span>
+                {scraperEngineUsed && (
+                  <span className="text-[10px] text-[#8C7355] bg-white px-1.5 py-0.5 border border-[#8C7355]/30">
+                    {scraperEngineUsed === 'firecrawl' ? '🔥 Firecrawl' : '⚡ Unified'}
+                  </span>
+                )}
               </div>
-              <button type="button" onClick={handleExtractFromUrl} disabled={isExtracting || !importUrl.trim()} className="px-3 py-1.5 bg-[#8C7355] hover:bg-[#735D43] disabled:opacity-50 text-white text-xs font-mono font-medium transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs shrink-0">
-                {isExtracting ? <><Loader2 className="w-3 h-3 animate-spin" />Extracting...</> : 'Auto-Fill'}
-              </button>
+            )}
+          </div>
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <input type="url" placeholder="Paste product URL..." value={importUrl} onChange={(event) => setImportUrl(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); handleExtractFromUrl(); } }} className="w-full pl-8 pr-2.5 py-1.5 bg-white border border-[#D5D5D0] text-xs text-[#1A1A1A] focus:outline-none focus:border-[#8C7355]" />
+              <Link2 className="w-3.5 h-3.5 text-[#8C7355] absolute left-2.5 top-2" />
             </div>
-            {extractError && <div className="mt-1 space-y-1"><p className="text-[11px] text-rose-700 font-mono">{extractError}</p><div onDragOver={(event) => { event.preventDefault(); event.stopPropagation(); }} onDrop={(event) => { event.preventDefault(); event.stopPropagation(); if (event.dataTransfer.files?.[0]) handleExtractFromImageFile(event.dataTransfer.files[0]); }} onClick={() => fileInputRef.current?.click()} className="p-2 border border-dashed border-[#8C7355]/40 bg-amber-50/40 hover:bg-amber-50 text-center cursor-pointer"><span className="text-[10px] font-mono text-[#8C7355] font-semibold">Or drop product screenshot here to extract with Vision AI</span></div></div>}
+            <button type="button" onClick={handleExtractFromUrl} disabled={isExtracting || !importUrl.trim()} className="px-3 py-1.5 bg-[#8C7355] hover:bg-[#735D43] disabled:opacity-50 text-white text-xs font-mono font-medium transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs shrink-0">
+              {isExtracting ? <><Loader2 className="w-3 h-3 animate-spin" />Extracting...</> : 'Auto-Fill'}
+            </button>
+          </div>
+          {extractError && <div className="mt-1 space-y-1"><p className="text-[11px] text-rose-700 font-mono">{extractError}</p><div onDragOver={(event) => { event.preventDefault(); event.stopPropagation(); }} onDrop={(event) => { event.preventDefault(); event.stopPropagation(); if (event.dataTransfer.files?.[0]) handleExtractFromImageFile(event.dataTransfer.files[0]); }} onClick={() => fileInputRef.current?.click()} className="p-2 border border-dashed border-[#8C7355]/40 bg-amber-50/40 hover:bg-amber-50 text-center cursor-pointer"><span className="text-[10px] font-mono text-[#8C7355] font-semibold">Or drop product screenshot here to extract with Vision AI</span></div></div>}
+        </div>
+
+        {/* Green/Blue Vinted Details Preservation Banner */}
+        {hasVintedProvenance && (
+          <div className="px-4 py-2.5 bg-[#007782]/10 border-b border-[#007782]/30 text-xs font-mono animate-in fade-in duration-200">
+            <div className="flex items-center justify-between text-[#007782] mb-1.5">
+              <div className="flex items-center gap-2 font-bold tracking-wide">
+                <span className="w-2.5 h-2.5 rounded-full bg-[#007782] shrink-0"></span>
+                <span className="flex items-center gap-1">
+                  <ShieldCheck className="w-3.5 h-3.5 text-[#007782]" />
+                  Vinted Acquisition Details (Preserved)
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                {orderStatus && (
+                  <span className="text-[9px] font-bold px-2 py-0.5 bg-[#007782] text-white rounded-xs uppercase tracking-wider">
+                    {orderStatus}
+                  </span>
+                )}
+                {orderNumber && (
+                  <span className="text-[9px] font-bold px-2 py-0.5 bg-[#007782]/20 text-[#007782] border border-[#007782]/40 rounded-xs">
+                    Order #{orderNumber}
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] text-[#2D4F4F]">
+              <div>
+                <span className="text-[#688888] block text-[9px] uppercase tracking-wider">Seller</span>
+                <span className="font-semibold text-[#007782]">
+                  {seller ? `@${seller.replace(/^@/, '')}` : 'Vinted Seller'}
+                </span>
+              </div>
+              <div>
+                <span className="text-[#688888] block text-[9px] uppercase tracking-wider">Provenance</span>
+                <span className="font-semibold">{retailerName || 'Vinted'}</span>
+              </div>
+              <div>
+                <span className="text-[#688888] block text-[9px] uppercase tracking-wider">Order Total</span>
+                <span className="font-semibold text-[#1A1A1A]">
+                  {orderValue ? formatGbp(orderValue) : estimatedPrice ? formatGbp(parseFloat(estimatedPrice) || 0) : '—'}
+                </span>
+              </div>
+              <div>
+                <span className="text-[#688888] block text-[9px] uppercase tracking-wider">Listing Link</span>
+                {vintedUrl ? (
+                  <a
+                    href={vintedUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-[#007782] hover:underline flex items-center gap-1 font-semibold truncate"
+                  >
+                    <ExternalLink className="w-3 h-3 shrink-0" />
+                    <span className="truncate">Open Vinted</span>
+                  </a>
+                ) : (
+                  <span className="text-[#888888]">Link archived</span>
+                )}
+              </div>
+            </div>
           </div>
         )}
 

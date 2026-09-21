@@ -1102,6 +1102,119 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     });
   }, [trashItems, restoreFromTrash]);
 
+  // Proactive self-healing: If an item in wardrobe or wishlist lost its Vinted provenance due to an autofill overwrite,
+  // restore those marketplace fields from the latest trash archive snapshot!
+  useEffect(() => {
+    if (trashItems.length === 0) return;
+
+    setItems((currentItems) => {
+      let changed = false;
+      const updated = currentItems.map((item) => {
+        const isCurrentlyVinted = Boolean(
+          item.vintedUrl ||
+          item.orderNumber ||
+          item.seller ||
+          item.orderStatus ||
+          item.transactionType ||
+          item.retailerName === 'Vinted' ||
+          (item.tags || []).some((t) => t.toLowerCase().includes('vinted'))
+        );
+
+        if (!isCurrentlyVinted) {
+          const snapshot = trashItems.find(
+            (t) =>
+              t.itemType === 'wardrobe' &&
+              t.itemData?.id === item.id &&
+              Boolean(
+                t.itemData?.vintedUrl ||
+                t.itemData?.orderNumber ||
+                t.itemData?.seller ||
+                t.itemData?.orderStatus ||
+                t.itemData?.retailerName === 'Vinted' ||
+                (t.itemData?.tags || []).some((tag: string) => tag.toLowerCase().includes('vinted'))
+              )
+          );
+
+          if (snapshot && snapshot.itemData) {
+            changed = true;
+            const old = snapshot.itemData;
+            return {
+              ...item,
+              vintedUrl: old.vintedUrl || old.targetStoreUrl || item.vintedUrl,
+              orderNumber: old.orderNumber || item.orderNumber,
+              seller: old.seller || item.seller,
+              buyer: old.buyer || item.buyer,
+              orderStatus: old.orderStatus || item.orderStatus,
+              orderDate: old.orderDate || item.orderDate,
+              transactionType: old.transactionType || item.transactionType,
+              orderValue: old.orderValue !== undefined ? old.orderValue : item.orderValue,
+              walletAmount: old.walletAmount !== undefined ? old.walletAmount : item.walletAmount,
+              retailerName: item.retailerName && item.retailerName !== 'Online Retailer' ? item.retailerName : (old.retailerName || 'Vinted'),
+              tags: Array.from(new Set([...(item.tags || []), 'vinted'])),
+            };
+          }
+        }
+        return item;
+      });
+
+      return changed ? updated : currentItems;
+    });
+
+    setShoppingList((currentShopping) => {
+      let changed = false;
+      const updated = currentShopping.map((sItem) => {
+        const isCurrentlyVinted = Boolean(
+          sItem.vintedUrl ||
+          sItem.orderNumber ||
+          sItem.seller ||
+          sItem.orderStatus ||
+          sItem.transactionType ||
+          sItem.retailerName === 'Vinted' ||
+          (sItem.tags || []).some((t) => t.toLowerCase().includes('vinted'))
+        );
+
+        if (!isCurrentlyVinted) {
+          const snapshot = trashItems.find(
+            (t) =>
+              t.itemType === 'shopping' &&
+              t.itemData?.id === sItem.id &&
+              Boolean(
+                t.itemData?.vintedUrl ||
+                t.itemData?.orderNumber ||
+                t.itemData?.seller ||
+                t.itemData?.orderStatus ||
+                t.itemData?.retailerName === 'Vinted' ||
+                (t.itemData?.tags || []).some((tag: string) => tag.toLowerCase().includes('vinted'))
+              )
+          );
+
+          if (snapshot && snapshot.itemData) {
+            changed = true;
+            const old = snapshot.itemData;
+            return {
+              ...sItem,
+              vintedUrl: old.vintedUrl || old.targetStoreUrl || sItem.vintedUrl,
+              orderNumber: old.orderNumber || sItem.orderNumber,
+              seller: old.seller || sItem.seller,
+              buyer: old.buyer || sItem.buyer,
+              orderStatus: old.orderStatus || sItem.orderStatus,
+              orderDate: old.orderDate || sItem.orderDate,
+              transactionType: old.transactionType || sItem.transactionType,
+              orderValue: old.orderValue !== undefined ? old.orderValue : sItem.orderValue,
+              walletAmount: old.walletAmount !== undefined ? old.walletAmount : sItem.walletAmount,
+              actualPricePaid: old.actualPricePaid !== undefined ? old.actualPricePaid : sItem.actualPricePaid,
+              retailerName: sItem.retailerName && sItem.retailerName !== 'Online Retailer' ? sItem.retailerName : (old.retailerName || 'Vinted'),
+              tags: Array.from(new Set([...(sItem.tags || []), 'vinted'])),
+            };
+          }
+        }
+        return sItem;
+      });
+
+      return changed ? updated : currentShopping;
+    });
+  }, [trashItems]);
+
   // Current version number = total logs count
   const currentVersion = changeLogs.length > 0 ? changeLogs[0].versionNumber : 1;
 
@@ -1370,9 +1483,59 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           ? (normalizeCategoryName(updates.category) as Category)
           : existing.category;
 
+        // Clean out undefined values from updates to avoid accidentally overwriting existing fields with undefined
+        const cleanUpdates: Partial<WardrobeItem> = {};
+        for (const [key, val] of Object.entries(updates)) {
+          if (val !== undefined) {
+            (cleanUpdates as any)[key] = val;
+          }
+        }
+
+        // Guaranteed Preservation of Vinted & Marketplace Acquisition Details:
+        // If the item had Vinted attributes, ensure they are strictly preserved unless explicitly replaced.
+        const existingHadVinted = Boolean(
+          existing.vintedUrl ||
+          existing.orderNumber ||
+          existing.seller ||
+          existing.buyer ||
+          existing.orderStatus ||
+          existing.transactionType ||
+          existing.orderValue !== undefined ||
+          existing.walletAmount !== undefined ||
+          existing.retailerName === 'Vinted' ||
+          (existing.targetStoreUrl && existing.targetStoreUrl.toLowerCase().includes('vinted')) ||
+          (existing.tags || []).some((t) => t.toLowerCase().includes('vinted'))
+        );
+
+        const preservedVintedProps: Partial<WardrobeItem> = {};
+        if (existingHadVinted) {
+          if (!cleanUpdates.vintedUrl && existing.vintedUrl) preservedVintedProps.vintedUrl = existing.vintedUrl;
+          if (!cleanUpdates.orderNumber && existing.orderNumber) preservedVintedProps.orderNumber = existing.orderNumber;
+          if (!cleanUpdates.seller && existing.seller) preservedVintedProps.seller = existing.seller;
+          if (!cleanUpdates.buyer && existing.buyer) preservedVintedProps.buyer = existing.buyer;
+          if (!cleanUpdates.orderStatus && existing.orderStatus) preservedVintedProps.orderStatus = existing.orderStatus;
+          if (!cleanUpdates.orderDate && existing.orderDate) preservedVintedProps.orderDate = existing.orderDate;
+          if (!cleanUpdates.transactionType && existing.transactionType) preservedVintedProps.transactionType = existing.transactionType;
+          if (cleanUpdates.orderValue === undefined && existing.orderValue !== undefined) preservedVintedProps.orderValue = existing.orderValue;
+          if (cleanUpdates.walletAmount === undefined && existing.walletAmount !== undefined) preservedVintedProps.walletAmount = existing.walletAmount;
+          if (!cleanUpdates.trackingNumber && existing.trackingNumber) preservedVintedProps.trackingNumber = existing.trackingNumber;
+          if (!cleanUpdates.carrier && existing.carrier) preservedVintedProps.carrier = existing.carrier;
+          if (!cleanUpdates.shippingStatus && existing.shippingStatus) preservedVintedProps.shippingStatus = existing.shippingStatus;
+          if (!cleanUpdates.lastUpdatedDate && existing.lastUpdatedDate) preservedVintedProps.lastUpdatedDate = existing.lastUpdatedDate;
+          if (!cleanUpdates.retailerName && existing.retailerName) preservedVintedProps.retailerName = existing.retailerName;
+
+          // Preserve 'vinted' tag
+          if (cleanUpdates.tags && Array.isArray(cleanUpdates.tags)) {
+            if (!cleanUpdates.tags.some((t) => t.toLowerCase() === 'vinted')) {
+              cleanUpdates.tags = ['vinted', ...cleanUpdates.tags];
+            }
+          }
+        }
+
         const updatedItem: WardrobeItem = {
           ...existing,
-          ...updates,
+          ...cleanUpdates,
+          ...preservedVintedProps,
           category: normalizedCategory,
           updatedAt: now,
         };
@@ -1926,9 +2089,55 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           { id, name: `${existing.brand} ${existing.name}` }
         );
 
+        // Clean out undefined values from updates to avoid accidentally overwriting existing fields with undefined
+        const cleanUpdates: Partial<ShoppingItem> = {};
+        for (const [key, val] of Object.entries(updates)) {
+          if (val !== undefined) {
+            (cleanUpdates as any)[key] = val;
+          }
+        }
+
+        const existingHadVinted = Boolean(
+          existing.vintedUrl ||
+          existing.orderNumber ||
+          existing.seller ||
+          existing.buyer ||
+          existing.orderStatus ||
+          existing.transactionType ||
+          existing.orderValue !== undefined ||
+          existing.walletAmount !== undefined ||
+          existing.retailerName === 'Vinted' ||
+          (existing.targetStoreUrl && existing.targetStoreUrl.toLowerCase().includes('vinted')) ||
+          (existing.tags || []).some((t) => t.toLowerCase().includes('vinted'))
+        );
+
+        const preservedVintedProps: Partial<ShoppingItem> = {};
+        if (existingHadVinted) {
+          if (!cleanUpdates.vintedUrl && existing.vintedUrl) preservedVintedProps.vintedUrl = existing.vintedUrl;
+          if (!cleanUpdates.orderNumber && existing.orderNumber) preservedVintedProps.orderNumber = existing.orderNumber;
+          if (!cleanUpdates.seller && existing.seller) preservedVintedProps.seller = existing.seller;
+          if (!cleanUpdates.buyer && existing.buyer) preservedVintedProps.buyer = existing.buyer;
+          if (!cleanUpdates.orderStatus && existing.orderStatus) preservedVintedProps.orderStatus = existing.orderStatus;
+          if (!cleanUpdates.orderDate && existing.orderDate) preservedVintedProps.orderDate = existing.orderDate;
+          if (!cleanUpdates.transactionType && existing.transactionType) preservedVintedProps.transactionType = existing.transactionType;
+          if (cleanUpdates.orderValue === undefined && existing.orderValue !== undefined) preservedVintedProps.orderValue = existing.orderValue;
+          if (cleanUpdates.walletAmount === undefined && existing.walletAmount !== undefined) preservedVintedProps.walletAmount = existing.walletAmount;
+          if (cleanUpdates.actualPricePaid === undefined && existing.actualPricePaid !== undefined) preservedVintedProps.actualPricePaid = existing.actualPricePaid;
+          if (!cleanUpdates.lastUpdatedDate && existing.lastUpdatedDate) preservedVintedProps.lastUpdatedDate = existing.lastUpdatedDate;
+          if (!cleanUpdates.retailerName && existing.retailerName) preservedVintedProps.retailerName = existing.retailerName;
+
+          // Preserve 'vinted' tag
+          if (cleanUpdates.tags && Array.isArray(cleanUpdates.tags)) {
+            if (!cleanUpdates.tags.some((t) => t.toLowerCase() === 'vinted')) {
+              cleanUpdates.tags = ['vinted', ...cleanUpdates.tags];
+            }
+          }
+        }
+
         const normalizedUpdates = {
-          ...updates,
-          ...(updates.category ? { category: normalizeCategoryName(updates.category) as Category } : {}),
+          ...cleanUpdates,
+          ...preservedVintedProps,
+          ...(cleanUpdates.category ? { category: normalizeCategoryName(cleanUpdates.category) as Category } : {}),
         };
         const merged = { ...existing, ...normalizedUpdates };
         const updated = updates.orderStatus ? normalizeShoppingItem(merged) : merged;

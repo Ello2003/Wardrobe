@@ -1601,7 +1601,18 @@ export const AutoImportModal: React.FC<AutoImportModalProps> = ({
 
     for (const item of selectedItems) {
       const targetDest = item.destination || globalDestination;
-      const isVinted = activeTab === 'vinted' || item.retailerName === 'Vinted' || (item.tags && item.tags.includes('vinted'));
+      const isVinted = Boolean(
+        activeTab === 'vinted' ||
+        item.retailerName === 'Vinted' ||
+        item.vintedUrl ||
+        item.orderNumber ||
+        item.seller ||
+        item.buyer ||
+        item.orderStatus ||
+        (item.targetStoreUrl && item.targetStoreUrl.toLowerCase().includes('vinted')) ||
+        (item.tags && item.tags.some((t: string) => t.toLowerCase().includes('vinted'))) ||
+        (activeTab === 'url' && urlInput.toLowerCase().includes('vinted'))
+      );
 
       if (targetDest === 'wardrobe') {
         wardrobeItemsToAdd.push({

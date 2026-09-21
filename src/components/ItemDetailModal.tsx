@@ -8,6 +8,8 @@ import {
   Layers,
   Tag,
   PoundSterling,
+  ExternalLink,
+  ShieldCheck,
 } from 'lucide-react';
 import { WardrobeItem, isHomewareCategory } from '../types';
 import { useWardrobe } from '../context/WardrobeContext';
@@ -249,18 +251,26 @@ export const ItemDetailModal: React.FC<ItemDetailModalProps> = ({ item, onClose,
           )}
 
           {/* Vinted Acquisition Provenance */}
-          {(item.seller || item.orderStatus || item.transactionType || item.orderValue || item.retailerName === 'Vinted' || itemTags.includes('vinted')) && (
+          {(item.seller || item.orderStatus || item.transactionType || item.orderValue !== undefined || item.walletAmount !== undefined || item.retailerName === 'Vinted' || item.vintedUrl || item.orderNumber || itemTags.some((t) => t.toLowerCase().includes('vinted'))) && (
             <div className="p-3 bg-[#F0F8F8] border border-[#BCE4E6] rounded-lg space-y-2 text-xs">
               <div className="flex items-center justify-between text-[11px] font-mono font-semibold text-[#007782]">
                 <span className="flex items-center gap-1.5">
                   <span className="w-2 h-2 rounded-full bg-[#007782]"></span>
+                  <ShieldCheck className="w-3.5 h-3.5 text-[#007782]" />
                   Vinted Provenance & Order Log
                 </span>
-                {item.transactionType && (
-                  <span className="px-2 py-0.5 bg-[#007782] text-white rounded-xs text-[10px]">
-                    {item.transactionType}
-                  </span>
-                )}
+                <div className="flex items-center gap-1.5">
+                  {item.transactionType && (
+                    <span className="px-2 py-0.5 bg-[#007782] text-white rounded-xs text-[10px]">
+                      {item.transactionType}
+                    </span>
+                  )}
+                  {item.orderNumber && (
+                    <span className="px-2 py-0.5 bg-[#007782]/10 text-[#007782] border border-[#007782]/30 rounded-xs text-[10px]">
+                      #{item.orderNumber}
+                    </span>
+                  )}
+                </div>
               </div>
 
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 font-mono text-[11px] text-[#4A4A45]">
@@ -292,6 +302,20 @@ export const ItemDetailModal: React.FC<ItemDetailModalProps> = ({ item, onClose,
                   <div>
                     <span className="text-[#00606A] text-[10px] block">Last Updated:</span>
                     <strong className="text-[#1A1A1A]">{item.lastUpdatedDate}</strong>
+                  </div>
+                )}
+                {item.vintedUrl && (
+                  <div className="col-span-2 sm:col-span-3 pt-1 border-t border-[#BCE4E6]/50">
+                    <span className="text-[#00606A] text-[10px] block">Listing Link:</span>
+                    <a
+                      href={item.vintedUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-[#007782] hover:underline flex items-center gap-1 font-semibold truncate"
+                    >
+                      <ExternalLink className="w-3 h-3 shrink-0" />
+                      <span className="truncate">{item.vintedUrl}</span>
+                    </a>
                   </div>
                 )}
               </div>

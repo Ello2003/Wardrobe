@@ -515,6 +515,9 @@ export interface ShoppingItem {
   transactionType?: 'Purchase' | 'Sale';
   orderValue?: number;
   walletAmount?: number;
+  trackingNumber?: string;
+  carrier?: string;
+  shippingStatus?: ShippingStatus;
   lastUpdatedDate?: string;
   originalListingColor?: string;
   engineUsed?: string;
