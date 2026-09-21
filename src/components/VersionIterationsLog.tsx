@@ -34,12 +34,53 @@ export interface AppReleaseIteration {
 
 export const APP_ITERATIONS_LOG: AppReleaseIteration[] = [
   {
+    version: 'v5.7',
+    releaseDate: 'September 2026',
+    title: 'Automated Garment Safety & Trash Archive: Lossless Overwrite, Merge, and Delete Recovery',
+    summary:
+      'Implemented an automated Trash Bin recovery system to prevent data loss whenever garments are edited, consolidated/merged, replaced during backup imports, or deleted. Resolved duplicate over-merging where Sunspel t-shirts and similar core garments were mistakenly identified as duplicates, added comprehensive trash preservation across all mutation operations, and introduced both an interactive Trash Bin Studio modal and an embedded recovery console in Tools.',
+    isLatest: true,
+    tags: [
+      'TRASH BIN',
+      'DATA LOSS PREVENTION',
+      'SUNSPEL RECOVERY',
+      'DUPLICATE MERGE SAFETY',
+      'OVERWRITE ARCHIVE',
+      'LOSSLESS RESTORE',
+    ],
+    changes: {
+      features: [
+        'Automated Overwrite & Merge Archive: Whenever any wardrobe garment, wishlist item, sale item, or outfit is updated, consolidated, or replaced by backup restore, a complete pre-modification snapshot is automatically archived to Trash with full reason metadata.',
+        'Interactive Trash Studio Modal: Added multi-criteria search, reason filtering (overwritten, consolidated, deleted, import-replaced), batch selection, original/copy restoration, and permanent purge controls.',
+        'Tools & Recovery Integration: Embedded a dedicated Trash & Safety Recovery console in ToolsView with real-time statistics and 1-click restore.',
+        'Direct Footer Recovery Action: Accessible from anywhere in the application with live count of archived items.',
+      ],
+      fixes: [
+        'Fixed Sunspel T-Shirts Disappearing Bug: Diagnosed and fixed root causes where generic title stripping in cleanItemTitle and loose duplicate matching in mergeWardrobeItems caused distinct garments (e.g. multiple Sunspel t-shirts) to be consolidated without explicit selection.',
+        'Eliminated Startup Auto-Deduplication: Prevented silent, unprompted merging on application load.',
+        'Ensured all secondary items consolidated during manual or batch merges are permanently archived into Trash before removal.',
+      ],
+      improvements: [
+        'Lossless restore options: Users can restore items back to their exact original IDs or as independent copies with new unique IDs.',
+        'Full entity preservation: Images, custom valuations, purchase prices, tags, care notes, and storage locations are fully preserved in trash snapshots.',
+      ],
+    },
+    affectedModules: [
+      'WardrobeContext.tsx',
+      'TrashBinModal.tsx',
+      'ToolsView.tsx',
+      'App.tsx',
+      'types.ts',
+      'duplicateUtils.ts',
+    ],
+  },
+  {
     version: 'v5.6',
     releaseDate: 'September 2026',
     title: 'Gemini Model Resilience & Fallback Engine: Active Models & 503 Spike Protection',
     summary:
       'Replaced deprecated Gemini models with modern, supported endpoints (gemini-3.8-flash, gemini-3.6-flash, gemini-flash-latest, gemini-3.1-flash-lite) across all AI extraction and vision pathways. Added automated backoff retry handling for transient 503 high-demand spikes and 429 rate limits, ensuring zero downtime during peak loads.',
-    isLatest: true,
+    isLatest: false,
     tags: [
       'GEMINI MODELS',
       'FALLBACK RESILIENCE',

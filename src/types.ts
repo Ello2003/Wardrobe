@@ -813,3 +813,25 @@ export interface UnifiedScrapeResult {
   error?: string;
 }
 
+export type TrashReason =
+  | 'overwritten'
+  | 'deleted'
+  | 'consolidated'
+  | 'bulk_deleted'
+  | 'import_replaced';
+
+export interface TrashItem {
+  id: string; // Unique trash entry identifier
+  originalId: string; // Original identifier of the item
+  itemType: 'wardrobe' | 'shopping' | 'selling' | 'outfit';
+  itemData: any; // Full snapshot of the item before overwrite or deletion
+  deletedAt: string; // ISO timestamp
+  reason: TrashReason;
+  description: string; // Readable description (e.g. "Overwritten during edit", "Merged into master")
+  overwrittenBy?: {
+    id?: string;
+    name?: string;
+    summary?: string;
+  };
+}
+

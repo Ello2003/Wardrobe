@@ -23,6 +23,7 @@ import {
   FileText,
   RotateCcw,
   Type,
+  Trash2,
 } from 'lucide-react';
 import { useWardrobe } from '../context/WardrobeContext';
 import { VersionHistoryView } from './VersionHistoryView';
@@ -40,7 +41,7 @@ import { InlineEditableTitle } from './common/InlineEditableTitle';
 
 interface ToolsViewProps {
   onOpenCreateSnapshot: () => void;
-  defaultSubTab?: 'duplicates' | 'import' | 'casing' | 'audit';
+  defaultSubTab?: 'duplicates' | 'import' | 'casing' | 'audit' | 'trash';
 }
 
 export const ToolsView: React.FC<ToolsViewProps> = ({
@@ -57,10 +58,14 @@ export const ToolsView: React.FC<ToolsViewProps> = ({
     formatCurrency,
     customLabels,
     updateCustomLabel,
+    trashItems,
+    openTrashModal,
+    restoreFromTrash,
+    permanentlyDeleteFromTrash,
   } = useWardrobe();
 
   const [activeSubTab, setActiveSubTab] = useState<
-    'duplicates' | 'import' | 'casing' | 'audit'
+    'duplicates' | 'import' | 'casing' | 'audit' | 'trash'
   >(defaultSubTab);
 
   // Duplicate Merge Modal State
@@ -248,6 +253,24 @@ export const ToolsView: React.FC<ToolsViewProps> = ({
                 ({snapshots.length})
               </span>
             </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveSubTab('trash')}
+              className={`flex items-center gap-2 px-3.5 py-1.5 text-xs font-mono font-medium transition-all cursor-pointer ${
+                activeSubTab === 'trash'
+                  ? 'bg-white text-[#1A1A1A] shadow-xs font-bold'
+                  : 'text-[#767670] hover:text-[#1A1A1A]'
+              }`}
+            >
+              <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+              <span>Trash &amp; Recovery</span>
+              {trashItems.length > 0 && (
+                <span className="px-1.5 py-0.2 text-[9px] bg-rose-600 text-white rounded-full font-bold">
+                  {trashItems.length}
+                </span>
+              )}
+            </button>
           </div>
 
           {/* Contextual Quick Actions for current tab */}
@@ -259,6 +282,17 @@ export const ToolsView: React.FC<ToolsViewProps> = ({
             >
               <Layers className="w-3.5 h-3.5" />
               <span>Scan &amp; Merge Duplicates</span>
+            </button>
+          )}
+
+          {activeSubTab === 'trash' && (
+            <button
+              type="button"
+              onClick={openTrashModal}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 bg-[#8C7355] hover:bg-[#735D43] text-white text-xs font-medium uppercase tracking-wider transition-all cursor-pointer shadow-xs"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Open Full Trash Bin</span>
             </button>
           )}
 
@@ -746,6 +780,197 @@ export const ToolsView: React.FC<ToolsViewProps> = ({
       {activeSubTab === 'audit' && (
         <div className="space-y-4">
           <VersionHistoryView onOpenCreateSnapshot={onOpenCreateSnapshot} />
+        </div>
+      )}
+
+      {/* ===================== SECTION 5: TRASH & RECOVERY ===================== */}
+      {activeSubTab === 'trash' && (
+        <div className="space-y-6">
+          {/* Header Safety Notice */}
+          <div className="p-5 bg-white border border-[#E5E5E1] shadow-xs">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex items-start gap-3">
+                <div className="p-2.5 bg-rose-50 border border-rose-200 text-rose-600 shrink-0">
+                  <ShieldCheck className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-serif font-bold text-base text-[#1A1A1A]">
+                    Automated Garment Safety &amp; Overwrite Archive
+                  </h3>
+                  <p className="text-xs text-[#767670] mt-1 max-w-2xl leading-relaxed">
+                    Whenever an item is edited, merged during deduplication, replaced by an import, or deleted, a complete lossless snapshot of its original state is safeguarded in this recovery archive. Nothing is silently lost.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={openTrashModal}
+                  className="px-4 py-2 bg-[#8C7355] hover:bg-[#735D43] text-white text-xs font-mono font-medium uppercase tracking-wider transition-all cursor-pointer shadow-xs flex items-center gap-1.5"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Open Interactive Trash Studio</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Quick Metrics Bar */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-5 pt-4 border-t border-[#F2F1ED]">
+              <div className="p-3 bg-[#FBFBF9] border border-[#E5E5E1]">
+                <div className="text-[10px] font-mono uppercase tracking-wider text-[#767670]">Total In Trash</div>
+                <div className="text-xl font-serif font-bold text-[#1A1A1A] mt-0.5">{trashItems.length}</div>
+              </div>
+              <div className="p-3 bg-[#FBFBF9] border border-[#E5E5E1]">
+                <div className="text-[10px] font-mono uppercase tracking-wider text-amber-700">Overwritten Items</div>
+                <div className="text-xl font-serif font-bold text-amber-900 mt-0.5">
+                  {trashItems.filter((i) => i.reason === 'overwritten').length}
+                </div>
+              </div>
+              <div className="p-3 bg-[#FBFBF9] border border-[#E5E5E1]">
+                <div className="text-[10px] font-mono uppercase tracking-wider text-purple-700">Consolidated Duplicates</div>
+                <div className="text-xl font-serif font-bold text-purple-900 mt-0.5">
+                  {trashItems.filter((i) => i.reason === 'consolidated').length}
+                </div>
+              </div>
+              <div className="p-3 bg-[#FBFBF9] border border-[#E5E5E1]">
+                <div className="text-[10px] font-mono uppercase tracking-wider text-blue-700">Replaced by Import</div>
+                <div className="text-xl font-serif font-bold text-blue-900 mt-0.5">
+                  {trashItems.filter((i) => i.reason === 'import_replaced').length}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Quick Item List or Clean State */}
+          {trashItems.length === 0 ? (
+            <div className="p-12 text-center bg-white border border-[#E5E5E1]">
+              <div className="w-12 h-12 mx-auto bg-emerald-50 border border-emerald-200 text-emerald-600 rounded-full flex items-center justify-center mb-3">
+                <CheckCircle2 className="w-6 h-6" />
+              </div>
+              <h4 className="font-serif font-bold text-base text-[#1A1A1A]">Trash Bin is Completely Clean</h4>
+              <p className="text-xs text-[#767670] mt-1 max-w-md mx-auto">
+                All inventory, wishlist, and sale items are active and secure. Any modified or merged garments will automatically appear here for instant recovery.
+              </p>
+            </div>
+          ) : (
+            <div className="bg-white border border-[#E5E5E1] divide-y divide-[#F2F1ED]">
+              <div className="p-4 bg-[#FBFBF9] flex items-center justify-between">
+                <div className="text-xs font-mono font-bold text-[#1A1A1A] uppercase tracking-wider">
+                  Archived Garments ({trashItems.length})
+                </div>
+                <button
+                  type="button"
+                  onClick={openTrashModal}
+                  className="text-xs font-mono text-[#8C7355] hover:underline cursor-pointer flex items-center gap-1"
+                >
+                  <span>View All &amp; Filter</span>
+                  <ArrowRight className="w-3 h-3" />
+                </button>
+              </div>
+
+              <div className="divide-y divide-[#F2F1ED] max-h-[600px] overflow-y-auto">
+                {trashItems.slice(0, 20).map((item) => {
+                  const data = item.itemData || {};
+                  const isSunspel = String(data.brand || '').toLowerCase().includes('sunspel') ||
+                    String(data.name || '').toLowerCase().includes('sunspel') ||
+                    String(data.name || '').toLowerCase().includes('t-shirt') ||
+                    String(data.name || '').toLowerCase().includes('tshirt');
+
+                  return (
+                    <div
+                      key={item.id}
+                      className={`p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-colors ${
+                        isSunspel ? 'bg-amber-50/40 hover:bg-amber-50/70' : 'hover:bg-[#FBFBF9]'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="w-12 h-12 bg-[#F2F1ED] border border-[#E5E5E1] shrink-0 overflow-hidden flex items-center justify-center">
+                          {data.imageUrl ? (
+                            <img
+                              src={data.imageUrl}
+                              alt={data.name || 'Garment'}
+                              className="w-full h-full object-cover"
+                              referrerPolicy="no-referrer"
+                            />
+                          ) : (
+                            <Shirt className="w-5 h-5 text-[#A0A09A]" />
+                          )}
+                        </div>
+
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-mono text-xs font-bold text-[#1A1A1A] truncate">
+                              {data.brand ? `${data.brand} ` : ''}{data.name || 'Untitled Item'}
+                            </span>
+                            {isSunspel && (
+                              <span className="px-1.5 py-0.2 text-[9px] font-mono uppercase bg-amber-200 text-amber-900 font-bold">
+                                Protected Garment
+                              </span>
+                            )}
+                            <span
+                              className={`px-2 py-0.5 text-[9px] font-mono uppercase tracking-wider font-semibold ${
+                                item.reason === 'overwritten'
+                                  ? 'bg-amber-100 text-amber-800'
+                                  : item.reason === 'consolidated'
+                                  ? 'bg-purple-100 text-purple-800'
+                                  : item.reason === 'import_replaced'
+                                  ? 'bg-blue-100 text-blue-800'
+                                  : 'bg-zinc-100 text-zinc-700'
+                              }`}
+                            >
+                              {item.reason.replace('_', ' ')}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center gap-3 text-[11px] text-[#767670] mt-1 font-mono flex-wrap">
+                            {data.color && <span>Color: {data.color}</span>}
+                            {data.size && <span>Size: {data.size}</span>}
+                            {data.category && <span>Category: {data.category}</span>}
+                            <span>Archived: {new Date(item.deletedAt).toLocaleDateString()}</span>
+                          </div>
+
+                          {item.description && (
+                            <p className="text-[11px] text-[#8C7355] mt-1 font-sans italic">
+                              {item.description}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+                        <button
+                          type="button"
+                          onClick={() => restoreFromTrash(item.id, false)}
+                          className="px-3 py-1.5 bg-[#1A1A1A] hover:bg-black text-white text-xs font-mono font-medium transition cursor-pointer flex items-center gap-1.5"
+                          title="Restore back to its collection"
+                        >
+                          <RotateCcw className="w-3 h-3 text-emerald-400" />
+                          <span>Restore</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => restoreFromTrash(item.id, true)}
+                          className="px-2.5 py-1.5 bg-white border border-[#E5E5E1] text-[#5A5A55] hover:text-[#1A1A1A] hover:bg-[#F2F1ED] text-xs font-mono transition cursor-pointer"
+                          title="Restore as a duplicate copy with new ID"
+                        >
+                          As Copy
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => permanentlyDeleteFromTrash(item.id)}
+                          className="p-1.5 text-zinc-400 hover:text-rose-600 transition cursor-pointer"
+                          title="Permanently remove from trash"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       )}
 

@@ -21,6 +21,8 @@ import {
   DEFAULT_CUSTOM_LABELS,
   normalizeCategoryName,
   isHomewareCategory,
+  TrashItem,
+  TrashReason,
 } from '../types';
 import {
   VintedOrder,
@@ -335,6 +337,24 @@ interface WardrobeContextType {
     exactOnly?: boolean
   ) => { mergedCount: number; removedCount: number; message: string };
 
+  // Trash & Recovery Actions
+  trashItems: TrashItem[];
+  moveToTrash: (
+    item: any,
+    itemType: 'wardrobe' | 'shopping' | 'selling' | 'outfit',
+    reason: TrashReason,
+    description: string,
+    overwrittenBy?: { id?: string; name?: string; summary?: string }
+  ) => void;
+  restoreFromTrash: (trashId: string, restoreAsNewCopy?: boolean) => boolean;
+  permanentlyDeleteFromTrash: (trashId: string) => void;
+  emptyTrash: () => void;
+  restoreAllFromTrash: () => void;
+  isTrashModalOpen: boolean;
+  setIsTrashModalOpen: (open: boolean) => void;
+  openTrashModal: () => void;
+  closeTrashModal: () => void;
+
   // Snapshot & Rollback Actions
   createSnapshot: (name: string, description?: string, isAuto?: boolean) => string;
   restoreSnapshot: (snapshotId: string) => boolean;
@@ -503,7 +523,7 @@ const cleanInitialGarmentTags = (rawTags?: string[], status?: string): string[] 
 const WardrobeContext = createContext<WardrobeContextType | undefined>(undefined);
 
 export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  // Load initial state with localStorage fallback, unique ID disambiguation, and Humidor-grade deduplication sweep
+  // Load initial state with localStorage fallback and unique ID disambiguation (no automatic destructive startup merge)
   const [items, setItems] = useState<WardrobeItem[]>(() => {
     try {
       const saved = localStorage.getItem(`${STORAGE_KEY}_items`);
@@ -514,18 +534,7 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         category: normalizeCategoryName(item.category) as Category,
         tags: cleanInitialGarmentTags(item.tags),
       }));
-      const { consolidated, mergedCount } = consolidateWardrobeDuplicates(normalized);
-      if (mergedCount > 0) {
-        console.info(
-          `[Humidor Auto-Deduplication] Consolidated ${mergedCount} duplicate instances on startup into clean master records.`
-        );
-        try {
-          localStorage.setItem(`${STORAGE_KEY}_items`, JSON.stringify(consolidated));
-        } catch (e) {
-          console.warn('Failed to cache deduplicated items', e);
-        }
-      }
-      return consolidated;
+      return normalized;
     } catch {
       const uniqueRaw = ensureUniqueIds(INITIAL_WARDROBE_ITEMS, 'item');
       const normalized = uniqueRaw.map((item) => ({
@@ -533,8 +542,7 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         category: normalizeCategoryName(item.category) as Category,
         tags: cleanInitialGarmentTags(item.tags),
       }));
-      const { consolidated } = consolidateWardrobeDuplicates(normalized);
-      return consolidated;
+      return normalized;
     }
   });
 
@@ -567,8 +575,7 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           tags: cleanInitialGarmentTags(norm.tags, norm.status),
         };
       });
-      const { consolidated } = consolidateShoppingDuplicates(normalized);
-      return consolidated;
+      return normalized;
     } catch {
       const uniqueRaw = ensureUniqueIds(INITIAL_SHOPPING_LIST, 'shop');
       const normalized = uniqueRaw.map((item) => {
@@ -579,8 +586,7 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           tags: cleanInitialGarmentTags(norm.tags, norm.status),
         };
       });
-      const { consolidated } = consolidateShoppingDuplicates(normalized);
-      return consolidated;
+      return normalized;
     }
   });
 
@@ -594,8 +600,7 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         category: normalizeCategoryName(item.category) as Category,
         tags: cleanInitialGarmentTags(item.tags, item.status),
       }));
-      const { consolidated } = consolidateSaleDuplicates(normalized);
-      return consolidated;
+      return normalized;
     } catch {
       const uniqueRaw = ensureUniqueIds(INITIAL_SALE_ITEMS, 'sale');
       const normalized = uniqueRaw.map((item) => ({
@@ -603,8 +608,7 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         category: normalizeCategoryName(item.category) as Category,
         tags: cleanInitialGarmentTags(item.tags, item.status),
       }));
-      const { consolidated } = consolidateSaleDuplicates(normalized);
-      return consolidated;
+      return normalized;
     }
   });
 
@@ -958,6 +962,146 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     hasChangesForAutoSnapshotRef.current = true;
   }, [items, outfits, shoppingList, saleItems, monthlyBudget]);
 
+  // Trash & Recycle Bin State with persistent storage
+  const [trashItems, setTrashItems] = useState<TrashItem[]>(() => {
+    try {
+      const saved = localStorage.getItem(`${STORAGE_KEY}_trash`);
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const [isTrashModalOpen, setIsTrashModalOpen] = useState<boolean>(false);
+  const openTrashModal = useCallback(() => setIsTrashModalOpen(true), []);
+  const closeTrashModal = useCallback(() => setIsTrashModalOpen(false), []);
+
+  useEffect(() => {
+    saveEntitySafely(`${STORAGE_KEY}_trash`, trashItems, STORAGE_KEY);
+  }, [trashItems]);
+
+  const moveToTrash = useCallback(
+    (
+      item: any,
+      itemType: 'wardrobe' | 'shopping' | 'selling' | 'outfit',
+      reason: TrashReason,
+      description: string,
+      overwrittenBy?: { id?: string; name?: string; summary?: string }
+    ) => {
+      if (!item) return;
+      try {
+        const cleanCopy = JSON.parse(JSON.stringify(item));
+        const trashEntry: TrashItem = {
+          id: generateUniqueId('trash'),
+          originalId: item.id || generateUniqueId('legacy'),
+          itemType,
+          itemData: cleanCopy,
+          deletedAt: new Date().toISOString(),
+          reason,
+          description,
+          overwrittenBy,
+        };
+
+        setTrashItems((prev) => {
+          const filtered = prev.filter((p) => p.id !== trashEntry.id);
+          return [trashEntry, ...filtered.slice(0, 499)];
+        });
+      } catch (err) {
+        console.warn('Failed to archive item to trash:', err);
+      }
+    },
+    []
+  );
+
+  const moveToTrashRef = useRef(moveToTrash);
+  useEffect(() => {
+    moveToTrashRef.current = moveToTrash;
+  }, [moveToTrash]);
+
+  const restoreFromTrash = useCallback(
+    (trashId: string, restoreAsNewCopy: boolean = false): boolean => {
+      const entry = trashItems.find((t) => t.id === trashId);
+      if (!entry) return false;
+
+      const now = new Date().toISOString();
+      const data = { ...entry.itemData };
+
+      if (entry.itemType === 'wardrobe') {
+        const existingIdx = items.findIndex((i) => i.id === data.id);
+        if (restoreAsNewCopy || existingIdx >= 0) {
+          const newId = generateUniqueId('item');
+          const restored: WardrobeItem = {
+            ...data,
+            id: newId,
+            name: restoreAsNewCopy ? `${data.name} (Copy)` : data.name,
+            createdAt: data.createdAt || now,
+            updatedAt: now,
+          };
+          setItems((prev) => [restored, ...prev]);
+          captureUndoState(`Restored copy of "${restored.brand} ${restored.name}" from trash`);
+        } else {
+          setItems((prev) => [data, ...prev]);
+          captureUndoState(`Restored "${data.brand} ${data.name}" from trash`);
+        }
+      } else if (entry.itemType === 'shopping') {
+        const existingIdx = shoppingList.findIndex((s) => s.id === data.id);
+        if (restoreAsNewCopy || existingIdx >= 0) {
+          const newId = generateUniqueId('shop');
+          const restored: ShoppingItem = {
+            ...data,
+            id: newId,
+            name: restoreAsNewCopy ? `${data.name} (Copy)` : data.name,
+          };
+          setShoppingList((prev) => [restored, ...prev]);
+        } else {
+          setShoppingList((prev) => [data, ...prev]);
+        }
+        captureUndoState(`Restored wishlist item "${data.name}" from trash`);
+      } else if (entry.itemType === 'selling') {
+        const existingIdx = saleItems.findIndex((s) => s.id === data.id);
+        if (restoreAsNewCopy || existingIdx >= 0) {
+          const newId = generateUniqueId('sale');
+          const restored: SaleItem = {
+            ...data,
+            id: newId,
+            name: restoreAsNewCopy ? `${data.name} (Copy)` : data.name,
+          };
+          setSaleItems((prev) => [restored, ...prev]);
+        } else {
+          setSaleItems((prev) => [data, ...prev]);
+        }
+        captureUndoState(`Restored resale item "${data.name}" from trash`);
+      } else if (entry.itemType === 'outfit') {
+        const newId = restoreAsNewCopy ? generateUniqueId('look') : data.id;
+        const restored: LookbookOutfit = {
+          ...data,
+          id: newId,
+          title: restoreAsNewCopy ? `${data.title} (Copy)` : data.title,
+        };
+        setOutfits((prev) => [restored, ...prev.filter((o) => o.id !== restored.id)]);
+        captureUndoState(`Restored look "${restored.title}" from trash`);
+      }
+
+      setTrashItems((prev) => prev.filter((t) => t.id !== trashId));
+      return true;
+    },
+    [trashItems, items, shoppingList, saleItems, captureUndoState]
+  );
+
+  const permanentlyDeleteFromTrash = useCallback((trashId: string) => {
+    setTrashItems((prev) => prev.filter((t) => t.id !== trashId));
+  }, []);
+
+  const emptyTrash = useCallback(() => {
+    setTrashItems([]);
+  }, []);
+
+  const restoreAllFromTrash = useCallback(() => {
+    trashItems.forEach((entry) => {
+      restoreFromTrash(entry.id, false);
+    });
+  }, [trashItems, restoreFromTrash]);
+
   // Current version number = total logs count
   const currentVersion = changeLogs.length > 0 ? changeLogs[0].versionNumber : 1;
 
@@ -1209,6 +1353,19 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       setItems((prev) => {
         const existing = prev.find((i) => i.id === id);
         if (!existing) return prev;
+
+        // Archive previous state into Trash as 'overwritten'
+        const changedFields = Object.keys(updates)
+          .filter((k) => (updates as any)[k] !== (existing as any)[k])
+          .join(', ');
+        moveToTrashRef.current(
+          existing,
+          'wardrobe',
+          'overwritten',
+          `Overwritten during item edit: updated ${changedFields || 'fields'}`,
+          { id, name: `${existing.brand} ${existing.name}` }
+        );
+
         const normalizedCategory = updates.category
           ? (normalizeCategoryName(updates.category) as Category)
           : existing.category;
@@ -1233,6 +1390,17 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         if (duplicateSecondaries.length === 0) {
           return prev.map((item) => (item.id === id ? updatedItem : item));
         }
+
+        // Move all secondary duplicate copies into Trash as 'consolidated' so they can be restored at any time!
+        duplicateSecondaries.forEach((sec) => {
+          moveToTrashRef.current(
+            sec,
+            'wardrobe',
+            'consolidated',
+            `Consolidated duplicate merged into master item "${updatedItem.brand} ${updatedItem.name}"`,
+            { id: updatedItem.id, name: `${updatedItem.brand} ${updatedItem.name}` }
+          );
+        });
 
         // Consolidate all secondary duplicate copies into the single master updated item!
         const secondaryIds = new Set(duplicateSecondaries.map((s) => s.id));
@@ -1328,6 +1496,13 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         const itemToDelete = prev.find((i) => i.id === id);
         if (!itemToDelete) return prev;
 
+        moveToTrashRef.current(
+          itemToDelete,
+          'wardrobe',
+          'deleted',
+          `Deleted from wardrobe: "${itemToDelete.brand} ${itemToDelete.name}"`
+        );
+
         captureUndoState(`Deleted "${itemToDelete.brand} ${itemToDelete.name}"`);
 
         recordChange(
@@ -1376,7 +1551,16 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       // 2. Undo stack capture
       captureUndoState(actionTitle);
 
-      // 3. Delete items
+      // 3. Move items to trash & delete
+      itemsToDelete.forEach((it) => {
+        moveToTrashRef.current(
+          it,
+          'wardrobe',
+          'bulk_deleted',
+          `Bulk deleted from wardrobe (${itemsToDelete.length} items total): "${it.brand} ${it.name}"`
+        );
+      });
+
       setItems((prev) => prev.filter((i) => !idSet.has(i.id)));
 
       // 4. Clean up outfits
@@ -1612,6 +1796,13 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         const lookToDelete = prev.find((o) => o.id === id);
         if (!lookToDelete) return prev;
 
+        moveToTrashRef.current(
+          lookToDelete,
+          'outfit',
+          'deleted',
+          `Deleted lookbook outfit: "${lookToDelete.title}"`
+        );
+
         recordChange(
           'LOOK_DELETED',
           'lookbook_outfit',
@@ -1725,6 +1916,16 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       setShoppingList((prev) => {
         const existing = prev.find((s) => s.id === id);
         if (!existing) return prev;
+
+        // Archive previous version to Trash before overwriting
+        moveToTrashRef.current(
+          existing,
+          'shopping',
+          'overwritten',
+          `Overwritten during wishlist edit: "${existing.brand} ${existing.name}"`,
+          { id, name: `${existing.brand} ${existing.name}` }
+        );
+
         const normalizedUpdates = {
           ...updates,
           ...(updates.category ? { category: normalizeCategoryName(updates.category) as Category } : {}),
@@ -1756,6 +1957,13 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       setShoppingList((prev) => {
         const toDelete = prev.find((s) => s.id === id);
         if (!toDelete) return prev;
+
+        moveToTrashRef.current(
+          toDelete,
+          'shopping',
+          'deleted',
+          `Deleted from wishlist: "${toDelete.brand} ${toDelete.name}"`
+        );
 
         captureUndoState(`Deleted "${toDelete.brand} ${toDelete.name}" from wishlist`);
 
@@ -1798,7 +2006,17 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       // 2. Undo capture
       captureUndoState(actionTitle);
 
-      // 3. Delete
+      // 3. Move items to trash
+      itemsToDelete.forEach((s) => {
+        moveToTrashRef.current(
+          s,
+          'shopping',
+          'bulk_deleted',
+          `Bulk deleted from wishlist (${itemsToDelete.length} items total): "${s.brand} ${s.name}"`
+        );
+      });
+
+      // 4. Delete
       setShoppingList((prev) => prev.filter((s) => !idSet.has(s.id)));
 
       // 4. Record change
@@ -1962,6 +2180,16 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       setSaleItems((prev) => {
         const existing = prev.find((s) => s.id === id);
         if (!existing) return prev;
+
+        // Archive previous version to Trash
+        moveToTrashRef.current(
+          existing,
+          'selling',
+          'overwritten',
+          `Overwritten during sale listing edit: "${existing.brand} ${existing.name}"`,
+          { id, name: `${existing.brand} ${existing.name}` }
+        );
+
         const normalizedCategory = updates.category
           ? (normalizeCategoryName(updates.category) as Category)
           : existing.category;
@@ -2006,6 +2234,13 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const existing = saleItems.find((s) => s.id === id);
       if (!existing) return;
 
+      moveToTrashRef.current(
+        existing,
+        'selling',
+        'deleted',
+        `Deleted sale listing: "${existing.brand} ${existing.name}"`
+      );
+
       captureUndoState(`Deleted listing "${existing.brand} ${existing.name}"`);
       setSaleItems((prev) => prev.filter((s) => s.id !== id));
 
@@ -2030,6 +2265,15 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (!ids || ids.length === 0) return;
       const itemsToDelete = saleItems.filter((s) => ids.includes(s.id));
       if (itemsToDelete.length === 0) return;
+
+      itemsToDelete.forEach((sl) => {
+        moveToTrashRef.current(
+          sl,
+          'selling',
+          'bulk_deleted',
+          `Bulk deleted from sale listings: "${sl.brand} ${sl.name}"`
+        );
+      });
 
       captureUndoState(`Bulk deleted ${itemsToDelete.length} sale listings`);
       setSaleItems((prev) => prev.filter((s) => !ids.includes(s.id)));
@@ -2568,12 +2812,21 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         const primary = prev.find((i) => i.id === primaryId);
         if (!primary) return prev;
 
-        // Find all secondary duplicate items (by id or if there's any identical clone or garment match)
+        // Find only explicitly targeted secondary duplicate items or exact ID duplicates
         const secondaries = prev.filter(
-          (i) =>
-            (secIdSet.has(i.id) || (i.id === primaryId && i !== primary) || isGarmentDuplicate(primary, i)) &&
-            i !== primary
+          (i) => (secIdSet.has(i.id) || (i.id === primaryId && i !== primary)) && i !== primary
         );
+
+        // Move all secondaries into Trash as 'consolidated' before filtering them out
+        secondaries.forEach((sec) => {
+          moveToTrashRef.current(
+            sec,
+            'wardrobe',
+            'consolidated',
+            `Consolidated into master item "${primary.brand} ${primary.name}"`,
+            { id: primary.id, name: `${primary.brand} ${primary.name}` }
+          );
+        });
 
         const allTags = Array.from(
           new Set([
@@ -3018,6 +3271,47 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             });
           }
         }
+      });
+
+      // Archive all removed secondaries to Trash
+      clusters.forEach((cl) => {
+        cl.secondary.forEach((sec) => {
+          if (sec.id === cl.primaryId) return;
+          if (sec.collection === 'wardrobe') {
+            const found = items.find((i) => i.id === sec.id);
+            if (found) {
+              moveToTrashRef.current(
+                found,
+                'wardrobe',
+                'consolidated',
+                `Auto-merged duplicate consolidated into master item #${cl.primaryId}`,
+                { id: cl.primaryId }
+              );
+            }
+          } else if (sec.collection === 'shopping') {
+            const found = shoppingList.find((s) => s.id === sec.id);
+            if (found) {
+              moveToTrashRef.current(
+                found,
+                'shopping',
+                'consolidated',
+                `Auto-merged wishlist duplicate consolidated into master #${cl.primaryId}`,
+                { id: cl.primaryId }
+              );
+            }
+          } else if (sec.collection === 'selling') {
+            const found = saleItems.find((s) => s.id === sec.id);
+            if (found) {
+              moveToTrashRef.current(
+                found,
+                'selling',
+                'consolidated',
+                `Auto-merged sale duplicate consolidated into master #${cl.primaryId}`,
+                { id: cl.primaryId }
+              );
+            }
+          }
+        });
       });
 
       // Update wardrobe in ONE atomic pass
@@ -5048,14 +5342,35 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         saveEntitySafely(`${STORAGE_KEY}_homeware_categories`, resolvedHomeware, STORAGE_KEY);
 
         if (mode === 'merge') {
-          // Merge items
+          // Archive items that are being replaced by incoming IDs
           const incomingIds = new Set(sanitizedItems.map((it) => it.id));
+          items
+            .filter((it) => incomingIds.has(it.id))
+            .forEach((it) => {
+              moveToTrashRef.current(
+                it,
+                'wardrobe',
+                'import_replaced',
+                `Replaced by incoming item during JSON merge: "${it.brand} ${it.name}"`
+              );
+            });
+
           const retainedItems = items.filter((it) => !incomingIds.has(it.id));
           setItems([...sanitizedItems, ...retainedItems]);
 
           // Merge outfits
           if (Array.isArray(container.outfits)) {
             const incomingOutfitIds = new Set(container.outfits.map((o: any) => o.id));
+            outfits
+              .filter((o) => incomingOutfitIds.has(o.id))
+              .forEach((o) => {
+                moveToTrashRef.current(
+                  o,
+                  'outfit',
+                  'import_replaced',
+                  `Replaced by incoming outfit during JSON merge: "${o.title}"`
+                );
+              });
             const retainedOutfits = outfits.filter((o) => !incomingOutfitIds.has(o.id));
             setOutfits([...container.outfits, ...retainedOutfits]);
           }
@@ -5063,6 +5378,16 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           // Merge shopping
           if (Array.isArray(container.shoppingList)) {
             const incomingShopIds = new Set(sanitizedShoppingList.map((s) => s.id));
+            shoppingList
+              .filter((s) => incomingShopIds.has(s.id))
+              .forEach((s) => {
+                moveToTrashRef.current(
+                  s,
+                  'shopping',
+                  'import_replaced',
+                  `Replaced by incoming wishlist item during JSON merge: "${s.brand} ${s.name}"`
+                );
+              });
             const retainedShopping = shoppingList.filter((s) => !incomingShopIds.has(s.id));
             setShoppingList([...sanitizedShoppingList, ...retainedShopping]);
           }
@@ -5070,11 +5395,54 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           // Merge sales
           if (Array.isArray(container.saleItems)) {
             const incomingSaleIds = new Set(sanitizedSaleItems.map((s) => s.id));
+            saleItems
+              .filter((s) => incomingSaleIds.has(s.id))
+              .forEach((s) => {
+                moveToTrashRef.current(
+                  s,
+                  'selling',
+                  'import_replaced',
+                  `Replaced by incoming sale listing during JSON merge: "${s.brand} ${s.name}"`
+                );
+              });
             const retainedSales = saleItems.filter((s) => !incomingSaleIds.has(s.id));
             setSaleItems([...sanitizedSaleItems, ...retainedSales]);
           }
         } else {
-          // Overwrite mode
+          // Overwrite mode: Archive all current items to Trash before replacing
+          items.forEach((it) => {
+            moveToTrashRef.current(
+              it,
+              'wardrobe',
+              'import_replaced',
+              `Archived before JSON database restore: "${it.brand} ${it.name}"`
+            );
+          });
+          shoppingList.forEach((s) => {
+            moveToTrashRef.current(
+              s,
+              'shopping',
+              'import_replaced',
+              `Archived before JSON database restore: "${s.brand} ${s.name}"`
+            );
+          });
+          saleItems.forEach((sl) => {
+            moveToTrashRef.current(
+              sl,
+              'selling',
+              'import_replaced',
+              `Archived before JSON database restore: "${sl.brand} ${sl.name}"`
+            );
+          });
+          outfits.forEach((o) => {
+            moveToTrashRef.current(
+              o,
+              'outfit',
+              'import_replaced',
+              `Archived before JSON database restore: "${o.title}"`
+            );
+          });
+
           setItems(sanitizedItems);
           if (Array.isArray(container.outfits)) setOutfits(container.outfits);
           if (Array.isArray(container.shoppingList)) setShoppingList(sanitizedShoppingList);
@@ -5607,6 +5975,16 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       mergeCrossCollectionItems,
       batchAutoMergeDuplicates,
       autoMergeAllDuplicates,
+      trashItems,
+      moveToTrash,
+      restoreFromTrash,
+      permanentlyDeleteFromTrash,
+      emptyTrash,
+      restoreAllFromTrash,
+      isTrashModalOpen,
+      setIsTrashModalOpen,
+      openTrashModal,
+      closeTrashModal,
       createSnapshot,
       restoreSnapshot,
       deleteSnapshot,
@@ -5719,6 +6097,15 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       mergeCrossCollectionItems,
       batchAutoMergeDuplicates,
       autoMergeAllDuplicates,
+      trashItems,
+      moveToTrash,
+      restoreFromTrash,
+      permanentlyDeleteFromTrash,
+      emptyTrash,
+      restoreAllFromTrash,
+      isTrashModalOpen,
+      openTrashModal,
+      closeTrashModal,
       createSnapshot,
       restoreSnapshot,
       deleteSnapshot,

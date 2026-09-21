@@ -16,12 +16,13 @@ import { ShoppingFormModal } from './components/ShoppingFormModal';
 import { CreateSnapshotModal } from './components/CreateSnapshotModal';
 import { SettingsModal } from './components/SettingsModal';
 import { DuplicateMergeModal } from './components/DuplicateMergeModal';
+import { TrashBinModal } from './components/TrashBinModal';
 import { GlobalSearchModal } from './components/common/GlobalSearchModal';
 import { QuickNoteWidget } from './components/QuickNoteWidget';
 import { DataSyncToolbar } from './components/DataSyncToolbar';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { WardrobeItem, LookbookOutfit, ShoppingItem } from './types';
-import { History, Undo2, X } from 'lucide-react';
+import { History, Undo2, X, Trash2 } from 'lucide-react';
 
 const MainAppContent: React.FC = () => {
   const {
@@ -31,6 +32,10 @@ const MainAppContent: React.FC = () => {
     canUndo,
     undoToast,
     dismissUndoToast,
+    trashItems,
+    isTrashModalOpen,
+    openTrashModal,
+    closeTrashModal,
   } = useWardrobe();
 
   const [selectedDetailItem, setSelectedDetailItem] = useState<WardrobeItem | null>(null);
@@ -222,6 +227,13 @@ const MainAppContent: React.FC = () => {
         />
       </ErrorBoundary>
 
+      <ErrorBoundary isModal onClose={closeTrashModal}>
+        <TrashBinModal
+          isOpen={isTrashModalOpen}
+          onClose={closeTrashModal}
+        />
+      </ErrorBoundary>
+
       {/* Floating Hover Quick Note Capture Widget */}
       <QuickNoteWidget />
 
@@ -241,12 +253,23 @@ const MainAppContent: React.FC = () => {
       <footer className="border-t border-zinc-200 bg-white py-4 text-center text-xs text-zinc-500">
         <div className="max-w-7xl mx-auto px-4 flex justify-between items-center">
           <div>&copy; {new Date().getFullYear()} Wardrobe &amp; Style Studio. All rights reserved.</div>
-          {currentVersion && (
-            <div className="flex items-center gap-1 text-zinc-400">
-              <History className="w-3 h-3" />
-              Version: {currentVersion}
-            </div>
-          )}
+          <div className="flex items-center gap-4">
+            <button
+              type="button"
+              onClick={openTrashModal}
+              className="flex items-center gap-1.5 text-zinc-500 hover:text-rose-600 transition cursor-pointer font-medium"
+              title="Open Trash & Overwritten Item Recovery"
+            >
+              <Trash2 className="w-3.5 h-3.5 text-rose-500" />
+              <span>Trash &amp; Recovery {trashItems.length > 0 ? `(${trashItems.length})` : ''}</span>
+            </button>
+            {currentVersion && (
+              <div className="flex items-center gap-1 text-zinc-400">
+                <History className="w-3 h-3" />
+                Version: {currentVersion}
+              </div>
+            )}
+          </div>
         </div>
       </footer>
     </div>
