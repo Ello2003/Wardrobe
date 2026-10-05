@@ -29,6 +29,8 @@ export interface ShoppingTableColumnSettings {
   showTags: boolean;
   showRetailer: boolean;
   showSeason: boolean;
+  showSize?: boolean;
+  showMaterial?: boolean;
   showUrl: boolean;
   showVintedDetails: boolean;
   showMatchingItems: boolean;
@@ -67,6 +69,8 @@ export interface ShoppingDisplaySettings {
   showPlannedUsage: boolean;
   showTags: boolean;
   showSeason: boolean;
+  showSize?: boolean;
+  showMaterial?: boolean;
   showRetailer: boolean;
   showUrl: boolean;
   showVintedDetails: boolean;
@@ -98,6 +102,8 @@ export const DEFAULT_SHOPPING_TABLE_SETTINGS: ShoppingTableDisplaySettings = {
   showTags: true,
   showRetailer: true,
   showSeason: true,
+  showSize: true,
+  showMaterial: true,
   showUrl: true,
   showVintedDetails: true,
   showMatchingItems: true,
@@ -325,6 +331,8 @@ export const ShoppingDisplaySettingsModal: React.FC<ShoppingDisplaySettingsModal
     { key: 'showPlannedUsage', label: 'Planned Usage & Gap Justification' },
     { key: 'showTags', label: 'Custom Tags (#style, #work)' },
     { key: 'showSeason', label: 'Target Season' },
+    { key: 'showSize', label: 'Size / Dimensions' },
+    { key: 'showMaterial', label: 'Material / Fabric Composition' },
     { key: 'showRetailer', label: 'Retailer & Merchant' },
     { key: 'showUrl', label: 'Store Link / URL' },
     { key: 'showVintedDetails', label: 'Vinted Order & Resale Info' },
@@ -351,6 +359,8 @@ export const ShoppingDisplaySettingsModal: React.FC<ShoppingDisplaySettingsModal
     { key: 'showTags', label: 'Custom Tags', description: 'Hashtag labels with quick edit' },
     { key: 'showRetailer', label: 'Retailer / Merchant', description: 'Store name or vendor' },
     { key: 'showSeason', label: 'Target Season', description: 'Target season badge' },
+    { key: 'showSize', label: 'Size / Sizing', description: 'Item size specification' },
+    { key: 'showMaterial', label: 'Material / Fabric', description: 'Fabric composition' },
     { key: 'showUrl', label: 'Store Link / URL', description: 'Direct store web link' },
     { key: 'showVintedDetails', label: 'Provenance / Order ID', description: 'Second-hand reference number' },
     { key: 'showMatchingItems', label: 'Matching Items', description: 'Capsule pairings count' },

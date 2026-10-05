@@ -38,6 +38,7 @@ import { ShoppingItem, ShoppingPriority, ShoppingStatus, Category, Season } from
 import { getColorHex } from '../utils/colorUtils';
 import { safeConfirm } from '../utils/safeConfirm';
 import { AutoImportModal } from './AutoImportModal';
+import { CategorySelect } from './common/CategorySelect';
 import { GarmentImage } from './GarmentImage';
 import { BulkEditModal } from './BulkEditModal';
 import { InlineEditableTitle } from './common/InlineEditableTitle';
@@ -48,6 +49,7 @@ import {
 } from './ShoppingDisplaySettingsModal';
 import { ShoppingDatabaseTable } from './ShoppingDatabaseTable';
 import { DuplicateMergeModal } from './DuplicateMergeModal';
+import { BulkSuiteModal, BulkSuiteTab } from './bulk/BulkSuiteModal';
 import { BulkActionBar } from './common/BulkActionBar';
 import { EmptyState } from './common/EmptyState';
 import { formatGbp } from '../utils/formatters';
@@ -232,6 +234,23 @@ export const ShoppingView: React.FC<ShoppingViewProps> = ({
   // Multi-Selection State & Actions
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
   const [isBulkEditOpen, setIsBulkEditOpen] = useState(false);
+
+  // Bulk Suite Modal
+  const [isBulkSuiteOpen, setIsBulkSuiteOpen] = useState(false);
+  const [bulkSuiteTab, setBulkSuiteTab] = useState<BulkSuiteTab>('text_parser');
+  const [bulkSuiteItemToVariant, setBulkSuiteItemToVariant] = useState<any>(null);
+  const [bulkSuiteSelectedIds, setBulkSuiteSelectedIds] = useState<string[]>([]);
+
+  const handleOpenBulkSuite = (
+    tab: BulkSuiteTab = 'text_parser',
+    itemToVariant: any = null,
+    selectedIds?: string[]
+  ) => {
+    setBulkSuiteTab(tab);
+    setBulkSuiteItemToVariant(itemToVariant);
+    setBulkSuiteSelectedIds(selectedIds || Array.from(selectedItemIds));
+    setIsBulkSuiteOpen(true);
+  };
 
   // Display Settings & Database View State (remembers view mode and options without defaulting back)
   const [displaySettings, setDisplaySettings] = useState<ShoppingDisplaySettings>(() => {
@@ -864,6 +883,16 @@ export const ShoppingView: React.FC<ShoppingViewProps> = ({
                 </button>
               )}
             </div>
+
+            <button
+              onClick={() => handleOpenBulkSuite('text_parser')}
+              id="shopping-bulk-suite-btn"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono font-medium bg-[#FAF9F5] hover:bg-[#F2F1ED] border border-[#8C7355] text-[#8C7355] transition-all cursor-pointer shadow-xs"
+              title="Bulk Suite: Multi-line text parser, colorway matrix & batch editor for wishlist"
+            >
+              <Layers className="w-3.5 h-3.5 text-[#8C7355]" />
+              <span className="font-semibold">Bulk &amp; Colorway Suite</span>
+            </button>
 
             <button
               onClick={onOpenAddShoppingItem}
@@ -1712,6 +1741,15 @@ export const ShoppingView: React.FC<ShoppingViewProps> = ({
         }}
         onBulkEdit={() => setIsBulkEditOpen(true)}
         onBulkDelete={handleDeleteSelected}
+        customActions={[
+          {
+            label: 'Open in Bulk Suite',
+            icon: Layers,
+            onClick: () => handleOpenBulkSuite('batch_edit', null, Array.from(selectedItemIds)),
+            variant: 'secondary',
+            title: 'Edit selected wishlist items in Bulk Suite matrix editor',
+          },
+        ]}
       />
 
       {/* Main Content: Wishlist Items (Database Table View OR Card Grid View) */}
@@ -1799,103 +1837,29 @@ export const ShoppingView: React.FC<ShoppingViewProps> = ({
                       containerClassName="w-full h-full flex items-center justify-center bg-[#F8F7F4]"
                     />
 
-                    {/* Top Left: Checkbox & Badges */}
+                    {/* Top Left: Multi-Select Checkbox Only */}
                     <div
-                      className="absolute top-2 left-2 flex flex-col gap-1 z-10"
+                      className="absolute top-2 left-2 z-10"
                       onClick={(e) => e.stopPropagation()}
                     >
-                      <div className="flex items-center gap-1.5">
-                        <button
-                          type="button"
-                          onClick={(e) => handleToggleSelectItem(item.id, e)}
-                          className={`p-1.5 rounded-md backdrop-blur-xs shadow-xs border transition-all cursor-pointer flex items-center justify-center ${
-                            isSelected
-                              ? 'bg-[#8C7355] border-[#8C7355] text-white ring-2 ring-[#8C7355]/30'
-                              : 'bg-white/95 border-zinc-200 text-zinc-300 hover:text-zinc-600 hover:border-zinc-400'
-                          }`}
-                          title={isSelected ? 'Deselect item' : 'Select item for bulk actions'}
-                          aria-label={isSelected ? 'Deselect item' : 'Select item'}
-                        >
-                          <CheckSquare className="w-3.5 h-3.5" />
-                        </button>
-
-                        {/* Priority selector inline */}
-                        {displaySettings.showPriority !== false && (
-                          <select
-                            value={item.priority}
-                            onChange={(e) =>
-                              updateShoppingItem(item.id, {
-                                priority: e.target.value as ShoppingPriority,
-                              })
-                            }
-                            className="text-[10px] font-mono px-2 py-0.5 bg-white/95 text-[#1A1A1A] border border-[#D5D5D0] shadow-xs focus:outline-none"
-                          >
-                            <option value="Essential / Must-Have">Essential</option>
-                            <option value="High">High Priority</option>
-                            <option value="Medium">Medium</option>
-                            <option value="Low / Wishlist">Low Wishlist</option>
-                          </select>
-                        )}
-
-                        {/* Status Selector inline */}
-                        {displaySettings.showStatus !== false && (
-                          <select
-                            value={item.status}
-                            onChange={(e) =>
-                              updateShoppingItem(item.id, {
-                                status: e.target.value as ShoppingStatus,
-                              })
-                            }
-                            className={`text-[10px] font-mono px-2 py-0.5 rounded-full border shadow-xs focus:outline-none cursor-pointer ${getShoppingStatusBadgeClass(
-                              item.status
-                            )}`}
-                          >
-                            <option value="To Buy">To Buy</option>
-                            <option value="In Basket">In Basket</option>
-                            <option value="Researching">Researching</option>
-                            <option value="Purchased">Purchased</option>
-                            <option value="Sold">Sold</option>
-                            <option value="Cancelled">Cancelled</option>
-                            <option value="Passed">Passed</option>
-                          </select>
-                        )}
-                      </div>
-
-                      {/* Category Selector inline */}
-                      {displaySettings.showCategory !== false && (
-                        <select
-                          value={item.category}
-                          onChange={(e) =>
-                            updateShoppingItem(item.id, {
-                              category: e.target.value,
-                            })
-                          }
-                          className="text-[10px] font-mono px-1.5 py-0.5 bg-white/95 text-[#4A4A45] border border-[#D5D5D0] shadow-xs focus:outline-none self-start"
-                          title="Change category inline"
-                        >
-                          {categories.map((c) => (
-                            <option key={c} value={c}>
-                              {c}
-                            </option>
-                          ))}
-                        </select>
-                      )}
-                    </div>
-
-                    {/* Top Right: Delete (x) Button */}
-                    <div className="absolute top-2 right-2 z-10">
                       <button
-                        onClick={(e) => handleDeleteSingleShoppingItem(item.id, e)}
-                        className="p-1.5 bg-white/95 text-[#767670] hover:text-rose-600 border border-[#D5D5D0] shadow-xs cursor-pointer"
-                        title="Delete from wishlist (✕)"
+                        type="button"
+                        onClick={(e) => handleToggleSelectItem(item.id, e)}
+                        className={`p-1.5 rounded-md backdrop-blur-xs shadow-xs border transition-all cursor-pointer flex items-center justify-center ${
+                          isSelected
+                            ? 'bg-[#8C7355] border-[#8C7355] text-white ring-2 ring-[#8C7355]/30'
+                            : 'bg-white/95 border-zinc-200 text-zinc-300 hover:text-zinc-600 hover:border-zinc-400'
+                        }`}
+                        title={isSelected ? 'Deselect item' : 'Select item for bulk actions'}
+                        aria-label={isSelected ? 'Deselect item' : 'Select item'}
                       >
-                        <Trash2 className="w-3.5 h-3.5" />
+                        <CheckSquare className="w-3.5 h-3.5" />
                       </button>
                     </div>
 
                     {/* Bottom Right: Price Tag */}
                     {displaySettings.showEstimatedPrice !== false && (
-                      <div className="absolute bottom-2 right-2">
+                      <div className="absolute bottom-2 right-2 z-10">
                         <span className="text-xs font-mono font-bold px-2 py-0.5 bg-white/95 text-[#1A1A1A] border border-[#D5D5D0] shadow-xs">
                           {formatGbp(item.estimatedPrice)}
                         </span>
@@ -1903,6 +1867,62 @@ export const ShoppingView: React.FC<ShoppingViewProps> = ({
                     )}
                   </div>
                 )}
+
+                {/* Sub-Image Clean Action Bar: Category dropdown, Status/Priority, and Delete Bin */}
+                <div
+                  className="px-3 py-1.5 bg-[#FAF9F7] border-b border-[#EAE8E3] flex items-center justify-between gap-1.5"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {/* Left: Category Dropdown */}
+                  {displaySettings.showCategory !== false ? (
+                    <div className="flex items-center gap-1 min-w-0 flex-1 max-w-[150px]">
+                      <CategorySelect
+                        value={item.category}
+                        onChange={(newCat) =>
+                          updateShoppingItem(item.id, {
+                            category: newCat,
+                          })
+                        }
+                        className="text-[10px] font-mono px-1.5 py-0.5 bg-white text-[#4A4A45] border border-[#D5D5D0] shadow-2xs focus:outline-none truncate w-full"
+                        title="Change category inline"
+                      />
+                    </div>
+                  ) : <div />}
+
+                  {/* Right: Status/Priority & Delete Bin */}
+                  <div className="flex items-center gap-1 shrink-0">
+                    {displaySettings.showStatus !== false && (
+                      <select
+                        value={item.status}
+                        onChange={(e) =>
+                          updateShoppingItem(item.id, {
+                            status: e.target.value as ShoppingStatus,
+                          })
+                        }
+                        className={`text-[9.5px] font-mono px-1.5 py-0.5 rounded-full border shadow-2xs focus:outline-none cursor-pointer ${getShoppingStatusBadgeClass(
+                          item.status
+                        )}`}
+                      >
+                        <option value="To Buy">To Buy</option>
+                        <option value="In Basket">In Basket</option>
+                        <option value="Researching">Researching</option>
+                        <option value="Purchased">Purchased</option>
+                        <option value="Sold">Sold</option>
+                        <option value="Cancelled">Cancelled</option>
+                        <option value="Passed">Passed</option>
+                      </select>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={(e) => handleDeleteSingleShoppingItem(item.id, e)}
+                      className="p-1 bg-white text-[#767670] hover:text-rose-600 border border-[#D5D5D0] shadow-2xs hover:border-rose-300 hover:bg-rose-50 transition-colors cursor-pointer"
+                      title="Delete from wishlist (✕)"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
 
                 {/* Body Details with Inline Editors */}
                 <div className={`p-3.5 space-y-2.5 flex-1 flex flex-col justify-between ${displaySettings.density === 'compact' ? 'p-2.5 space-y-2' : ''}`}>
@@ -2362,6 +2382,16 @@ export const ShoppingView: React.FC<ShoppingViewProps> = ({
         targetType="shopping"
         selectedIds={Array.from(selectedItemIds)}
         onComplete={() => setSelectedItemIds(new Set())}
+      />
+
+      {/* Comprehensive Bulk & Colorway Suite Modal */}
+      <BulkSuiteModal
+        isOpen={isBulkSuiteOpen}
+        onClose={() => setIsBulkSuiteOpen(false)}
+        defaultDestination="shopping"
+        initialTab={bulkSuiteTab}
+        initialItemToVariant={bulkSuiteItemToVariant}
+        initialSelectedIds={bulkSuiteSelectedIds}
       />
 
       {/* Display Settings Modal */}

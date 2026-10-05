@@ -1,5 +1,6 @@
 import { VintedWorkerAuth } from '../types';
 import { safeApiFetch } from '../utils/apiHelper';
+import { canonicalizeCategory } from '../constants/categories';
 
 export interface VintedOrder {
   orderId: string;
@@ -427,41 +428,43 @@ export const extractVintedItemsFromUrls = async (
 };
 
 // Heuristic category classifier from garment title
-export const inferCategoryFromTitle = (title: string): string => {
+export const inferCategoryFromTitle = (title: string, availableCategories?: string[]): string => {
   const t = (title || '').toLowerCase();
+  let rawDetected = '';
 
   if (/\b(tie|bowtie|scarf|shawl|belt|hat|beanie|cap|gloves|sunglasses|watch|cufflinks|wallet|umbrella|jewel|necklace|ring|bracelet)\b/.test(t)) {
-    return 'Accessories';
-  }
-  if (/\b(jacket|coat|parka|blazer|trench|bomber|puffer|windbreaker|gilet|overcoat|cape|anorak|shearling|leather jacket)\b/.test(t)) {
-    return 'Outerwear';
-  }
-  if (/\b(knit|knitwear|jumper|sweater|cardigan|pullover|roll neck|turtleneck|crewneck|cashmere|wool jumper)\b/.test(t)) {
-    return 'Knitwear';
-  }
-  if (/\b(dress|gown|maxi dress|midi dress|mini dress|jumpsuit|dungarees|romper|playsuit)\b/.test(t)) {
-    return 'Dresses & Jumpsuits';
-  }
-  if (/\b(trousers|jeans|pants|shorts|skirt|chinos|leggings|culottes|slacks|joggers)\b/.test(t)) {
-    return 'Bottoms';
-  }
-  if (/\b(boot|boots|shoe|shoes|sneaker|sneakers|trainer|trainers|loafer|loafers|heel|heels|sandal|sandals|oxford|derby|brogues|mules|flats)\b/.test(t)) {
-    return 'Shoes';
-  }
-  if (/\b(bag|handbag|tote|backpack|clutch|crossbody|briefcase|satchel|shoulder bag|duffle)\b/.test(t)) {
-    return 'Bags';
-  }
-  if (/\b(suit|tuxedo|dinner jacket|tailcoat|formal)\b/.test(t)) {
-    return 'Formalwear';
-  }
-  if (/\b(activewear|gym|running|sports|legging|bra|tracksuit|yoga)\b/.test(t)) {
-    return 'Activewear';
-  }
-  if (/\b(shirt|t-shirt|tee|polo|blouse|top|tank|camisole|crop top|button down|oxford shirt)\b/.test(t)) {
-    return 'Tops';
+    rawDetected = 'Accessories';
+  } else if (/\b(jacket|coat|parka|blazer|trench|bomber|puffer|windbreaker|gilet|overcoat|cape|anorak|shearling|leather jacket)\b/.test(t)) {
+    rawDetected = 'Outerwear';
+  } else if (/\b(knit|knitwear|jumper|sweater|cardigan|pullover|roll neck|turtleneck|crewneck|cashmere|wool jumper)\b/.test(t)) {
+    rawDetected = 'Knitwear';
+  } else if (/\b(dress|gown|maxi dress|midi dress|mini dress|jumpsuit|dungarees|romper|playsuit)\b/.test(t)) {
+    rawDetected = 'Dresses & Jumpsuits';
+  } else if (/\b(trousers|jeans|pants|shorts|skirt|chinos|leggings|culottes|slacks|joggers)\b/.test(t)) {
+    rawDetected = 'Bottoms';
+  } else if (/\b(shoe tree|shoe trees|shoe polish|shoe cream|shoe brush|leather cleaner|suede protector|shoecare|shoe care)\b/.test(t)) {
+    rawDetected = 'Shoe Care';
+  } else if (/\b(boot|boots|shoe|shoes|sneaker|sneakers|trainer|trainers|loafer|loafers|heel|heels|sandal|sandals|oxford|derby|brogues|mules|flats)\b/.test(t)) {
+    rawDetected = 'Shoes';
+  } else if (/\b(bag|handbag|tote|backpack|clutch|crossbody|briefcase|satchel|shoulder bag|duffle)\b/.test(t)) {
+    rawDetected = 'Bags';
+  } else if (/\b(suit|tuxedo|dinner jacket|tailcoat|formal)\b/.test(t)) {
+    rawDetected = 'Formalwear';
+  } else if (/\b(activewear|gym|running|sports|legging|bra|tracksuit|yoga)\b/.test(t)) {
+    rawDetected = 'Activewear';
+  } else if (/\b(t-shirt|tshirt|tee|tees|graphic tee)\b/.test(t)) {
+    rawDetected = 'T-Shirts';
+  } else if (/\b(shirt|shirts|button down|oxford shirt|blouse)\b/.test(t)) {
+    rawDetected = 'Shirts';
+  } else if (/\b(polo|top|tank|camisole|crop top)\b/.test(t)) {
+    rawDetected = 'Tops';
   }
 
-  return 'Tops';
+  if (availableCategories && availableCategories.length > 0) {
+    return canonicalizeCategory(rawDetected, availableCategories);
+  }
+
+  return rawDetected || 'Outerwear';
 };
 
 // Scrape active listings and items from a Vinted account or member profile URL

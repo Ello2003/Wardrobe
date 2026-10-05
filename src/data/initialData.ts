@@ -10,6 +10,7 @@ import {
   DEFAULT_GARMENT_CATEGORIES,
   DEFAULT_HOMEWARE_CATEGORIES,
   isHomewareCategory,
+  deduplicateCategoriesCaseInsensitive,
 } from '../types';
 import backupPayload from '../../wardrobe-database-backup.json';
 
@@ -520,37 +521,34 @@ export const INITIAL_WARDROBE_ITEMS: WardrobeItem[] = (
     : DEFAULT_WARDROBE_ITEMS
 );
 
-export const INITIAL_GARMENT_CATEGORIES: string[] = Array.from(
-  new Set([
-    ...DEFAULT_GARMENT_CATEGORIES,
-    ...(Array.isArray(backupPayload?.data?.items)
-      ? (backupPayload.data.items as unknown as { category?: string }[])
-          .map((it) => it.category)
-          .filter((c): c is string => !!c && !isHomewareCategory(c))
-      : []),
-    ...(Array.isArray(backupPayload?.data?.categories)
-      ? (backupPayload.data.categories as string[]).filter((c) => !isHomewareCategory(c))
-      : []),
-  ])
-);
+export const INITIAL_GARMENT_CATEGORIES: string[] = deduplicateCategoriesCaseInsensitive([
+  ...DEFAULT_GARMENT_CATEGORIES,
+  ...(Array.isArray(backupPayload?.data?.items)
+    ? (backupPayload.data.items as unknown as { category?: string }[])
+        .map((it) => it.category)
+        .filter((c): c is string => !!c && !isHomewareCategory(c))
+    : []),
+  ...(Array.isArray(backupPayload?.data?.categories)
+    ? (backupPayload.data.categories as string[]).filter((c) => !isHomewareCategory(c))
+    : []),
+]);
 
-export const INITIAL_HOMEWARE_CATEGORIES: string[] = Array.from(
-  new Set([
-    ...DEFAULT_HOMEWARE_CATEGORIES,
-    ...(Array.isArray(backupPayload?.data?.items)
-      ? (backupPayload.data.items as unknown as { category?: string }[])
-          .map((it) => it.category)
-          .filter((c): c is string => !!c && isHomewareCategory(c))
-      : []),
-    ...(Array.isArray(backupPayload?.data?.categories)
-      ? (backupPayload.data.categories as string[]).filter((c) => isHomewareCategory(c))
-      : []),
-  ])
-);
+export const INITIAL_HOMEWARE_CATEGORIES: string[] = deduplicateCategoriesCaseInsensitive([
+  ...DEFAULT_HOMEWARE_CATEGORIES,
+  ...(Array.isArray(backupPayload?.data?.items)
+    ? (backupPayload.data.items as unknown as { category?: string }[])
+        .map((it) => it.category)
+        .filter((c): c is string => !!c && isHomewareCategory(c))
+    : []),
+  ...(Array.isArray(backupPayload?.data?.categories)
+    ? (backupPayload.data.categories as string[]).filter((c) => isHomewareCategory(c))
+    : []),
+]);
 
-export const INITIAL_CATEGORIES: string[] = Array.from(
-  new Set([...INITIAL_GARMENT_CATEGORIES, ...INITIAL_HOMEWARE_CATEGORIES])
-);
+export const INITIAL_CATEGORIES: string[] = deduplicateCategoriesCaseInsensitive([
+  ...INITIAL_GARMENT_CATEGORIES,
+  ...INITIAL_HOMEWARE_CATEGORIES,
+]);
 
 const DEFAULT_SHOPPING_LIST: ShoppingItem[] = [
   {

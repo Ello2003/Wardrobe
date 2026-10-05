@@ -30,6 +30,8 @@ export interface InventoryTableColumnSettings {
   showCondition: boolean;
   showSeason: boolean;
   showColor: boolean;
+  showSize?: boolean;
+  showMaterial?: boolean;
   showLocation: boolean;
   showTags: boolean;
   showVintedDetails: boolean;
@@ -63,6 +65,8 @@ export interface InventoryDisplaySettings {
   showWearCount: boolean;
   showSeason: boolean;
   showCondition: boolean;
+  showSize?: boolean;
+  showMaterial?: boolean;
   showTags: boolean;
   showLocation: boolean;
   showVintedDetails: boolean;
@@ -93,6 +97,8 @@ export const DEFAULT_INVENTORY_TABLE_SETTINGS: InventoryTableDisplaySettings = {
   showCondition: true,
   showSeason: true,
   showColor: true,
+  showSize: true,
+  showMaterial: true,
   showLocation: true,
   showTags: true,
   showVintedDetails: true,
@@ -115,6 +121,8 @@ export const DEFAULT_INVENTORY_DISPLAY_SETTINGS: InventoryDisplaySettings = {
   showWearCount: true,
   showSeason: true,
   showCondition: true,
+  showSize: true,
+  showMaterial: true,
   showTags: true,
   showLocation: true,
   showVintedDetails: true,
@@ -149,7 +157,7 @@ export const InventoryDisplaySettingsModal: React.FC<InventoryDisplaySettingsMod
   onChange,
   onResetColumnWidths,
 }) => {
-  const [activeTab, setActiveTab] = useState<'general' | 'card' | 'table'>('general');
+  const [activeTab, setActiveTab] = useState<'general' | 'card' | 'table' | 'item_settings'>('general');
 
   if (!isOpen) return null;
 
@@ -212,6 +220,8 @@ export const InventoryDisplaySettingsModal: React.FC<InventoryDisplaySettingsMod
         showWearCount: true,
         showSeason: false,
         showCondition: false,
+        showSize: true,
+        showMaterial: false,
         showTags: false,
         showLocation: false,
         showVintedDetails: false,
@@ -233,6 +243,8 @@ export const InventoryDisplaySettingsModal: React.FC<InventoryDisplaySettingsMod
         showWearCount: true,
         showSeason: false,
         showCondition: false,
+        showSize: false,
+        showMaterial: false,
         showTags: false,
         showLocation: false,
         showVintedDetails: false,
@@ -254,6 +266,8 @@ export const InventoryDisplaySettingsModal: React.FC<InventoryDisplaySettingsMod
         showWearCount: true,
         showSeason: false,
         showCondition: true,
+        showSize: true,
+        showMaterial: true,
         showTags: false,
         showLocation: true,
         showVintedDetails: true,
@@ -314,6 +328,8 @@ export const InventoryDisplaySettingsModal: React.FC<InventoryDisplaySettingsMod
     { key: 'showPrice', label: 'Purchase Price (£)' },
     { key: 'showRrp', label: 'RRP / Retail Benchmark (£)' },
     { key: 'showWearCount', label: 'Wear Count & CPW' },
+    { key: 'showSize', label: 'Size / Sizing' },
+    { key: 'showMaterial', label: 'Material / Fabric Composition' },
     { key: 'showSeason', label: 'Season Badges' },
     { key: 'showCondition', label: 'Condition Grade' },
     { key: 'showTags', label: 'Custom Tags' },
@@ -338,6 +354,8 @@ export const InventoryDisplaySettingsModal: React.FC<InventoryDisplaySettingsMod
     { key: 'showCondition', label: 'Condition Grade', description: 'Condition dropdown selector' },
     { key: 'showSeason', label: 'Target Season', description: 'Spring, Summer, Autumn, Winter tags' },
     { key: 'showColor', label: 'Garment Color', description: 'Color name & preview dot' },
+    { key: 'showSize', label: 'Garment Size / Sizing', description: 'Size and fit dimensions' },
+    { key: 'showMaterial', label: 'Material / Composition', description: 'Fabric composition (e.g. 100% Wool, Cotton, Silk)' },
     { key: 'showLocation', label: 'Storage Location', description: 'Wardrobe rack or bin location' },
     { key: 'showTags', label: 'Custom Tags', description: 'Hashtag badges with add/delete' },
     { key: 'showVintedDetails', label: 'Vinted Order & Provenance', description: 'Order ID, seller, and listing link' },
@@ -412,6 +430,19 @@ export const InventoryDisplaySettingsModal: React.FC<InventoryDisplaySettingsMod
           >
             <TableIcon className="w-3.5 h-3.5" />
             <span>Database / Table View</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('item_settings')}
+            className={`flex-1 py-1.5 px-3 text-xs font-mono font-medium rounded transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+              activeTab === 'item_settings'
+                ? 'bg-white text-[#8C7355] font-bold shadow-xs border border-[#8C7355]/40'
+                : 'text-[#767670] hover:text-[#1A1A1A]'
+            }`}
+          >
+            <Shirt className="w-3.5 h-3.5" />
+            <span>Item Settings &amp; AI</span>
           </button>
         </div>
 
@@ -754,6 +785,236 @@ export const InventoryDisplaySettingsModal: React.FC<InventoryDisplaySettingsMod
                   );
                 })}
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* Tab 4: Item Settings & AI Calculations */}
+        {activeTab === 'item_settings' && (
+          <div className="space-y-4 max-h-[50vh] overflow-y-auto pr-1 animate-fadeIn">
+            {/* Intro Banner */}
+            <div className="p-3 bg-[#F8F7F4] border border-[#E5E5E1] rounded-md space-y-1">
+              <div className="flex items-center gap-1.5 text-xs font-mono font-bold text-[#8C7355] uppercase tracking-wider">
+                <Shirt className="w-3.5 h-3.5" />
+                <span>Item Attribute Settings &amp; Sartorial AI Intelligence</span>
+              </div>
+              <p className="text-xs text-[#5A5A55]">
+                Configure how <strong>Material</strong>, <strong>Size</strong>, and garment attributes are displayed across cards and database tables. When AI calculates outfit combinations, recommendations, or resale valuations, it now utilizes all entered fields and Picture AI.
+              </p>
+            </div>
+
+            {/* Material in Settings */}
+            <div className="border border-[#E5E5E1] p-3.5 rounded-md bg-white space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-xs font-mono font-bold uppercase tracking-wider text-[#1A1A1A] flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-[#8C7355]" />
+                    Material / Fabric Composition Settings
+                  </h3>
+                  <p className="text-[11px] text-[#767670] mt-0.5">
+                    Track luxury and heritage textiles (e.g. 100% Shetland Wool, Heavy Cotton Twill, Japanese Selvedge Denim, Mulberry Silk, Linen).
+                  </p>
+                </div>
+              </div>
+
+              {/* Toggles for Material Display */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => toggleKey('showMaterial')}
+                  className={`flex items-center justify-between p-2.5 text-xs border rounded-md transition-all text-left cursor-pointer ${
+                    settings.showMaterial !== false
+                      ? 'bg-[#FAF9F5] border-[#8C7355] text-[#1A1A1A] font-semibold'
+                      : 'bg-white border-[#E5E5E1] text-[#767670]'
+                  }`}
+                >
+                  <div>
+                    <div className="font-mono text-xs">Show Material on Grid Cards</div>
+                    <div className="text-[10px] text-[#767670]">Display fabric pill badge on garment cards</div>
+                  </div>
+                  {settings.showMaterial !== false ? (
+                    <Eye className="w-3.5 h-3.5 text-[#8C7355] shrink-0 ml-2" />
+                  ) : (
+                    <EyeOff className="w-3.5 h-3.5 text-[#A5A5A0] shrink-0 ml-2" />
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => toggleTableSetting('showMaterial')}
+                  className={`flex items-center justify-between p-2.5 text-xs border rounded-md transition-all text-left cursor-pointer ${
+                    currentTableSettings.showMaterial !== false
+                      ? 'bg-[#FAF9F5] border-[#8C7355] text-[#1A1A1A] font-semibold'
+                      : 'bg-white border-[#E5E5E1] text-[#767670]'
+                  }`}
+                >
+                  <div>
+                    <div className="font-mono text-xs">Show Material in Database Table</div>
+                    <div className="text-[10px] text-[#767670]">Dedicated column with inline editing</div>
+                  </div>
+                  {currentTableSettings.showMaterial !== false ? (
+                    <Eye className="w-3.5 h-3.5 text-[#8C7355] shrink-0 ml-2" />
+                  ) : (
+                    <EyeOff className="w-3.5 h-3.5 text-[#A5A5A0] shrink-0 ml-2" />
+                  )}
+                </button>
+              </div>
+
+              {/* Common Materials Reference */}
+              <div className="pt-2 border-t border-[#F2F1ED]">
+                <span className="text-[10px] font-mono text-[#767670] uppercase tracking-wider block mb-1.5 font-semibold">
+                  Standard Textile Presets Recognized by AI:
+                </span>
+                <div className="flex flex-wrap gap-1">
+                  {[
+                    '100% Wool',
+                    'Merino Wool',
+                    'Cashmere',
+                    'Heavy Cotton Twill',
+                    'Selvedge Denim',
+                    'Linen',
+                    'Mulberry Silk',
+                    'Waxed Cotton',
+                    'Suede',
+                    'Calfskin Leather',
+                    'Gore-Tex',
+                    'Corduroy',
+                    'Mohair',
+                  ].map((mat) => (
+                    <span
+                      key={mat}
+                      className="text-[10px] font-mono px-2 py-0.5 bg-[#F8F7F4] border border-[#E5E5E1] text-[#555] rounded-xs"
+                    >
+                      {mat}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Size in Settings */}
+            <div className="border border-[#E5E5E1] p-3.5 rounded-md bg-white space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-xs font-mono font-bold uppercase tracking-wider text-[#1A1A1A] flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-[#1A1A1A]" />
+                    Size &amp; Fit Settings
+                  </h3>
+                  <p className="text-[11px] text-[#767670] mt-0.5">
+                    Standard garment sizing, chest measurements, waist dimensions, and shoe sizing.
+                  </p>
+                </div>
+              </div>
+
+              {/* Toggles for Size Display */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => toggleKey('showSize')}
+                  className={`flex items-center justify-between p-2.5 text-xs border rounded-md transition-all text-left cursor-pointer ${
+                    settings.showSize !== false
+                      ? 'bg-[#FAF9F5] border-[#8C7355] text-[#1A1A1A] font-semibold'
+                      : 'bg-white border-[#E5E5E1] text-[#767670]'
+                  }`}
+                >
+                  <div>
+                    <div className="font-mono text-xs">Show Size on Grid Cards</div>
+                    <div className="text-[10px] text-[#767670]">Display size chip on garment cards</div>
+                  </div>
+                  {settings.showSize !== false ? (
+                    <Eye className="w-3.5 h-3.5 text-[#8C7355] shrink-0 ml-2" />
+                  ) : (
+                    <EyeOff className="w-3.5 h-3.5 text-[#A5A5A0] shrink-0 ml-2" />
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => toggleTableSetting('showSize')}
+                  className={`flex items-center justify-between p-2.5 text-xs border rounded-md transition-all text-left cursor-pointer ${
+                    currentTableSettings.showSize !== false
+                      ? 'bg-[#FAF9F5] border-[#8C7355] text-[#1A1A1A] font-semibold'
+                      : 'bg-white border-[#E5E5E1] text-[#767670]'
+                  }`}
+                >
+                  <div>
+                    <div className="font-mono text-xs">Show Size in Database Table</div>
+                    <div className="text-[10px] text-[#767670]">Dedicated column with inline editing</div>
+                  </div>
+                  {currentTableSettings.showSize !== false ? (
+                    <Eye className="w-3.5 h-3.5 text-[#8C7355] shrink-0 ml-2" />
+                  ) : (
+                    <EyeOff className="w-3.5 h-3.5 text-[#A5A5A0] shrink-0 ml-2" />
+                  )}
+                </button>
+              </div>
+
+              {/* Common Size Scales */}
+              <div className="pt-2 border-t border-[#F2F1ED]">
+                <span className="text-[10px] font-mono text-[#767670] uppercase tracking-wider block mb-1.5 font-semibold">
+                  Standard Sizing Systems Recognized by AI:
+                </span>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 text-[10px] font-mono">
+                  <div className="bg-[#F8F7F4] p-1.5 border border-[#E5E5E1]">
+                    <strong className="text-[#1A1A1A] block">Letter Sizing</strong>
+                    <span className="text-[#767670]">XS · S · M · L · XL · XXL</span>
+                  </div>
+                  <div className="bg-[#F8F7F4] p-1.5 border border-[#E5E5E1]">
+                    <strong className="text-[#1A1A1A] block">UK Tailoring</strong>
+                    <span className="text-[#767670]">36R · 38R · 40R · 42R · 44R</span>
+                  </div>
+                  <div className="bg-[#F8F7F4] p-1.5 border border-[#E5E5E1]">
+                    <strong className="text-[#1A1A1A] block">Waist / Inseam</strong>
+                    <span className="text-[#767670]">30/30 · 32/32 · 34/32</span>
+                  </div>
+                  <div className="bg-[#F8F7F4] p-1.5 border border-[#E5E5E1]">
+                    <strong className="text-[#1A1A1A] block">Footwear</strong>
+                    <span className="text-[#767670]">UK 8 · UK 9 · UK 10 · EU 43</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* AI Calculation & Picture AI Engine */}
+            <div className="border border-[#8C7355]/40 p-3.5 rounded-md bg-[#FAF9F5] space-y-2">
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-[#8C7355]" />
+                <h3 className="text-xs font-mono font-bold uppercase tracking-wider text-[#1A1A1A]">
+                  AI Calculations &amp; Picture Vision Integration
+                </h3>
+              </div>
+              <p className="text-xs text-[#4A4A45] leading-relaxed">
+                When generating smart outfit formulas, weather-appropriate pairings, and resale descriptions, the AI calculates synergy using <strong>all available entered fields</strong>:
+              </p>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 text-[11px] font-mono pt-1">
+                <div className="bg-white p-2 border border-[#E5E5E1] flex items-center gap-1.5">
+                  <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                  <span>Material &amp; Weave</span>
+                </div>
+                <div className="bg-white p-2 border border-[#E5E5E1] flex items-center gap-1.5">
+                  <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                  <span>Size &amp; Fit Layering</span>
+                </div>
+                <div className="bg-white p-2 border border-[#E5E5E1] flex items-center gap-1.5">
+                  <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                  <span>Condition Grade</span>
+                </div>
+                <div className="bg-white p-2 border border-[#E5E5E1] flex items-center gap-1.5">
+                  <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                  <span>Colorway &amp; Hex Swatch</span>
+                </div>
+                <div className="bg-white p-2 border border-[#E5E5E1] flex items-center gap-1.5">
+                  <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                  <span>Wear Count &amp; CPW</span>
+                </div>
+                <div className="bg-white p-2 border border-[#E5E5E1] flex items-center gap-1.5">
+                  <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                  <span>Picture AI Vision</span>
+                </div>
+              </div>
+              <p className="text-[11px] text-[#767670] pt-1">
+                Picture AI automatically inspects fabric drape, collar styling, texture grain, and realistic hue directly from garment photographs.
+              </p>
             </div>
           </div>
         )}

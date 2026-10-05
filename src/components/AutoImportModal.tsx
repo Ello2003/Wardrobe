@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { useWardrobe } from '../context/WardrobeContext';
 import { Category, Season, Condition, SellingStatus, ShoppingStatus, normalizeCategoryName } from '../types';
+import { canonicalizeCategory } from '../constants/categories';
 import { GarmentImage } from './GarmentImage';
 import {
   fetchAllVintedOrders,
@@ -21,6 +22,7 @@ import {
 } from '../utils/tagUtils';
 import { extractAllGarmentAttributes } from '../utils/garmentAttributeExtractor';
 import { safeApiFetch } from '../utils/apiHelper';
+import { CategorySelect } from './common/CategorySelect';
 import {
   Link2,
   Sparkles,
@@ -245,9 +247,11 @@ export const AutoImportModal: React.FC<AutoImportModalProps> = ({
       setActiveTab(initialTab || (initialUrl ? 'url' : 'url'));
 
       if (initialUrl && initialUrl.trim()) {
-        setUrlInput(initialUrl.trim());
+        const clean = initialUrl.trim();
+        const withProto = /^https?:\/\//i.test(clean) ? clean : `https://${clean}`;
+        setUrlInput(withProto);
         setActiveTab('url');
-        handleExtractFromUrl(initialUrl.trim());
+        handleExtractFromUrl(withProto);
       }
     } else {
       setExtractedItems([]);
@@ -523,14 +527,12 @@ export const AutoImportModal: React.FC<AutoImportModalProps> = ({
     retailer?: string
   ) => {
     const list: ExtractedGarmentItem[] = (rawItems || []).map((raw, idx) => {
-      const validCategory = categories.includes(raw.category as Category)
-        ? (raw.category as Category)
-        : categories[0] || 'Outerwear';
+      const validCategory = (canonicalizeCategory(raw.category, categories) || '') as Category;
 
       const isSale = isSaleItem(raw);
       const tags = Array.isArray(raw.tags) && raw.tags.length > 0
         ? [...raw.tags]
-        : ['imported', validCategory.toLowerCase()];
+        : ['imported', validCategory ? validCategory.toLowerCase() : ''].filter(Boolean);
       
       if (isSale && !tags.some((t: string) => t.toLowerCase() === 'sale')) {
         tags.push('sale');
@@ -582,7 +584,7 @@ export const AutoImportModal: React.FC<AutoImportModalProps> = ({
 
       // Original listing color vs default
       const originalListingColor = raw.color || raw.colour || raw.color_title || '';
-      const resolvedColor = attrs.color || originalListingColor || 'Neutral';
+      const resolvedColor = attrs.color || originalListingColor || '';
       const resolvedMaterial = attrs.material || raw.material || 'Natural Fiber / Blend';
       const resolvedSize = attrs.size || raw.size || '';
       const resolvedRetailer = raw.retailerName || (raw.targetStoreUrl?.includes('vinted') || activeTab === 'vinted' ? 'Vinted' : retailer) || 'Vinted';
@@ -640,6 +642,39 @@ export const AutoImportModal: React.FC<AutoImportModalProps> = ({
     setExtractedItems(list);
     setImportSearchQuery('');
     setImportCurrentPage(1);
+
+    // Asynchronously scout and enrich images for items missing a photo
+    list.forEach((item, index) => {
+      if (!item.imageUrl && (item.brand || item.name)) {
+        fetch('/api/scraper/lookup-product-images', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            brand: item.brand,
+            name: item.name,
+            color: item.color,
+            category: item.category,
+          }),
+        })
+          .then((r) => r.json())
+          .then((res) => {
+            if (res.success && res.images?.length > 0) {
+              setExtractedItems((prev) =>
+                prev.map((it, idx) =>
+                  idx === index && !it.imageUrl
+                    ? {
+                        ...it,
+                        imageUrl: res.images[0].imageUrl,
+                        allCandidateImages: res.images.map((im: any) => im.imageUrl),
+                      }
+                    : it
+                )
+              );
+            }
+          })
+          .catch(() => {});
+      }
+    });
     setBasketSummary({
       isBasket: isBasket || list.length > 1,
       basketTotalGbp: Number(totalGbp) || list.reduce((sum, it) => sum + it.purchasePrice, 0),
@@ -649,10 +684,13 @@ export const AutoImportModal: React.FC<AutoImportModalProps> = ({
 
   // Extraction Method 1: URL / Web Link (Single, Basket, or Multiple links)
   const handleExtractFromUrl = async (targetUrl?: string) => {
-    const urlToUse = (targetUrl || urlInput).trim();
+    let urlToUse = (targetUrl || urlInput).trim();
     if (!urlToUse) {
       setError('Please paste a valid web product or shopping basket URL.');
       return;
+    }
+    if (!/^https?:\/\//i.test(urlToUse)) {
+      urlToUse = `https://${urlToUse}`;
     }
 
     setIsLoading(true);
@@ -674,7 +712,7 @@ export const AutoImportModal: React.FC<AutoImportModalProps> = ({
               typeof vintedItem.price === 'number'
                 ? vintedItem.price
                 : parseFloat(String(vintedItem.price || '0').replace(/[^0-9.]/g, '')) || 0;
-            const cat = normalizeCategoryName(inferCategoryFromTitle(vintedItem.title), categories);
+            const cat = canonicalizeCategory(inferCategoryFromTitle(vintedItem.title, categories), categories);
             const isSale = globalDestination === 'selling';
 
             const attrs = extractAllGarmentAttributes({
@@ -699,7 +737,7 @@ export const AutoImportModal: React.FC<AutoImportModalProps> = ({
                   category: cat,
                   purchasePrice: p,
                   size: attrs.size || vintedItem.size || '',
-                  color: attrs.color || vintedItem.colour || 'Neutral',
+                  color: attrs.color || vintedItem.colour || '',
                   material: attrs.material || vintedItem.material || 'Natural Fiber / Blend',
                   condition: vintedItem.condition || 'Good',
                   season: ['All-Season'],
@@ -711,7 +749,7 @@ export const AutoImportModal: React.FC<AutoImportModalProps> = ({
                     .filter(Boolean)
                     .join(' · '),
                   destination: globalDestination,
-                  tags: ['vinted', 'active-listing', isSale ? 'sale' : 'imported'],
+                  tags: Array.isArray(vintedItem.tags) ? vintedItem.tags : [],
                   transactionType: isSale ? 'Sale' : undefined,
                 },
               ],
@@ -728,7 +766,10 @@ export const AutoImportModal: React.FC<AutoImportModalProps> = ({
 
       const res = await safeApiFetch('/api/gemini/extract-from-url', {
         method: 'POST',
-        body: JSON.stringify({ url: urlToUse }),
+        body: JSON.stringify({
+          url: urlToUse,
+          availableCategories: categories,
+        }),
       });
 
       if (!res.success || !res.data) {
@@ -791,15 +832,15 @@ export const AutoImportModal: React.FC<AutoImportModalProps> = ({
       normalizeExtractedItems(
         [
           {
-            name: 'Wardrobe Piece',
-            brand: 'Designer Brand',
-            category: categories[0] || 'Tops',
-            purchasePrice: 100,
-            color: 'Neutral',
-            season: ['Autumn', 'Winter'],
+            name: '',
+            brand: '',
+            category: '',
+            purchasePrice: 0,
+            color: '',
+            season: [],
             imageUrl: base64Img,
             allCandidateImages: [base64Img],
-            tags: ['photo-upload'],
+            tags: [],
           },
         ],
         false,
@@ -1087,7 +1128,7 @@ export const AutoImportModal: React.FC<AutoImportModalProps> = ({
           brand: garmentBrand,
           category: cat,
           size: attrs.size || l.size || '',
-          color: attrs.color || l.color || 'Neutral',
+          color: attrs.color || l.color || '',
           material: attrs.material || l.material || 'Natural Fiber / Blend',
           purchasePrice: p,
           season: ['All-Season'],
@@ -1235,7 +1276,7 @@ export const AutoImportModal: React.FC<AutoImportModalProps> = ({
           category: cat,
           purchasePrice: p,
           size: attrs.size || o.size || '',
-          color: attrs.color || o.color || 'Neutral',
+          color: attrs.color || o.color || '',
           material: attrs.material || o.material || 'Natural Fiber / Blend',
           season: ['All-Season'],
           condition: 'Good',
@@ -1343,7 +1384,7 @@ export const AutoImportModal: React.FC<AutoImportModalProps> = ({
           category: cat,
           purchasePrice: p,
           size: attrs.size || it.size || '',
-          color: attrs.color || it.colour || 'Neutral',
+          color: attrs.color || it.colour || '',
           material: attrs.material || it.material || 'Natural Fiber / Blend',
           condition: it.condition || 'Good',
           season: ['All-Season'],
@@ -1353,7 +1394,7 @@ export const AutoImportModal: React.FC<AutoImportModalProps> = ({
           seller: it.seller,
           notes: [it.description, it.seller ? `Seller: @${it.seller}` : ''].filter(Boolean).join(' · '),
           destination: globalDestination,
-          tags: ['vinted', 'active-listing', isSale ? 'sale' : 'imported'],
+          tags: Array.isArray(it.tags) ? it.tags : [],
           transactionType: isSale ? 'Sale' : undefined,
         };
       });
@@ -1617,18 +1658,18 @@ export const AutoImportModal: React.FC<AutoImportModalProps> = ({
       if (targetDest === 'wardrobe') {
         wardrobeItemsToAdd.push({
           name: item.name || 'Imported Piece',
-          brand: item.brand || 'Designer Brand',
-          category: item.category || categories[0] || 'Outerwear',
-          subcategory: item.tags?.[0] || 'Capsule Piece',
-          color: item.color || 'Neutral',
+          brand: item.brand || '',
+          category: item.category || ('' as Category),
+          subcategory: item.tags?.[0] || undefined,
+          color: item.color || '',
           material: item.material || undefined,
           size: item.size || undefined,
-          season: (item.season as Season[]) || ['Autumn', 'Winter'],
+          season: (item.season as Season[]) || [],
           purchaseDate: item.orderDate || new Date().toISOString().split('T')[0],
           purchasePrice: Number(item.purchasePrice) || 0,
           currentValuation: Number(item.purchasePrice) || 0,
           rrp: Number(item.rrp) || Number(item.purchasePrice) || undefined,
-          condition: (item.condition as Condition) || 'Vintage / Well-Loved',
+          condition: (item.condition as Condition) || undefined,
           tags: determineLifecycleTags({
             destination: 'wardrobe',
             orderStatus: item.orderStatus,
@@ -1671,11 +1712,11 @@ export const AutoImportModal: React.FC<AutoImportModalProps> = ({
 
         saleItemsToAdd.push({
           name: item.name || 'Resale Garment',
-          brand: item.brand || 'Designer Brand',
-          category: item.category || categories[0] || 'Outerwear',
+          brand: item.brand || '',
+          category: (item.category || '') as Category,
           size: item.size || undefined,
-          color: item.color || 'Neutral',
-          condition: (item.condition as Condition) || 'Excellent',
+          color: item.color || '',
+          condition: (item.condition as Condition) || undefined,
           originalPricePaid: Number(item.purchasePrice) || 0,
           listingPrice: Number(item.purchasePrice) || 0,
           soldPrice: effectiveStatus === 'Sold' ? (Number(item.purchasePrice) || undefined) : undefined,
@@ -1735,14 +1776,14 @@ export const AutoImportModal: React.FC<AutoImportModalProps> = ({
 
         shoppingItemsToAdd.push({
           name: item.name || 'Wishlist Item',
-          brand: item.brand || 'Brand',
-          category: item.category || categories[0] || 'Outerwear',
+          brand: item.brand || '',
+          category: (item.category || '') as Category,
           estimatedPrice: Number(item.purchasePrice) || 0,
           actualPricePaid: isPurchased ? (Number(item.orderValue) || Number(item.purchasePrice) || 0) : undefined,
           rrp: Number(item.rrp) || Number(item.purchasePrice) || undefined,
           priority: 'High',
           status: itemStatus,
-          season: (item.season?.[0] as Season) || 'Autumn',
+          season: (item.season?.[0] as Season) || undefined,
           matchingWardrobeItemIds: [],
           targetStoreUrl: item.targetStoreUrl || (activeTab === 'url' ? urlInput : 'https://www.vinted.co.uk'),
           imageUrl: item.imageUrl || '',
@@ -3996,6 +4037,36 @@ export const AutoImportModal: React.FC<AutoImportModalProps> = ({
                             </button>
                             <button
                               type="button"
+                              onClick={async () => {
+                                try {
+                                  const imgRes = await fetch('/api/scraper/lookup-product-images', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({
+                                      brand: item.brand,
+                                      name: item.name,
+                                      color: item.color,
+                                      category: item.category,
+                                    }),
+                                  });
+                                  const imgData = await imgRes.json();
+                                  if (imgData.success && imgData.images?.length > 0) {
+                                    handleUpdateItemField(idx, 'imageUrl', imgData.images[0].imageUrl);
+                                    handleUpdateItemField(
+                                      idx,
+                                      'allCandidateImages',
+                                      imgData.images.map((im: any) => im.imageUrl)
+                                    );
+                                  }
+                                } catch {}
+                              }}
+                              className="px-1.5 py-1 bg-white hover:bg-[#E5E3DC] border border-[#D5D5D0] text-[10px] text-[#4A4A45]"
+                              title="Auto-search product photos"
+                            >
+                              <Search className="w-3 h-3 text-[#8C7355]" />
+                            </button>
+                            <button
+                              type="button"
                               onClick={() => handleReanalyzeCard(idx)}
                               className="px-1.5 py-1 bg-amber-50 hover:bg-amber-100 border border-amber-200 text-[10px] text-[#8C7355]"
                               title="Re-extract fields from this image using Vision AI"
@@ -4085,17 +4156,12 @@ export const AutoImportModal: React.FC<AutoImportModalProps> = ({
                             <label className="text-[10px] font-mono text-[#767670] uppercase font-semibold">
                               Category
                             </label>
-                            <select
-                              value={item.category || categories[0] || 'Outerwear'}
-                              onChange={(e) => handleUpdateItemField(idx, 'category', e.target.value as Category)}
-                              className="w-full px-2 py-1 border border-[#D5D5D0] bg-white text-xs text-[#1A1A1A] focus:outline-none focus:border-[#8C7355]"
-                            >
-                              {categories.map((cat) => (
-                                <option key={cat} value={cat}>
-                                  {cat}
-                                </option>
-                              ))}
-                            </select>
+                            <CategorySelect
+                              value={item.category || ''}
+                              onChange={(val) => handleUpdateItemField(idx, 'category', val as Category)}
+                              categories={categories}
+                              className="px-2 py-1 text-xs"
+                            />
                           </div>
 
                           {/* Size */}

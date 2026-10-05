@@ -412,7 +412,7 @@ export function extractMaterialFromTitleAndDesc(
     }
   }
 
-  return cleanExisting || 'Cotton / Natural Fiber';
+  return cleanExisting || '';
 }
 
 /**
@@ -526,7 +526,7 @@ export function extractAllGarmentAttributes(input: {
 
   return {
     brand,
-    color: color || rawColor || 'Neutral',
+    color: color || rawColor || '',
     material: material || rawMaterial || 'Natural Fiber / Blend',
     size: size || rawSize || '',
     seller,

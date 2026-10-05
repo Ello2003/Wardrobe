@@ -22,6 +22,8 @@ import {
   Info,
   ShieldCheck,
   ExternalLink,
+  Search,
+  FileText,
 } from 'lucide-react';
 import {
   WardrobeItem,
@@ -38,7 +40,11 @@ import { useWardrobe } from '../context/WardrobeContext';
 import { GarmentImage } from './GarmentImage';
 import { isGarmentDuplicate } from './duplicateMerge/duplicateUtils';
 import { safeApiFetch } from '../utils/apiHelper';
+import { extractGarmentFromUrlFree, extractGarmentFromTextFree } from '../utils/freeAutofillFallback';
 import { calculateRrpSavings, formatGbp } from '../utils/formatters';
+import { ProductImagePickerModal } from './ProductImagePickerModal';
+import { PasteSpecsAutofillModal } from './PasteSpecsAutofillModal';
+import { CategorySelect } from './common/CategorySelect';
 
 interface ItemFormModalProps {
   isOpen: boolean;
@@ -131,7 +137,15 @@ export const ItemFormModal: React.FC<ItemFormModalProps> = ({
   onClose,
   initialItem,
 }) => {
-  const { items, addItem, updateItem, categories = [], addCategory } = useWardrobe();
+  const {
+    items,
+    addItem,
+    updateItem,
+    categories = [],
+    garmentCategories = [],
+    homewareCategories = [],
+    addCategory,
+  } = useWardrobe();
   const safeCategories = Array.isArray(categories) && categories.length > 0 ? categories : DEFAULT_CATEGORIES;
 
   // Primary Single Source of Truth Tab State
@@ -140,23 +154,131 @@ export const ItemFormModal: React.FC<ItemFormModalProps> = ({
   // Shared Core Specs
   const [name, setName] = useState('');
   const [brand, setBrand] = useState('');
-  const [category, setCategory] = useState<string>(safeCategories[0] || 'Tops');
+  const [category, setCategory] = useState<string>(initialItem?.category || '');
   const [isAddingCategory, setIsAddingCategory] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
-  const [color, setColor] = useState('');
+  const [color, setColor] = useState(initialItem?.color || '');
   const [purchasePrice, setPurchasePrice] = useState<string>('');
   const [rrp, setRrp] = useState<string>('');
   const [purchaseDate, setPurchaseDate] = useState<string>('');
-  const [condition, setCondition] = useState<Condition>('Excellent');
+  const [condition, setCondition] = useState<Condition | ''>(initialItem?.condition || '');
   const [notes, setNotes] = useState('');
   const [tagsInput, setTagsInput] = useState('');
   const [imageUrl, setImageUrl] = useState('');
   const [isPhotoDragging, setIsPhotoDragging] = useState(false);
+  const [aiSuggestionsBanner, setAiSuggestionsBanner] = useState<string | null>(null);
+
+  const handleAiSuggestFields = async () => {
+    setIsExtracting(true);
+    setExtractError(null);
+    setExtractSuccess(false);
+    setAiSuggestionsBanner(null);
+
+    const currentItem = {
+      id: initialItem?.id || 'temp-item',
+      name: name.trim(),
+      brand: brand.trim(),
+      category: category || (activeTab === 'clothing' ? 'Tops' : 'Homeware & Tech'),
+      color: color.trim(),
+      material: activeTab === 'clothing' ? clothingMaterial.trim() : homewareMaterial.trim(),
+      size: size.trim(),
+      condition: condition.trim(),
+      purchasePrice: purchasePrice ? parseFloat(purchasePrice) : undefined,
+      rrp: rrp ? parseFloat(rrp) : undefined,
+      season: seasons,
+      notes: notes.trim(),
+      careNotes: careNotes.trim(),
+      storageLocation: (activeTab === 'clothing' ? clothingStorageLocation : roomLocation).trim(),
+      tags: tagsInput.split(',').map((t) => t.trim().toLowerCase().replace(/^#/, '')).filter(Boolean),
+    };
+
+    try {
+      const res = await safeApiFetch('/api/gemini/scan-garment-photo', {
+        method: 'POST',
+        body: JSON.stringify({
+          imageBase64: imageUrl && imageUrl.startsWith('data:') ? imageUrl : undefined,
+          imageUrl: imageUrl && !imageUrl.startsWith('data:') ? imageUrl : undefined,
+          currentItem,
+        }),
+      });
+
+      if (res.success && res.data?.audit) {
+        const audit = res.data.audit;
+        const filledAttrs: string[] = [];
+
+        if (audit.brand && (!brand || brand === 'Unbranded')) {
+          setBrand(audit.brand);
+          filledAttrs.push(`Brand: ${audit.brand}`);
+        }
+        if (audit.name && (!name || name === 'New Garment')) {
+          setName(audit.name);
+          filledAttrs.push(`Name: ${audit.name}`);
+        }
+        if (audit.category && categories.includes(audit.category)) {
+          setCategory(audit.category);
+          filledAttrs.push(`Category: ${audit.category}`);
+        }
+        if (audit.color && !color) {
+          setColor(audit.color);
+          if (!originalListingColor) setOriginalListingColor(audit.color);
+          filledAttrs.push(`Color: ${audit.color}`);
+        }
+        if (audit.material) {
+          setClothingMaterial(audit.material);
+          setHomewareMaterial(audit.material);
+          filledAttrs.push(`Material: ${audit.material}`);
+        }
+        if (audit.size) {
+          setSize(audit.size);
+          filledAttrs.push(`Size: ${audit.size}`);
+        }
+        if (audit.careNotes && !careNotes) {
+          setCareNotes(audit.careNotes);
+          filledAttrs.push('Care Instructions');
+        }
+        if (audit.rrp && !rrp) {
+          setRrp(audit.rrp.toString());
+          filledAttrs.push(`RRP: £${audit.rrp}`);
+        }
+        if (audit.season && Array.isArray(audit.season) && seasons.length === 0) {
+          setSeasons(audit.season);
+          filledAttrs.push(`Season: ${audit.season.join(', ')}`);
+        }
+        if (audit.tags && Array.isArray(audit.tags)) {
+          setTagsInput((prev) => {
+            const existing = prev ? prev.split(',').map((t) => t.trim()).filter(Boolean) : [];
+            const incoming = audit.tags.map((t: string) => t.trim()).filter(Boolean);
+            return Array.from(new Set([...existing, ...incoming])).join(', ');
+          });
+          filledAttrs.push('Tags');
+        }
+
+        setExtractSuccess(true);
+        setScraperEngineUsed(res.data.engine || 'picture-ai-multimodal');
+        setAiSuggestionsBanner(
+          filledAttrs.length > 0
+            ? `AI analyzed entered fields & picture: suggested ${filledAttrs.join(', ')}!`
+            : 'AI analyzed your garment: current specifications verified with high confidence!'
+        );
+      } else {
+        throw new Error(res.error || 'Could not compute AI suggestions.');
+      }
+    } catch (err: any) {
+      setExtractError(err?.message || 'AI suggestion failed. Please ensure photo or details are entered.');
+    } finally {
+      setIsExtracting(false);
+    }
+  };
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [autoConsolidate, setAutoConsolidate] = useState(false);
 
   // Clothing & Wearables Specific Criteria
-  const [seasons, setSeasons] = useState<Season[]>(['Autumn', 'Winter']);
+  const [seasons, setSeasons] = useState<Season[]>(
+    Array.isArray(initialItem?.season)
+      ? initialItem.season
+      : initialItem?.season
+      ? [initialItem.season as any]
+      : []
+  );
   const [size, setSize] = useState('');
   const [clothingMaterial, setClothingMaterial] = useState('');
   const [clothingStorageLocation, setClothingStorageLocation] = useState('');
@@ -196,6 +318,9 @@ export const ItemFormModal: React.FC<ItemFormModalProps> = ({
   const [extractSuccess, setExtractSuccess] = useState(false);
   const [scraperEngineUsed, setScraperEngineUsed] = useState<string | null>(null);
   const [originalListingColor, setOriginalListingColor] = useState<string>('');
+  const [candidateImagesList, setCandidateImagesList] = useState<string[]>([]);
+  const [isImagePickerOpen, setIsImagePickerOpen] = useState(false);
+  const [isPasteSpecsOpen, setIsPasteSpecsOpen] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -218,21 +343,40 @@ export const ItemFormModal: React.FC<ItemFormModalProps> = ({
   // Synchronize initial state when opening modal
   useEffect(() => {
     if (initialItem) {
-      // Determine tab based on itemType, category, or hardware attributes
-      const isHomewareType =
-        initialItem.itemType === 'homeware_lifestyle' ||
-        isHomewareCategory(initialItem.category) ||
-        !!initialItem.modelNumber ||
-        !!initialItem.dimensions ||
-        !!initialItem.powerSpecs ||
-        !!initialItem.connectivity ||
-        !!initialItem.roomLocation;
+      // Determine tab based on category placement, taxonomy, and item attributes
+      const catLower = (initialItem.category || '').trim().toLowerCase();
+      const isShoeCare =
+        catLower === 'shoe care' ||
+        catLower === 'shoecare' ||
+        catLower === 'shoe care & maintenance' ||
+        catLower.includes('shoe care') ||
+        catLower.includes('shoe tree');
+      const isGarmentCat = garmentCategories.some((c) => c.toLowerCase() === catLower);
+      const isHomewareCat = homewareCategories.some((c) => c.toLowerCase() === catLower);
+
+      let isHomewareType = false;
+      if (isShoeCare && !isHomewareCat) {
+        isHomewareType = false;
+      } else if (isGarmentCat) {
+        isHomewareType = false;
+      } else if (isHomewareCat) {
+        isHomewareType = true;
+      } else if (initialItem.itemType === 'clothing') {
+        isHomewareType = false;
+      } else if (initialItem.itemType === 'homeware_lifestyle') {
+        isHomewareType = true;
+      } else {
+        isHomewareType =
+          isHomewareCategory(initialItem.category, garmentCategories, homewareCategories) ||
+          (Boolean(initialItem.modelNumber || initialItem.powerSpecs || initialItem.connectivity) &&
+            !isGarmentCat);
+      }
 
       setActiveTab(isHomewareType ? 'homeware' : 'clothing');
 
       setName(initialItem.name || '');
       setBrand(initialItem.brand || '');
-      setCategory(initialItem.category || (isHomewareType ? 'Audio & Tech' : 'Tops'));
+      setCategory(initialItem.category || '');
       setColor(initialItem.color || '');
       setPurchasePrice(
         initialItem.purchasePrice !== undefined && initialItem.purchasePrice !== null
@@ -245,7 +389,7 @@ export const ItemFormModal: React.FC<ItemFormModalProps> = ({
           : ''
       );
       setPurchaseDate(initialItem.purchaseDate || '');
-      setCondition(initialItem.condition || 'Excellent');
+      setCondition(initialItem.condition || '');
       setNotes(initialItem.notes || '');
       setTagsInput(
         Array.isArray(initialItem.tags)
@@ -255,6 +399,7 @@ export const ItemFormModal: React.FC<ItemFormModalProps> = ({
           : ''
       );
       setImageUrl(initialItem.imageUrl || '');
+      setCandidateImagesList(initialItem.imageUrl ? [initialItem.imageUrl] : []);
 
       // Clothing fields
       setSeasons(
@@ -262,11 +407,11 @@ export const ItemFormModal: React.FC<ItemFormModalProps> = ({
           ? initialItem.season
           : initialItem.season
           ? [initialItem.season as any]
-          : ['Autumn', 'Winter']
+          : []
       );
       setSize(initialItem.size || '');
       setClothingMaterial(initialItem.material || '');
-      setClothingStorageLocation(initialItem.storageLocation || 'Main Wardrobe');
+      setClothingStorageLocation(initialItem.storageLocation || '');
       setCareNotes(initialItem.careNotes || '');
 
       // Homeware & Electronics fields
@@ -275,7 +420,7 @@ export const ItemFormModal: React.FC<ItemFormModalProps> = ({
       setWeight(initialItem.weight || '');
       setPowerSpecs(initialItem.powerSpecs || '');
       setConnectivity(initialItem.connectivity || '');
-      setRoomLocation(initialItem.roomLocation || initialItem.storageLocation || 'Living Room');
+      setRoomLocation(initialItem.roomLocation || initialItem.storageLocation || '');
       setWarrantyInfo(initialItem.warrantyInfo || '');
       setIncludedAccessories(initialItem.includedAccessories || '');
       setHomewareMaterial(initialItem.material || '');
@@ -313,21 +458,22 @@ export const ItemFormModal: React.FC<ItemFormModalProps> = ({
       setActiveTab('clothing');
       setName('');
       setBrand('');
-      setCategory(safeCategories[0] || 'Tops');
+      setCategory('');
       setColor('');
       setPurchasePrice('');
       setRrp('');
       setPurchaseDate(new Date().toISOString().split('T')[0]);
-      setCondition('Excellent');
+      setCondition('');
       setNotes('');
       setTagsInput('');
       setImageUrl('');
+      setCandidateImagesList([]);
 
       // Clothing defaults
-      setSeasons(['Autumn', 'Winter']);
+      setSeasons([]);
       setSize('');
       setClothingMaterial('');
-      setClothingStorageLocation('Main Wardrobe');
+      setClothingStorageLocation('');
       setCareNotes('');
 
       // Homeware & Electronics defaults
@@ -336,7 +482,7 @@ export const ItemFormModal: React.FC<ItemFormModalProps> = ({
       setWeight('');
       setPowerSpecs('');
       setConnectivity('');
-      setRoomLocation('Living Room');
+      setRoomLocation('');
       setWarrantyInfo('');
       setIncludedAccessories('');
       setHomewareMaterial('');
@@ -383,10 +529,10 @@ export const ItemFormModal: React.FC<ItemFormModalProps> = ({
   // Handle Tab Switch with smart category adjustment if desired
   const handleTabSwitch = (newTab: FormTab) => {
     setActiveTab(newTab);
-    if (newTab === 'homeware' && !isHomewareCategory(category)) {
-      setCategory('Audio & Tech');
-    } else if (newTab === 'clothing' && isHomewareCategory(category)) {
-      setCategory(DEFAULT_GARMENT_CATEGORIES[0] || 'Tops');
+    if (newTab === 'homeware' && !isHomewareCategory(category, garmentCategories, homewareCategories)) {
+      setCategory('');
+    } else if (newTab === 'clothing' && isHomewareCategory(category, garmentCategories, homewareCategories)) {
+      setCategory('');
     }
   };
 
@@ -472,6 +618,9 @@ export const ItemFormModal: React.FC<ItemFormModalProps> = ({
           if (item.category && categories.includes(item.category)) setCategory(item.category);
           // Prioritize original listing color over defaults
           if (item.color) setColor(item.color);
+          if (item.originalListingColor) setOriginalListingColor(item.originalListingColor);
+          if (item.size) setSize(item.size);
+          if (item.careNotes) setCareNotes(item.careNotes);
           if (item.material) {
             setClothingMaterial(item.material);
             setHomewareMaterial(item.material);
@@ -556,6 +705,7 @@ export const ItemFormModal: React.FC<ItemFormModalProps> = ({
       if (item.color) setColor(item.color);
       if (item.originalListingColor) setOriginalListingColor(item.originalListingColor);
       else if (item.color) setOriginalListingColor(item.color);
+      if (item.size) setSize(item.size);
       if (item.engineUsed) setScraperEngineUsed(item.engineUsed);
       if (item.material) {
         setClothingMaterial(item.material);
@@ -571,7 +721,36 @@ export const ItemFormModal: React.FC<ItemFormModalProps> = ({
       } else if (item.purchasePrice) {
         setRrp((prev) => (prev && parseFloat(prev) > 0 ? prev : item.purchasePrice.toString()));
       }
-      if (item.imageUrl) setImageUrl(item.imageUrl);
+      let finalImg = item.imageUrl || '';
+      let candidateImgs: string[] = Array.isArray(item.allCandidateImages) && item.allCandidateImages.length > 0
+        ? item.allCandidateImages
+        : finalImg ? [finalImg] : [];
+
+      if (!finalImg) {
+        // Autonomous photo lookup fallback
+        try {
+          const imgRes = await fetch('/api/scraper/lookup-product-images', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              brand: item.brand,
+              name: item.name,
+              color: item.color,
+              category: item.category,
+            }),
+          });
+          const imgData = await imgRes.json();
+          if (imgData.success && imgData.images?.length > 0) {
+            finalImg = imgData.images[0].imageUrl;
+            candidateImgs = imgData.images.map((im: any) => im.imageUrl);
+          }
+        } catch (imgScoutErr) {
+          console.warn('Frontend image scout notice:', imgScoutErr);
+        }
+      }
+
+      if (finalImg) setImageUrl(finalImg);
+      setCandidateImagesList(candidateImgs);
       if (item.careNotes) setCareNotes(item.careNotes);
       // Rule: Preserve notes and never overwrite these notes
       if (item.notes) {
@@ -584,34 +763,100 @@ export const ItemFormModal: React.FC<ItemFormModalProps> = ({
       if (item.season && Array.isArray(item.season)) {
         setSeasons(item.season);
       }
-      if (item.tags && Array.isArray(item.tags)) {
+      if (item.tags && Array.isArray(item.tags) && item.tags.length > 0) {
         setTagsInput((prev) => {
           const existing = prev ? prev.split(',').map((t) => t.trim()).filter(Boolean) : [];
           const incoming = item.tags.map((t: string) => t.trim()).filter(Boolean);
-          if (hasVintedProvenance || isVintedLink) {
-            if (!existing.some((t) => t.toLowerCase() === 'vinted') && !incoming.some((t) => t.toLowerCase() === 'vinted')) {
-              existing.unshift('vinted');
-            }
-          }
           const merged = Array.from(new Set([...existing, ...incoming]));
           return merged.join(', ');
-        });
-      } else if (hasVintedProvenance || isVintedLink) {
-        setTagsInput((prev) => {
-          const existing = prev ? prev.split(',').map((t) => t.trim()).filter(Boolean) : [];
-          if (!existing.some((t) => t.toLowerCase() === 'vinted')) {
-            existing.unshift('vinted');
-          }
-          return existing.join(', ');
         });
       }
 
       setExtractSuccess(true);
     } catch (err: any) {
-      setExtractError(err?.message || 'Error extracting details.');
+      console.warn('Primary autofill notice, activating free deterministic fallback:', err);
+      try {
+        const freeItem = extractGarmentFromUrlFree(importUrl.trim());
+        if (freeItem.name) setName(freeItem.name);
+        if (freeItem.brand) setBrand(freeItem.brand);
+        if (freeItem.category && categories.includes(freeItem.category)) setCategory(freeItem.category);
+        if (freeItem.color) {
+          setColor(freeItem.color);
+          setOriginalListingColor(freeItem.color);
+        }
+        if (freeItem.material) {
+          setClothingMaterial(freeItem.material);
+          setHomewareMaterial(freeItem.material);
+        }
+        if (freeItem.size) setSize(freeItem.size);
+        if (freeItem.purchasePrice) {
+          setPurchasePrice((prev) => (prev && parseFloat(prev) > 0 ? prev : freeItem.purchasePrice!.toString()));
+        }
+        if (freeItem.rrp) {
+          setRrp(freeItem.rrp.toString());
+        }
+        if (freeItem.notes) {
+          setNotes((prev) => {
+            if (!prev || !prev.trim()) return freeItem.notes || '';
+            return prev;
+          });
+        }
+
+        // Autonomous image lookup on fallback
+        try {
+          const imgRes = await fetch('/api/scraper/lookup-product-images', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              brand: freeItem.brand,
+              name: freeItem.name,
+              color: freeItem.color,
+              category: freeItem.category,
+            }),
+          });
+          const imgData = await imgRes.json();
+          if (imgData.success && imgData.images?.length > 0) {
+            setImageUrl(imgData.images[0].imageUrl);
+            setCandidateImagesList(imgData.images.map((im: any) => im.imageUrl));
+          }
+        } catch {}
+
+        setScraperEngineUsed('free-deterministic-fallback');
+        setExtractSuccess(true);
+      } catch {
+        setExtractError(err?.message || 'Error extracting details.');
+      }
     } finally {
       setIsExtracting(false);
     }
+  };
+
+  const handleApplyPastedSpecs = (item: any) => {
+    if (item.name) setName(item.name);
+    if (item.brand) setBrand(item.brand);
+    if (item.category && categories.includes(item.category)) setCategory(item.category);
+    if (item.color) {
+      setColor(item.color);
+      setOriginalListingColor(item.color);
+    }
+    if (item.material) {
+      setClothingMaterial(item.material);
+      setHomewareMaterial(item.material);
+    }
+    if (item.size) setSize(item.size);
+    if (item.purchasePrice) setPurchasePrice(item.purchasePrice.toString());
+    if (item.rrp) setRrp(item.rrp.toString());
+    if (item.imageUrl) setImageUrl(item.imageUrl);
+    if (Array.isArray(item.allCandidateImages) && item.allCandidateImages.length > 0) {
+      setCandidateImagesList(item.allCandidateImages);
+    } else if (item.imageUrl) {
+      setCandidateImagesList([item.imageUrl]);
+    }
+    if (item.notes) {
+      setNotes((prev) => (prev ? `${prev}\n\n${item.notes}` : item.notes));
+    }
+    setExtractSuccess(true);
+    setScraperEngineUsed('pasted-specs-extractor');
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -646,11 +891,11 @@ export const ItemFormModal: React.FC<ItemFormModalProps> = ({
           purchasePrice: priceNum,
           rrp: rrpNum,
           purchaseDate,
-          condition,
-          material: clothingMaterial.trim(),
-          size: size.trim(),
-          storageLocation: clothingStorageLocation.trim() || 'Main Wardrobe',
-          careNotes: careNotes.trim(),
+          condition: (condition as Condition) || undefined,
+          material: clothingMaterial.trim() || undefined,
+          size: size.trim() || undefined,
+          storageLocation: clothingStorageLocation.trim() || undefined,
+          careNotes: careNotes.trim() || undefined,
           notes: notes.trim(),
           tags,
           imageUrl: finalImageUrl,
@@ -676,18 +921,15 @@ export const ItemFormModal: React.FC<ItemFormModalProps> = ({
         };
 
         if (initialItem) {
-          updateItem(initialItem.id, payload, autoConsolidate);
+          updateItem(initialItem.id, payload);
         } else {
-          addItem(
-            {
-              ...payload,
-              subcategory: tags[0] || 'Capsule Piece',
-              currentValuation: priceNum,
-              isFavorite: false,
-              isArchived: false,
-            },
-            autoConsolidate
-          );
+          addItem({
+            ...payload,
+            subcategory: tags[0] || undefined,
+            currentValuation: priceNum,
+            isFavorite: false,
+            isArchived: false,
+          });
         }
       } else {
         // Homeware, Electronics & Hobbies Payload
@@ -700,10 +942,10 @@ export const ItemFormModal: React.FC<ItemFormModalProps> = ({
           purchasePrice: priceNum,
           rrp: rrpNum,
           purchaseDate,
-          condition,
-          material: homewareMaterial.trim(),
-          size: dimensions.trim() || size.trim(),
-          storageLocation: roomLocation.trim() || clothingStorageLocation.trim() || 'Living Room',
+          condition: (condition as Condition) || undefined,
+          material: homewareMaterial.trim() || undefined,
+          size: dimensions.trim() || size.trim() || undefined,
+          storageLocation: roomLocation.trim() || clothingStorageLocation.trim() || undefined,
           careNotes: warrantyInfo.trim() || careNotes.trim(),
           notes: notes.trim(),
           tags,
@@ -738,18 +980,15 @@ export const ItemFormModal: React.FC<ItemFormModalProps> = ({
         };
 
         if (initialItem) {
-          updateItem(initialItem.id, payload, autoConsolidate);
+          updateItem(initialItem.id, payload);
         } else {
-          addItem(
-            {
-              ...payload,
-              subcategory: tags[0] || 'Lifestyle Asset',
-              currentValuation: priceNum,
-              isFavorite: false,
-              isArchived: false,
-            },
-            autoConsolidate
-          );
+          addItem({
+            ...payload,
+            subcategory: tags[0] || 'Lifestyle Asset',
+            currentValuation: priceNum,
+            isFavorite: false,
+            isArchived: false,
+          });
         }
       }
 
@@ -880,7 +1119,51 @@ export const ItemFormModal: React.FC<ItemFormModalProps> = ({
                 </>
               )}
             </button>
+            <button
+              type="button"
+              onClick={() => setIsPasteSpecsOpen(true)}
+              className="px-2.5 py-1.5 bg-white hover:bg-[#EAE8E3] border border-[#D5D5D0] text-[#5A5A55] text-xs font-mono font-medium transition-colors flex items-center gap-1 shrink-0 cursor-pointer shadow-xs"
+              title="Paste raw description, receipt, or specs"
+            >
+              <FileText className="w-3.5 h-3.5 text-[#8C7355]" />
+              <span className="hidden sm:inline">Paste Specs</span>
+            </button>
+            <button
+              type="button"
+              onClick={handleAiSuggestFields}
+              disabled={isExtracting}
+              className="px-3 py-1.5 bg-[#1A1A1A] hover:bg-[#333330] disabled:opacity-50 text-white text-xs font-mono font-semibold transition-colors flex items-center gap-1.5 shrink-0 cursor-pointer shadow-xs"
+              title="Calculate & suggest missing fields using all entered inputs and picture AI"
+            >
+              {isExtracting ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-[#8C7355]" />
+                  <span>Calculating...</span>
+                </>
+              ) : (
+                <>
+                  <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                  <span>AI Suggest Fields</span>
+                </>
+              )}
+            </button>
           </div>
+          {aiSuggestionsBanner && (
+            <div className="mt-2 p-2 bg-amber-50/90 border border-[#8C7355]/30 text-xs font-mono text-[#8C7355] flex items-center justify-between animate-fadeIn">
+              <span className="flex items-center gap-1.5 font-semibold">
+                <Sparkles className="w-3.5 h-3.5 text-[#8C7355] shrink-0" />
+                {aiSuggestionsBanner}
+              </span>
+              <button
+                type="button"
+                onClick={() => setAiSuggestionsBanner(null)}
+                className="text-[#8C7355] hover:text-[#1A1A1A] cursor-pointer ml-2"
+                title="Dismiss"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
           {extractError && (
             <div className="mt-1 space-y-1">
               <p className="text-[11px] text-rose-600 font-mono">{extractError}</p>
@@ -981,32 +1264,23 @@ export const ItemFormModal: React.FC<ItemFormModalProps> = ({
 
         {/* Form Body */}
         <form onSubmit={handleSubmit} className="p-5 space-y-4 max-h-[72vh] overflow-y-auto">
-          {/* Duplicate Detection Alert & Consolidation Notice */}
+          {/* Similar Items Notice (Informative only - all saves strictly preserve distinct items) */}
           {detectedDuplicates.length > 0 && (
-            <div className="p-3.5 bg-amber-50/90 border border-amber-300 rounded-sm text-[#1A1A1A]">
+            <div className="p-3 bg-[#FBFBF9] border border-[#E5E5E1] rounded-sm text-[#1A1A1A]">
               <div className="flex items-start gap-2.5">
-                <AlertTriangle className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
-                <div className="flex-1 space-y-1.5">
+                <Info className="w-4 h-4 text-[#8C7355] shrink-0 mt-0.5" />
+                <div className="flex-1 space-y-1">
                   <div className="flex items-center justify-between">
-                    <p className="text-xs font-semibold text-amber-900">
-                      {detectedDuplicates.length} duplicate {detectedDuplicates.length === 1 ? 'copy' : 'copies'} detected in your inventory
+                    <p className="text-xs font-semibold text-[#1A1A1A]">
+                      {detectedDuplicates.length} similar {detectedDuplicates.length === 1 ? 'piece' : 'pieces'} in inventory
                     </p>
-                    <span className="text-[10px] font-mono font-medium px-2 py-0.5 bg-amber-200 text-amber-900 rounded-full">
-                      Humidor Auto-Merge
+                    <span className="text-[10px] font-mono font-medium px-2 py-0.5 bg-[#F2F1ED] text-[#5A5A55] rounded-xs">
+                      Distinct Items Preserved
                     </span>
                   </div>
-                  <p className="text-[11px] text-amber-800 leading-relaxed">
-                    Similar piece(s) exist in your inventory. By default, distinct items are preserved. You can opt in below if you want to consolidate them into 1 master item.
+                  <p className="text-[11px] text-[#5A5A55] leading-relaxed">
+                    This item is saved as an independent, distinct record. All auto-merging on save is strictly disabled. You have full control to merge duplicates at any time via the dedicated <strong>Merging Tool</strong>.
                   </p>
-                  <label className="flex items-center gap-2 pt-1 font-medium text-xs text-amber-950 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={autoConsolidate}
-                      onChange={(e) => setAutoConsolidate(e.target.checked)}
-                      className="accent-[#8C7355] w-3.5 h-3.5 rounded"
-                    />
-                    <span>Consolidate all duplicate copies into this master item on save</span>
-                  </label>
                 </div>
               </div>
             </div>
@@ -1105,6 +1379,29 @@ export const ItemFormModal: React.FC<ItemFormModalProps> = ({
                     <span>Upload File</span>
                   </button>
 
+                  <button
+                    type="button"
+                    onClick={() => setIsImagePickerOpen(true)}
+                    className="px-3 py-1.5 bg-white hover:bg-[#E5E3DC] border border-[#D5D5D0] text-xs font-mono text-[#4A4A45] flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                    title="Search product photographs"
+                  >
+                    <Search className="w-3.5 h-3.5 text-[#8C7355]" />
+                    <span>Find Photo</span>
+                  </button>
+
+                  {imageUrl && (
+                    <button
+                      type="button"
+                      onClick={handleAiSuggestFields}
+                      disabled={isExtracting}
+                      className="px-2.5 py-1.5 bg-[#FAF9F5] hover:bg-[#F2F1ED] border border-[#8C7355] text-xs font-mono font-semibold text-[#8C7355] flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                      title="Run Picture AI analysis on this photo with current fields"
+                    >
+                      <Sparkles className="w-3.5 h-3.5 text-[#8C7355]" />
+                      <span>AI Scan Photo</span>
+                    </button>
+                  )}
+
                   {imageUrl && (
                     <button
                       type="button"
@@ -1115,6 +1412,36 @@ export const ItemFormModal: React.FC<ItemFormModalProps> = ({
                     </button>
                   )}
                 </div>
+
+                {candidateImagesList.length > 1 && (
+                  <div className="pt-2 border-t border-[#E5E5E1]/70">
+                    <div className="text-[10px] font-mono text-[#5A5A55] mb-1 flex items-center justify-between">
+                      <span className="font-semibold">Candidate photos ({candidateImagesList.length}):</span>
+                      <span className="text-[9px] text-[#8C7355]">Click to select</span>
+                    </div>
+                    <div className="flex gap-2 overflow-x-auto pb-1 max-w-full">
+                      {candidateImagesList.map((cImg, cIdx) => (
+                        <button
+                          key={cIdx}
+                          type="button"
+                          onClick={() => setImageUrl(cImg)}
+                          className={`w-12 h-12 shrink-0 border overflow-hidden rounded-xs transition-all relative ${
+                            imageUrl === cImg
+                              ? 'border-[#8C7355] ring-2 ring-[#8C7355]'
+                              : 'border-[#D5D5D0] opacity-80 hover:opacity-100 hover:border-[#8C7355]'
+                          }`}
+                        >
+                          <img src={cImg} alt={`Option ${cIdx + 1}`} className="w-full h-full object-cover" />
+                          {imageUrl === cImg && (
+                            <div className="absolute top-0.5 right-0.5 bg-[#8C7355] text-white p-0.5 rounded-full">
+                              <Check className="w-2.5 h-2.5" />
+                            </div>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 <p className="text-[10px] text-[#767670]">
                   Supports high-resolution photography, local image files, and direct links without distortion.
                 </p>
@@ -1172,94 +1499,21 @@ export const ItemFormModal: React.FC<ItemFormModalProps> = ({
                     <label className="text-[11px] font-mono text-[#5A5A55] font-semibold">
                       Garment Category *
                     </label>
-                    {!isAddingCategory ? (
-                      <button
-                        type="button"
-                        onClick={() => setIsAddingCategory(true)}
-                        className="text-[10px] font-mono text-[#8C7355] hover:text-[#1A1A1A] hover:underline cursor-pointer"
-                      >
-                        + New Category
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => setIsAddingCategory(false)}
-                        className="text-[10px] font-mono text-[#767670] hover:text-[#1A1A1A] cursor-pointer"
-                      >
-                        Cancel
-                      </button>
-                    )}
                   </div>
-
-                  {isAddingCategory ? (
-                    <div className="flex items-center gap-1.5">
-                      <input
-                        type="text"
-                        value={newCategoryName}
-                        onChange={(e) => setNewCategoryName(e.target.value)}
-                        placeholder="Category name..."
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            e.preventDefault();
-                            const clean = newCategoryName.trim();
-                            if (clean) {
-                              addCategory(clean);
-                              setCategory(clean);
-                              setNewCategoryName('');
-                              setIsAddingCategory(false);
-                            }
-                          }
-                          if (e.key === 'Escape') setIsAddingCategory(false);
-                        }}
-                        autoFocus
-                        className="flex-1 px-2.5 py-1.5 bg-white border border-[#8C7355] text-xs text-[#1A1A1A] focus:outline-none"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const clean = newCategoryName.trim();
-                          if (clean) {
-                            addCategory(clean);
-                            setCategory(clean);
-                            setNewCategoryName('');
-                            setIsAddingCategory(false);
-                          }
-                        }}
-                        disabled={!newCategoryName.trim()}
-                        className="px-2.5 py-1.5 bg-[#8C7355] text-white text-xs font-mono disabled:opacity-50 cursor-pointer"
-                      >
-                        Save
-                      </button>
-                    </div>
-                  ) : (
-                    <select
-                      value={category}
-                      onChange={(e) => setCategory(e.target.value)}
-                      className="w-full px-2.5 py-1.5 bg-white border border-[#D5D5D0] text-xs text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none"
-                    >
-                      {category && !safeCategories.includes(category) && (
-                        <option value={category}>{category}</option>
-                      )}
-                      <optgroup label="Apparel & Garments">
-                        {safeCategories
-                          .filter((cat) => !isHomewareCategory(cat))
-                          .map((cat) => (
-                            <option key={cat} value={cat}>
-                              {cat}
-                            </option>
-                          ))}
-                      </optgroup>
-                      <optgroup label="Homeware & Lifestyle">
-                        {safeCategories
-                          .filter((cat) => isHomewareCategory(cat))
-                          .map((cat) => (
-                            <option key={cat} value={cat}>
-                              {cat}
-                            </option>
-                          ))}
-                      </optgroup>
-                    </select>
-                  )}
+                  <CategorySelect
+                    value={category}
+                    onChange={(newCat) => setCategory(newCat)}
+                    garmentCategories={garmentCategories}
+                    homewareCategories={homewareCategories}
+                    filterScope="garments"
+                    allowAddNew={true}
+                    allowEmpty={true}
+                    emptyOptionLabel="Select Category (Optional / Empty)"
+                    onAddNewCategory={(newCat) => {
+                      addCategory(newCat);
+                      setCategory(newCat);
+                    }}
+                  />
                 </div>
 
                 <div>
@@ -1449,96 +1703,23 @@ export const ItemFormModal: React.FC<ItemFormModalProps> = ({
                 <div>
                   <div className="flex items-center justify-between mb-1">
                     <label className="text-[11px] font-mono text-[#5A5A55] font-semibold">
-                      Category *
+                      Homeware Category *
                     </label>
-                    {!isAddingCategory ? (
-                      <button
-                        type="button"
-                        onClick={() => setIsAddingCategory(true)}
-                        className="text-[10px] font-mono text-[#8C7355] hover:text-[#1A1A1A] hover:underline cursor-pointer"
-                      >
-                        + New Category
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => setIsAddingCategory(false)}
-                        className="text-[10px] font-mono text-[#767670] hover:text-[#1A1A1A] cursor-pointer"
-                      >
-                        Cancel
-                      </button>
-                    )}
                   </div>
-
-                  {isAddingCategory ? (
-                    <div className="flex items-center gap-1.5">
-                      <input
-                        type="text"
-                        value={newCategoryName}
-                        onChange={(e) => setNewCategoryName(e.target.value)}
-                        placeholder="Category name..."
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            e.preventDefault();
-                            const clean = newCategoryName.trim();
-                            if (clean) {
-                              addCategory(clean);
-                              setCategory(clean);
-                              setNewCategoryName('');
-                              setIsAddingCategory(false);
-                            }
-                          }
-                          if (e.key === 'Escape') setIsAddingCategory(false);
-                        }}
-                        autoFocus
-                        className="flex-1 px-2.5 py-1.5 bg-white border border-[#8C7355] text-xs text-[#1A1A1A] focus:outline-none"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const clean = newCategoryName.trim();
-                          if (clean) {
-                            addCategory(clean);
-                            setCategory(clean);
-                            setNewCategoryName('');
-                            setIsAddingCategory(false);
-                          }
-                        }}
-                        disabled={!newCategoryName.trim()}
-                        className="px-2.5 py-1.5 bg-[#8C7355] text-white text-xs font-mono disabled:opacity-50 cursor-pointer"
-                      >
-                        Save
-                      </button>
-                    </div>
-                  ) : (
-                    <select
-                      value={category}
-                      onChange={(e) => setCategory(e.target.value)}
-                      className="w-full px-2.5 py-1.5 bg-white border border-[#D5D5D0] text-xs text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none"
-                    >
-                      {category && !safeCategories.includes(category) && (
-                        <option value={category}>{category}</option>
-                      )}
-                      <optgroup label="Homeware, Tech &amp; Hobbies">
-                        {safeCategories
-                          .filter((cat) => isHomewareCategory(cat))
-                          .map((cat) => (
-                            <option key={cat} value={cat}>
-                              {cat}
-                            </option>
-                          ))}
-                      </optgroup>
-                      <optgroup label="Apparel &amp; Other Categories">
-                        {safeCategories
-                          .filter((cat) => !isHomewareCategory(cat))
-                          .map((cat) => (
-                            <option key={cat} value={cat}>
-                              {cat}
-                            </option>
-                          ))}
-                      </optgroup>
-                    </select>
-                  )}
+                  <CategorySelect
+                    value={category}
+                    onChange={(newCat) => setCategory(newCat)}
+                    garmentCategories={garmentCategories}
+                    homewareCategories={homewareCategories}
+                    filterScope="homeware"
+                    allowAddNew={true}
+                    allowEmpty={true}
+                    emptyOptionLabel="Select Category (Optional / Empty)"
+                    onAddNewCategory={(newCat) => {
+                      addCategory(newCat);
+                      setCategory(newCat);
+                    }}
+                  />
                 </div>
 
                 <div>
@@ -1766,10 +1947,12 @@ export const ItemFormModal: React.FC<ItemFormModalProps> = ({
                   onChange={(e) => setCondition(e.target.value as Condition)}
                   className="w-full px-2 py-1.5 bg-white border border-[#D5D5D0] text-xs text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none"
                 >
+                  <option value="">Select Condition (Unspecified)</option>
                   <option value="Pristine / New">Pristine / New</option>
                   <option value="Excellent">Excellent</option>
                   <option value="Good">Good</option>
                   <option value="Needs Repair">Needs Repair</option>
+                  <option value="Vintage / Well-Loved">Vintage / Well-Loved</option>
                 </select>
               </div>
             </div>
@@ -1839,6 +2022,26 @@ export const ItemFormModal: React.FC<ItemFormModalProps> = ({
           </div>
         </form>
       </div>
+
+      <ProductImagePickerModal
+        isOpen={isImagePickerOpen}
+        onClose={() => setIsImagePickerOpen(false)}
+        onSelectImage={(newImg) => {
+          setImageUrl(newImg);
+          setCandidateImagesList((prev) => (prev.includes(newImg) ? prev : [newImg, ...prev]));
+        }}
+        brand={brand}
+        name={name}
+        color={color}
+        category={category}
+        currentImageUrl={imageUrl}
+      />
+
+      <PasteSpecsAutofillModal
+        isOpen={isPasteSpecsOpen}
+        onClose={() => setIsPasteSpecsOpen(false)}
+        onApply={handleApplyPastedSpecs}
+      />
     </div>
   );
 };

@@ -82,11 +82,20 @@ export function inferEbayCategory(title: string): string {
   if (/hoodie|sweatshirt|sweater|jumper|cardigan|pullover|knit|fleece|crewneck|roll neck|turtleneck/i.test(t)) {
     return 'Knitwear';
   }
-  if (/shirt|t-shirt|tee|polo|blouse|top|tank|jersey/i.test(t)) {
+  if (/t-shirt|tshirt|tee|graphic tee/i.test(t)) {
+    return 'T-Shirts';
+  }
+  if (/shirt|button down|oxford|blouse/i.test(t)) {
+    return 'Shirts';
+  }
+  if (/polo|top|tank|jersey/i.test(t)) {
     return 'Tops';
   }
   if (/jeans|trousers|pants|chinos|joggers|sweatpants|cargo|shorts|culottes/i.test(t)) {
     return 'Trousers';
+  }
+  if (/shoe tree|shoe trees|shoe polish|shoe cream|shoe brush|leather cleaner|suede protector|shoecare|shoe care/i.test(t)) {
+    return 'Shoe Care';
   }
   if (/shoe|boot|sneaker|trainer|loafer|derby|oxford|sandal|heel|mule|flat|brogue/i.test(t)) {
     return 'Shoes';
@@ -106,7 +115,7 @@ export function inferEbayCategory(title: string): string {
   if (/belt|scarf|beanie|hat|cap|tie|gloves|sunglasses|watch|wallet/i.test(t)) {
     return 'Accessories';
   }
-  return 'Tops';
+  return 'Outerwear';
 }
 
 /**

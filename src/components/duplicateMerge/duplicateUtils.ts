@@ -133,11 +133,7 @@ export const cleanItemTitle = (str?: string | null, brand?: string | null): stri
 
   return cleaned
     .replace(/\b(size|sz|uk|eu|us|m|l|s|xl|xxl|xs|small|medium|large|15|155|16|165|17|38|39|40|41|42|43|44)\b/gi, '')
-    .replace(
-      /\b(black|white|blue|navy|grey|gray|green|red|brown|beige|cream|tan|olive|sage|camel|oatmeal|khaki|burgundy|charcoal|stripe|striped|check|checked|plaid|gingham|poplin|linen|cotton|silk|wool|cashmere|twill|oxford)\b/gi,
-      ''
-    )
-    .replace(/\b(new|vintage|worn|bnwt|authentic|classic|pure|napoli|1925|milano)\b/gi, '')
+    .replace(/\b(new|vintage|worn|bnwt|authentic|pure|napoli|1925|milano)\b/gi, '')
     .replace(/\s+/g, ' ')
     .trim();
 };
@@ -504,10 +500,24 @@ export const isGarmentDuplicate = (
     const isGenericB = !cleanNameB || cleanNameB === cleanBrandB || cleanNameB === 'item' || cleanNameB === 'clothing' || cleanNameB === 'garment';
     if (isGenericA && isGenericB) return true;
 
+    // Generic category words that MUST NOT match distinct items on their own
+    const GENERIC_GARMENT_TERMS = new Set([
+      'shirt', 'tshirt', 't-shirt', 'tee', 'top', 'jacket', 'blazer', 'coat', 'trouser', 'trousers',
+      'pant', 'pants', 'chino', 'chinos', 'jean', 'jeans', 'knit', 'knitwear', 'jumper', 'sweater',
+      'cardigan', 'polo', 'overshirt', 'shoe', 'shoes', 'boot', 'boots', 'loafer', 'loafers', 'suit',
+      'vest', 'waistcoat', 'hoodie', 'sweatshirt', 'item', 'garment', 'piece', 'clothing'
+    ]);
+
     // Clean title match without brand prefix & noise words
     const titleA = cleanItemTitle(rawNameA, rawBrandA).toLowerCase().replace(/[^a-z0-9]/g, '');
     const titleB = cleanItemTitle(rawNameB, rawBrandB).toLowerCase().replace(/[^a-z0-9]/g, '');
-    if (titleA && titleB && titleA === titleB) return true;
+    
+    // If the stripped title is just a generic category noun (e.g. "shirt"), do NOT treat different items as duplicates!
+    if (titleA && titleB && titleA === titleB) {
+      if (!GENERIC_GARMENT_TERMS.has(titleA) && titleA.length >= 4) {
+        return true;
+      }
+    }
 
     // DO NOT merge if names are different distinct garments (e.g. "Oxford Shirt" vs "Flannel Shirt" vs "Harrington Jacket")
     return false;
@@ -517,15 +527,22 @@ export const isGarmentDuplicate = (
   const isUnknownBrandA = !cleanBrandA || cleanBrandA === 'unknown' || cleanBrandA === 'brand' || cleanBrandA === 'designerbrand';
   const isUnknownBrandB = !cleanBrandB || cleanBrandB === 'unknown' || cleanBrandB === 'brand' || cleanBrandB === 'designerbrand';
 
+  const GENERIC_GARMENT_TERMS = new Set([
+    'shirt', 'tshirt', 't-shirt', 'tee', 'top', 'jacket', 'blazer', 'coat', 'trouser', 'trousers',
+    'pant', 'pants', 'chino', 'chinos', 'jean', 'jeans', 'knit', 'knitwear', 'jumper', 'sweater',
+    'cardigan', 'polo', 'overshirt', 'shoe', 'shoes', 'boot', 'boots', 'loafer', 'loafers', 'suit',
+    'vest', 'waistcoat', 'hoodie', 'sweatshirt', 'item', 'garment', 'piece', 'clothing'
+  ]);
+
   if (isUnknownBrandA && cleanBrandB && cleanBrandB.length >= 4 && fullA.includes(cleanBrandB)) {
     const titleA = cleanItemTitle(rawNameA, rawBrandB).toLowerCase().replace(/[^a-z0-9]/g, '');
     const titleB = cleanItemTitle(rawNameB, rawBrandB).toLowerCase().replace(/[^a-z0-9]/g, '');
-    if (titleA && titleB && titleA === titleB) return true;
+    if (titleA && titleB && titleA === titleB && !GENERIC_GARMENT_TERMS.has(titleA) && titleA.length >= 4) return true;
   }
   if (isUnknownBrandB && cleanBrandA && cleanBrandA.length >= 4 && fullB.includes(cleanBrandA)) {
     const titleA = cleanItemTitle(rawNameA, rawBrandA).toLowerCase().replace(/[^a-z0-9]/g, '');
     const titleB = cleanItemTitle(rawNameB, rawBrandA).toLowerCase().replace(/[^a-z0-9]/g, '');
-    if (titleA && titleB && titleA === titleB) return true;
+    if (titleA && titleB && titleA === titleB && !GENERIC_GARMENT_TERMS.has(titleA) && titleA.length >= 4) return true;
   }
 
   return false;

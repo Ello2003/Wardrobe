@@ -31,6 +31,7 @@ import {
   ExternalLink,
   Copy,
   Loader2,
+  Shirt,
 } from 'lucide-react';
 import { useWardrobe } from '../context/WardrobeContext';
 import { AppSettings, DEFAULT_APP_SETTINGS } from '../types';
@@ -86,6 +87,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   const [activeTab, setActiveTab] = useState<
     | 'general'
     | 'labels'
+    | 'items'
     | 'wardrobe_table'
     | 'wishlist_table'
     | 'resale_table'
@@ -427,6 +429,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
           >
             <Edit3 className="w-3.5 h-3.5" />
             <span>Nomenclature &amp; Titles</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('items')}
+            className={`px-3 py-2 text-xs font-mono font-medium border-b-2 cursor-pointer transition-colors whitespace-nowrap flex items-center gap-1.5 ${
+              activeTab === 'items'
+                ? 'border-[#8C7355] text-[#8C7355] font-bold'
+                : 'border-transparent text-[#767670] hover:text-[#1A1A1A]'
+            }`}
+          >
+            <Shirt className="w-3.5 h-3.5" />
+            <span>Item Settings &amp; AI</span>
           </button>
           <button
             type="button"
@@ -1284,6 +1298,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                     { key: 'showCondition', label: 'Condition' },
                     { key: 'showSeason', label: 'Season' },
                     { key: 'showColor', label: 'Color Tone' },
+                    { key: 'showSize', label: 'Garment Size / Sizing' },
+                    { key: 'showMaterial', label: 'Material / Fabric Composition' },
                     { key: 'showLocation', label: 'Storage Location' },
                     { key: 'showTags', label: 'Custom Tags' },
                     { key: 'showVintedDetails', label: 'Provenance / Vinted Link' },
@@ -1437,6 +1453,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                     { key: 'showPlannedUsage', label: 'Planned Usage / Wardrobe Gap' },
                     { key: 'showRetailer', label: 'Retailer / Store' },
                     { key: 'showSeason', label: 'Season' },
+                    { key: 'showSize', label: 'Garment Size / Dimensions' },
+                    { key: 'showMaterial', label: 'Material / Fabric Composition' },
                     { key: 'showUrl', label: 'Store Link / URL' },
                     { key: 'showVintedDetails', label: 'Vinted Ref / Order #' },
                     { key: 'showMatchingItems', label: 'Wardrobe Pairings' },
@@ -1708,6 +1726,244 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                       When editing garment names, notes, or justification reasons, drag the bottom-right handle of the input box to resize it horizontally and vertically.
                     </span>
                   </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* TAB: Item Settings & AI Calculations */}
+          {activeTab === 'items' && (
+            <div className="space-y-6">
+              <div className="flex items-start justify-between bg-[#FAF9F5] p-4 border border-[#E5E5E1]">
+                <div>
+                  <h3 className="text-sm font-serif font-bold text-[#1A1A1A] flex items-center gap-1.5">
+                    <Shirt className="w-4 h-4 text-[#8C7355]" />
+                    Item Settings &amp; Attribute Configuration
+                  </h3>
+                  <p className="text-xs text-[#767670] mt-0.5">
+                    Manage how Material, Size, Condition, and garment metadata are tracked and displayed, and configure AI calculation criteria.
+                  </p>
+                </div>
+              </div>
+
+              {/* Section 1: Material in Settings */}
+              <div className="border border-[#E5E5E1] p-4 space-y-3.5 bg-white">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h4 className="text-xs font-mono font-bold uppercase tracking-wider text-[#1A1A1A] flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-[#8C7355]" />
+                      Material &amp; Fabric Composition Tracking
+                    </h4>
+                    <p className="text-[11px] text-[#767670] mt-0.5">
+                      Track textiles, weave structure, and fabric blends for proper care and sartorial harmony.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <label className="flex items-center justify-between p-3 border border-[#E5E5E1] bg-white cursor-pointer hover:border-[#8C7355]">
+                    <div>
+                      <span className="text-xs font-mono font-bold text-[#1A1A1A] block">Show Material on Grid Cards</span>
+                      <span className="text-[11px] text-[#767670]">Display fabric badge and inline editor on wardrobe cards</span>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={invSettings.showMaterial !== false}
+                      onChange={(e) => {
+                        updateInventoryDisplay({
+                          ...invSettings,
+                          showMaterial: e.target.checked,
+                        });
+                      }}
+                      className="accent-[#8C7355] w-4 h-4 cursor-pointer"
+                    />
+                  </label>
+
+                  <label className="flex items-center justify-between p-3 border border-[#E5E5E1] bg-white cursor-pointer hover:border-[#8C7355]">
+                    <div>
+                      <span className="text-xs font-mono font-bold text-[#1A1A1A] block">Show Material in Database Table</span>
+                      <span className="text-[11px] text-[#767670]">Dedicated column with resizable header and inline editing</span>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={invSettings.tableSettings?.showMaterial !== false}
+                      onChange={(e) => {
+                        const curTable = invSettings.tableSettings || DEFAULT_INVENTORY_TABLE_SETTINGS;
+                        updateInventoryDisplay({
+                          ...invSettings,
+                          tableSettings: { ...curTable, showMaterial: e.target.checked },
+                        });
+                      }}
+                      className="accent-[#8C7355] w-4 h-4 cursor-pointer"
+                    />
+                  </label>
+                </div>
+
+                {/* Common Fabric Presets */}
+                <div className="pt-2 border-t border-[#F2F1ED]">
+                  <span className="text-[10px] font-mono font-semibold text-[#5A5A55] uppercase tracking-wider block mb-1.5">
+                    Recognized Luxury &amp; Heritage Materials:
+                  </span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {[
+                      '100% Shetland Wool',
+                      'Merino Wool',
+                      'Cashmere',
+                      'Heavy Cotton Twill',
+                      'Japanese Selvedge Denim',
+                      'Irish Linen',
+                      'Mulberry Silk',
+                      'Waxed Cotton',
+                      'Calfskin Leather',
+                      'Suede',
+                      'Gore-Tex',
+                      'Corduroy',
+                      'Mohair Blend',
+                    ].map((mat) => (
+                      <span
+                        key={mat}
+                        className="text-[10.5px] font-mono px-2 py-0.5 bg-[#FAF9F5] border border-[#E5E5E1] text-[#333] rounded-xs"
+                      >
+                        {mat}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Section 2: Size & Sizing Systems */}
+              <div className="border border-[#E5E5E1] p-4 space-y-3.5 bg-white">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h4 className="text-xs font-mono font-bold uppercase tracking-wider text-[#1A1A1A] flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-[#1A1A1A]" />
+                      Size &amp; Fit Dimensional Settings
+                    </h4>
+                    <p className="text-[11px] text-[#767670] mt-0.5">
+                      Configure size visibility and formatting across letter sizing, tailoring chest sizes, and footwear.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <label className="flex items-center justify-between p-3 border border-[#E5E5E1] bg-white cursor-pointer hover:border-[#8C7355]">
+                    <div>
+                      <span className="text-xs font-mono font-bold text-[#1A1A1A] block">Show Size on Grid Cards</span>
+                      <span className="text-[11px] text-[#767670]">Display size pill and inline editor on wardrobe cards</span>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={invSettings.showSize !== false}
+                      onChange={(e) => {
+                        updateInventoryDisplay({
+                          ...invSettings,
+                          showSize: e.target.checked,
+                        });
+                      }}
+                      className="accent-[#8C7355] w-4 h-4 cursor-pointer"
+                    />
+                  </label>
+
+                  <label className="flex items-center justify-between p-3 border border-[#E5E5E1] bg-white cursor-pointer hover:border-[#8C7355]">
+                    <div>
+                      <span className="text-xs font-mono font-bold text-[#1A1A1A] block">Show Size in Database Table</span>
+                      <span className="text-[11px] text-[#767670]">Dedicated column with resizable width and inline editing</span>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={invSettings.tableSettings?.showSize !== false}
+                      onChange={(e) => {
+                        const curTable = invSettings.tableSettings || DEFAULT_INVENTORY_TABLE_SETTINGS;
+                        updateInventoryDisplay({
+                          ...invSettings,
+                          tableSettings: { ...curTable, showSize: e.target.checked },
+                        });
+                      }}
+                      className="accent-[#8C7355] w-4 h-4 cursor-pointer"
+                    />
+                  </label>
+                </div>
+
+                {/* Sizing Scales */}
+                <div className="pt-2 border-t border-[#F2F1ED]">
+                  <span className="text-[10px] font-mono font-semibold text-[#5A5A55] uppercase tracking-wider block mb-1.5">
+                    Standard Sizing Scales Supported:
+                  </span>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs font-mono">
+                    <div className="p-2 border border-[#E5E5E1] bg-[#FAF9F5]">
+                      <span className="text-[10px] text-[#767670] uppercase block">Letter Tops</span>
+                      <strong className="text-[#1A1A1A]">XS · S · M · L · XL · XXL</strong>
+                    </div>
+                    <div className="p-2 border border-[#E5E5E1] bg-[#FAF9F5]">
+                      <span className="text-[10px] text-[#767670] uppercase block">UK Tailoring</span>
+                      <strong className="text-[#1A1A1A]">36R · 38R · 40R · 42R · 44R</strong>
+                    </div>
+                    <div className="p-2 border border-[#E5E5E1] bg-[#FAF9F5]">
+                      <span className="text-[10px] text-[#767670] uppercase block">Waist / Inseam</span>
+                      <strong className="text-[#1A1A1A]">30/30 · 32/32 · 34/32</strong>
+                    </div>
+                    <div className="p-2 border border-[#E5E5E1] bg-[#FAF9F5]">
+                      <span className="text-[10px] text-[#767670] uppercase block">Footwear</span>
+                      <strong className="text-[#1A1A1A]">UK 8 · UK 9 · UK 10 · EU 43</strong>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Section 3: AI Calculations & Picture AI Vision */}
+              <div className="border border-[#8C7355]/40 p-4 space-y-3 bg-[#FAF9F5]">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-[#8C7355]" />
+                  <h4 className="text-xs font-mono font-bold uppercase tracking-wider text-[#1A1A1A]">
+                    AI Calculations &amp; Picture AI Vision Integration
+                  </h4>
+                </div>
+                <p className="text-xs text-[#4A4A45] leading-relaxed">
+                  The styling intelligence and recommendation engines actively compute combinations using <strong>all available fields entered</strong> as well as <strong>Picture AI</strong>:
+                </p>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs font-mono">
+                  <div className="p-2 bg-white border border-[#E5E5E1] flex items-center gap-1.5">
+                    <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                    <span>Material &amp; Weave</span>
+                  </div>
+                  <div className="p-2 bg-white border border-[#E5E5E1] flex items-center gap-1.5">
+                    <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                    <span>Size &amp; Layering Fit</span>
+                  </div>
+                  <div className="p-2 bg-white border border-[#E5E5E1] flex items-center gap-1.5">
+                    <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                    <span>Condition Grade</span>
+                  </div>
+                  <div className="p-2 bg-white border border-[#E5E5E1] flex items-center gap-1.5">
+                    <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                    <span>Season &amp; Weather</span>
+                  </div>
+                  <div className="p-2 bg-white border border-[#E5E5E1] flex items-center gap-1.5">
+                    <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                    <span>Color &amp; Hex Tones</span>
+                  </div>
+                  <div className="p-2 bg-white border border-[#E5E5E1] flex items-center gap-1.5">
+                    <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                    <span>Purchase &amp; RRP</span>
+                  </div>
+                  <div className="p-2 bg-white border border-[#E5E5E1] flex items-center gap-1.5">
+                    <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                    <span>Wear Count &amp; CPW</span>
+                  </div>
+                  <div className="p-2 bg-white border border-[#E5E5E1] flex items-center gap-1.5">
+                    <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                    <span>Picture AI Vision</span>
+                  </div>
+                </div>
+
+                <div className="text-[11px] text-[#767670] space-y-1 pt-1">
+                  <p>
+                    • <strong>Picture AI</strong> inspects the photograph to recognize silhouette drape, fabric texture, button details, and true color tone.
+                  </p>
+                  <p>
+                    • <strong>All Fields Utilization</strong> ensures that outerwear fits over knitwear, fragile vintage pieces are styled respectfully, and unworn items are surfaced to optimize cost-per-wear.
+                  </p>
                 </div>
               </div>
             </div>

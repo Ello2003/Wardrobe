@@ -29,14 +29,31 @@ import {
   Shirt,
   Pencil,
   Package,
+  GripVertical,
+  ArrowRightLeft,
+  ListPlus,
+  Palette,
+  Compass,
+  AlertTriangle,
 } from 'lucide-react';
 import { useWardrobe } from '../context/WardrobeContext';
-import { WardrobeItem, Category, Season, Condition, isHomewareCategory } from '../types';
+import { WardrobeItem, Category, Season, Condition, isHomewareCategory, SaleItem } from '../types';
 import { safeConfirm } from '../utils/safeConfirm';
+import {
+  MissingCriteria,
+  auditGarmentDetails,
+  getMissingDetailsStats,
+} from '../utils/missingDetailsAudit';
 import { AutoImportModal } from './AutoImportModal';
+import { CategorySelect } from './common/CategorySelect';
 import { GarmentImage } from './GarmentImage';
 import { BulkEditModal } from './BulkEditModal';
 import { DuplicateMergeModal } from './DuplicateMergeModal';
+import { OrganizeCategoriesModal } from './OrganizeCategoriesModal';
+import { BatchLinePasteModal } from './BatchLinePasteModal';
+import { BulkSuiteModal, BulkSuiteTab } from './bulk/BulkSuiteModal';
+import { TravelCapsuleStudioModal } from './travel/TravelCapsuleStudioModal';
+import { FlatlayMoodboardModal } from './flatlay/FlatlayMoodboardModal';
 import { InventoryDatabaseTable, getColorHex } from './InventoryDatabaseTable';
 import { BulkActionBar } from './common/BulkActionBar';
 import { EmptyState } from './common/EmptyState';
@@ -87,9 +104,11 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
     updateHomewareCategory,
     deleteHomewareCategory,
     resetHomewareCategories,
+    moveCategory,
     moveWardrobeItemToSales,
     moveWardrobeItemToShopping,
     moveMultipleWardrobeItems,
+    saleItems,
     formatCurrency,
     customLabels,
     updateCustomLabel,
@@ -207,31 +226,37 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
     return 'All';
   });
 
+  // Mapping of active sale items linked to wardrobe pieces
+  const saleItemByWardrobeId = useMemo(() => {
+    const map = new Map<string, SaleItem>();
+    saleItems.forEach((s) => {
+      if (s.sourceWardrobeItemId && s.status !== 'Delisted' && s.status !== 'Cancelled') {
+        map.set(s.sourceWardrobeItemId, s);
+      }
+    });
+    return map;
+  }, [saleItems]);
+
   const [categoryFilterScope, setCategoryFilterScope] = useState<'all' | 'garments' | 'homeware'>(() => {
     try {
-      return (localStorage.getItem('inventory_category_filter_scope') as any) || 'all';
+      const saved = localStorage.getItem('inventory_category_filter_scope');
+      if (saved && ['all', 'garments', 'homeware'].includes(saved)) {
+        return saved as 'all' | 'garments' | 'homeware';
+      }
     } catch (e) {}
-    return 'all';
+    return 'garments';
   });
 
   const handleSelectGarmentCategory = (cat: string | 'All' | '__ALL_GARMENTS__') => {
-    if (cat === 'All' || (categoryFilterScope === 'garments' && selectedGarmentCategory === cat)) {
-      setCategoryFilterScope('all');
-      setSelectedGarmentCategory('All');
-      try {
-        localStorage.setItem('inventory_category_filter_scope', 'all');
-        localStorage.setItem('inventory_selected_garment_category', 'All');
-      } catch (e) {}
-      return;
-    }
     setCategoryFilterScope('garments');
-    setSelectedGarmentCategory(cat);
+    const targetCat = cat === '__ALL_GARMENTS__' ? 'All' : cat;
+    setSelectedGarmentCategory(targetCat);
     setSelectedHomewareCategory('All');
     setSelectedHomewareTag('All');
     setSelectedCategory('All');
     try {
       localStorage.setItem('inventory_category_filter_scope', 'garments');
-      localStorage.setItem('inventory_selected_garment_category', cat);
+      localStorage.setItem('inventory_selected_garment_category', targetCat);
       localStorage.setItem('inventory_selected_homeware_category', 'All');
       localStorage.setItem('inventory_selected_homeware_tag', 'All');
       localStorage.setItem('inventory_selected_category', 'All');
@@ -239,27 +264,14 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
   };
 
   const handleSelectGarmentTag = (tag: string | 'All') => {
-    if (tag === 'All' || (categoryFilterScope === 'garments' && selectedGarmentTag === tag)) {
-      setSelectedGarmentTag('All');
-      if (selectedGarmentCategory === 'All') {
-        setCategoryFilterScope('all');
-        try {
-          localStorage.setItem('inventory_category_filter_scope', 'all');
-        } catch (e) {}
-      }
-      try {
-        localStorage.setItem('inventory_selected_garment_tag', 'All');
-      } catch (e) {}
-      return;
-    }
     setCategoryFilterScope('garments');
-    setSelectedGarmentTag(tag);
+    setSelectedGarmentTag(tag === selectedGarmentTag ? 'All' : tag);
     setSelectedHomewareCategory('All');
     setSelectedHomewareTag('All');
     setSelectedTag('All');
     try {
       localStorage.setItem('inventory_category_filter_scope', 'garments');
-      localStorage.setItem('inventory_selected_garment_tag', tag);
+      localStorage.setItem('inventory_selected_garment_tag', tag === selectedGarmentTag ? 'All' : tag);
       localStorage.setItem('inventory_selected_homeware_category', 'All');
       localStorage.setItem('inventory_selected_homeware_tag', 'All');
       localStorage.setItem('inventory_selected_tag', 'All');
@@ -267,23 +279,15 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
   };
 
   const handleSelectHomewareCategory = (cat: string | 'All' | '__ALL_HOMEWARE__') => {
-    if (cat === 'All' || (categoryFilterScope === 'homeware' && selectedHomewareCategory === cat)) {
-      setCategoryFilterScope('all');
-      setSelectedHomewareCategory('All');
-      try {
-        localStorage.setItem('inventory_category_filter_scope', 'all');
-        localStorage.setItem('inventory_selected_homeware_category', 'All');
-      } catch (e) {}
-      return;
-    }
     setCategoryFilterScope('homeware');
-    setSelectedHomewareCategory(cat);
+    const targetCat = cat === '__ALL_HOMEWARE__' ? 'All' : cat;
+    setSelectedHomewareCategory(targetCat);
     setSelectedGarmentCategory('All');
     setSelectedGarmentTag('All');
     setSelectedCategory('All');
     try {
       localStorage.setItem('inventory_category_filter_scope', 'homeware');
-      localStorage.setItem('inventory_selected_homeware_category', cat);
+      localStorage.setItem('inventory_selected_homeware_category', targetCat);
       localStorage.setItem('inventory_selected_garment_category', 'All');
       localStorage.setItem('inventory_selected_garment_tag', 'All');
       localStorage.setItem('inventory_selected_category', 'All');
@@ -291,27 +295,14 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
   };
 
   const handleSelectHomewareTag = (tag: string | 'All') => {
-    if (tag === 'All' || (categoryFilterScope === 'homeware' && selectedHomewareTag === tag)) {
-      setSelectedHomewareTag('All');
-      if (selectedHomewareCategory === 'All') {
-        setCategoryFilterScope('all');
-        try {
-          localStorage.setItem('inventory_category_filter_scope', 'all');
-        } catch (e) {}
-      }
-      try {
-        localStorage.setItem('inventory_selected_homeware_tag', 'All');
-      } catch (e) {}
-      return;
-    }
     setCategoryFilterScope('homeware');
-    setSelectedHomewareTag(tag);
+    setSelectedHomewareTag(tag === selectedHomewareTag ? 'All' : tag);
     setSelectedGarmentCategory('All');
     setSelectedGarmentTag('All');
     setSelectedTag('All');
     try {
       localStorage.setItem('inventory_category_filter_scope', 'homeware');
-      localStorage.setItem('inventory_selected_homeware_tag', tag);
+      localStorage.setItem('inventory_selected_homeware_tag', tag === selectedHomewareTag ? 'All' : tag);
       localStorage.setItem('inventory_selected_garment_category', 'All');
       localStorage.setItem('inventory_selected_garment_tag', 'All');
       localStorage.setItem('inventory_selected_tag', 'All');
@@ -337,12 +328,46 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
     } catch (e) {}
   };
 
+  const isItemHomeware = useCallback(
+    (itemOrCategory: WardrobeItem | string | undefined | null): boolean => {
+      if (!itemOrCategory) return false;
+      const cat = typeof itemOrCategory === 'string' ? itemOrCategory : itemOrCategory.category;
+      const itemType = typeof itemOrCategory === 'object' ? itemOrCategory.itemType : undefined;
+
+      if (cat && cat.trim()) {
+        const lower = cat.trim().toLowerCase();
+        const isShoeCare =
+          lower === 'shoe care' ||
+          lower === 'shoecare' ||
+          lower === 'shoe care & maintenance' ||
+          lower.includes('shoe care') ||
+          lower.includes('shoe tree');
+
+        // Shoe care explicitly belongs to wardrobe / footwear unless user explicitly placed in homewareCategories
+        if (isShoeCare && !homewareCategories.some((c) => c.toLowerCase() === lower)) {
+          return false;
+        }
+
+        // Section placement in user's active categories takes precedence
+        if (garmentCategories.some((c) => c.toLowerCase() === lower)) return false;
+        if (homewareCategories.some((c) => c.toLowerCase() === lower)) return true;
+      }
+
+      if (itemType === 'clothing') return false;
+      if (itemType === 'homeware_lifestyle') return true;
+      if (!cat) return false;
+
+      return isHomewareCategory(cat, garmentCategories, homewareCategories);
+    },
+    [garmentCategories, homewareCategories]
+  );
+
   const handleSetSelectedCategory = (cat: string | 'All') => {
     if (cat === 'All') {
       handleClearAllCategoryFilters();
       return;
     }
-    if (isHomewareCategory(cat)) {
+    if (isItemHomeware(cat)) {
       handleSelectHomewareCategory(cat);
     } else {
       handleSelectGarmentCategory(cat);
@@ -391,19 +416,87 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
     } catch (e) {}
   };
 
+  // Missing Details Audit & Quality Filter
+  const [missingDetailsFilter, setMissingDetailsFilter] = useState<MissingCriteria>(() => {
+    try {
+      const saved = localStorage.getItem('inventory_missing_details_filter');
+      if (saved) return saved as MissingCriteria;
+    } catch (e) {}
+    return 'all';
+  });
+
+  const handleSetMissingDetailsFilter = (criteria: MissingCriteria) => {
+    setMissingDetailsFilter(criteria);
+    try {
+      localStorage.setItem('inventory_missing_details_filter', criteria);
+    } catch (e) {}
+  };
+
+  const missingStats = useMemo(() => getMissingDetailsStats(items), [items]);
+
   const [sortBy, setSortBy] = useState<
-    'wears_desc' | 'price_desc' | 'price_asc' | 'rrp_desc' | 'newest'
+    | 'brand_asc'
+    | 'brand_desc'
+    | 'name_asc'
+    | 'name_desc'
+    | 'wears_desc'
+    | 'wears_asc'
+    | 'price_desc'
+    | 'price_asc'
+    | 'rrp_desc'
+    | 'newest'
+    | 'oldest'
+    | 'location_asc'
+    | 'color_asc'
+    | 'condition'
+    | 'for_sale'
   >(() => {
     try {
       const saved = localStorage.getItem('inventory_sort_by');
-      if (saved && ['wears_desc', 'price_desc', 'price_asc', 'rrp_desc', 'newest'].includes(saved)) {
+      if (
+        saved &&
+        [
+          'brand_asc',
+          'brand_desc',
+          'name_asc',
+          'name_desc',
+          'wears_desc',
+          'wears_asc',
+          'price_desc',
+          'price_asc',
+          'rrp_desc',
+          'newest',
+          'oldest',
+          'location_asc',
+          'color_asc',
+          'condition',
+          'for_sale',
+        ].includes(saved)
+      ) {
         return saved as any;
       }
     } catch (e) {}
     return 'wears_desc';
   });
 
-  const handleSetSortBy = (sort: 'wears_desc' | 'price_desc' | 'price_asc' | 'rrp_desc' | 'newest') => {
+  const handleSetSortBy = (
+    sort:
+      | 'brand_asc'
+      | 'brand_desc'
+      | 'name_asc'
+      | 'name_desc'
+      | 'wears_desc'
+      | 'wears_asc'
+      | 'price_desc'
+      | 'price_asc'
+      | 'rrp_desc'
+      | 'newest'
+      | 'oldest'
+      | 'location_asc'
+      | 'color_asc'
+      | 'condition'
+      | 'for_sale'
+  ) => {
     setSortBy(sort);
     try {
       localStorage.setItem('inventory_sort_by', sort);
@@ -468,11 +561,39 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
   const [newHomewareCategoryName, setNewHomewareCategoryName] = useState('');
   const [editingHomewareCategoryName, setEditingHomewareCategoryName] = useState<string | null>(null);
   const [editingHomewareCategoryValue, setEditingHomewareCategoryValue] = useState('');
+  const [showHomewareBarInAll, setShowHomewareBarInAll] = useState(false);
+
+  // Taxonomy Organization Modal
+  const [isOrganizeCategoriesOpen, setIsOrganizeCategoriesOpen] = useState(false);
+  const [isDraggingOverGarments, setIsDraggingOverGarments] = useState(false);
+  const [isDraggingOverHomeware, setIsDraggingOverHomeware] = useState(false);
 
   // Auto-Import Modal State
   const [isAutoImportOpen, setIsAutoImportOpen] = useState(false);
   const [autoImportTab, setAutoImportTab] = useState<'url' | 'photo' | 'text' | 'vinted'>('url');
   const [quickUrl, setQuickUrl] = useState('');
+
+  // Batch Line-by-Line Paste Modal
+  const [isBatchPasteOpen, setIsBatchPasteOpen] = useState(false);
+
+  // Bulk Suite Modal (Text Parser, Colorway Matrix, Batch Editor)
+  const [isBulkSuiteOpen, setIsBulkSuiteOpen] = useState(false);
+  const [bulkSuiteTab, setBulkSuiteTab] = useState<BulkSuiteTab>('text_parser');
+  const [bulkSuiteItemToVariant, setBulkSuiteItemToVariant] = useState<WardrobeItem | null>(null);
+  const [bulkSuiteSelectedIds, setBulkSuiteSelectedIds] = useState<string[]>([]);
+  const [isTravelCapsuleOpen, setIsTravelCapsuleOpen] = useState(false);
+  const [isFlatlayStudioOpen, setIsFlatlayStudioOpen] = useState(false);
+
+  const handleOpenBulkSuite = (
+    tab: BulkSuiteTab = 'text_parser',
+    itemToVariant: WardrobeItem | null = null,
+    selectedIds?: string[]
+  ) => {
+    setBulkSuiteTab(tab);
+    setBulkSuiteItemToVariant(itemToVariant);
+    setBulkSuiteSelectedIds(selectedIds || Array.from(selectedItemIds));
+    setIsBulkSuiteOpen(true);
+  };
 
   // Inline Editing States
   const [editingFieldId, setEditingFieldId] = useState<string | null>(null); // e.g. "item-123_name"
@@ -518,7 +639,7 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
   const uniqueGarmentTags = useMemo(() => {
     const counts: Record<string, number> = {};
     items.forEach((it) => {
-      if (!it.isArchived && !isHomewareCategory(it.category) && Array.isArray(it.tags)) {
+      if (!it.isArchived && !isItemHomeware(it) && Array.isArray(it.tags)) {
         it.tags.forEach((t) => {
           const clean = t.trim();
           if (clean) {
@@ -530,13 +651,13 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
     return Object.entries(counts)
       .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
       .map(([tag, count]) => ({ tag, count }));
-  }, [items]);
+  }, [items, isItemHomeware]);
 
   // Unique Tags specifically for Homeware pieces
   const uniqueHomewareTags = useMemo(() => {
     const counts: Record<string, number> = {};
     items.forEach((it) => {
-      if (!it.isArchived && isHomewareCategory(it.category) && Array.isArray(it.tags)) {
+      if (!it.isArchived && isItemHomeware(it) && Array.isArray(it.tags)) {
         it.tags.forEach((t) => {
           const clean = t.trim();
           if (clean) {
@@ -548,16 +669,16 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
     return Object.entries(counts)
       .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
       .map(([tag, count]) => ({ tag, count }));
-  }, [items]);
+  }, [items, isItemHomeware]);
 
   // Pipeline Counts (All, Closet, Purchased, Sold, Cancelled)
   const garmentItemsCount = useMemo(
-    () => items.filter((it) => !it.isArchived && !isHomewareCategory(it.category)).length,
-    [items]
+    () => items.filter((it) => !it.isArchived && !isItemHomeware(it)).length,
+    [items, isItemHomeware]
   );
   const homewareItemsCount = useMemo(
-    () => items.filter((it) => !it.isArchived && isHomewareCategory(it.category)).length,
-    [items]
+    () => items.filter((it) => !it.isArchived && isItemHomeware(it)).length,
+    [items, isItemHomeware]
   );
 
   const pipelineStats = useMemo(() => {
@@ -656,7 +777,7 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
 
         // Independent Category & Tag Filtering System (Garments vs Homeware)
         if (categoryFilterScope === 'garments') {
-          if (isHomewareCategory(item.category)) return false;
+          if (isItemHomeware(item)) return false;
           if (
             selectedGarmentCategory !== 'All' &&
             selectedGarmentCategory !== '__ALL_GARMENTS__' &&
@@ -670,7 +791,7 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
             }
           }
         } else if (categoryFilterScope === 'homeware') {
-          if (!isHomewareCategory(item.category)) return false;
+          if (!isItemHomeware(item)) return false;
           if (
             selectedHomewareCategory !== 'All' &&
             selectedHomewareCategory !== '__ALL_HOMEWARE__' &&
@@ -687,9 +808,9 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
           // Both are 'All', all inventory pieces are allowed
           // Optional backward compatible legacy filter check
           if (selectedCategory === '__GARMENTS__') {
-            if (isHomewareCategory(item.category)) return false;
+            if (isItemHomeware(item)) return false;
           } else if (selectedCategory === '__HOMEWARE__') {
-            if (!isHomewareCategory(item.category)) return false;
+            if (!isItemHomeware(item)) return false;
           } else if (
             selectedCategory !== 'All' &&
             (item.category || '').trim().toLowerCase() !== selectedCategory.trim().toLowerCase()
@@ -717,6 +838,48 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
           }
         }
         if (selectedCondition !== 'All' && item.condition !== selectedCondition) return false;
+
+        // Missing Details Audit Filtering
+        if (missingDetailsFilter !== 'all') {
+          const audit = auditGarmentDetails(item);
+          switch (missingDetailsFilter) {
+            case 'missing_size':
+              if (!audit.isMissingSize) return false;
+              break;
+            case 'missing_brand':
+              if (!audit.isMissingBrand) return false;
+              break;
+            case 'missing_material':
+              if (!audit.isMissingMaterial) return false;
+              break;
+            case 'missing_color':
+              if (!audit.isMissingColor) return false;
+              break;
+            case 'missing_price':
+              if (!audit.isMissingPrice) return false;
+              break;
+            case 'missing_rrp':
+              if (!audit.isMissingRrp) return false;
+              break;
+            case 'missing_category':
+              if (!audit.isMissingCategory) return false;
+              break;
+            case 'missing_image':
+              if (!audit.isMissingImage) return false;
+              break;
+            case 'missing_location':
+              if (!audit.isMissingLocation) return false;
+              break;
+            case 'any_missing':
+              if (!audit.hasAnyMissing) return false;
+              break;
+            case 'complete':
+              if (audit.hasAnyMissing) return false;
+              break;
+            default:
+              break;
+          }
+        }
 
         if (searchQuery.trim()) {
           const query = searchQuery.toLowerCase();
@@ -760,16 +923,55 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
       })
       .sort((a, b) => {
         switch (sortBy) {
+          case 'brand_asc':
+            return (a.brand || '').localeCompare(b.brand || '');
+          case 'brand_desc':
+            return (b.brand || '').localeCompare(a.brand || '');
+          case 'name_asc':
+            return (a.name || '').localeCompare(b.name || '');
+          case 'name_desc':
+            return (b.name || '').localeCompare(a.name || '');
           case 'wears_desc':
             return b.wearCount - a.wearCount;
+          case 'wears_asc':
+            return a.wearCount - b.wearCount;
           case 'price_desc':
             return b.purchasePrice - a.purchasePrice;
           case 'price_asc':
             return a.purchasePrice - b.purchasePrice;
           case 'rrp_desc':
             return (b.rrp || 0) - (a.rrp || 0);
-          case 'newest':
-            return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+          case 'newest': {
+            const dateA = a.purchaseDate ? new Date(a.purchaseDate).getTime() : new Date(a.createdAt || 0).getTime();
+            const dateB = b.purchaseDate ? new Date(b.purchaseDate).getTime() : new Date(b.createdAt || 0).getTime();
+            return dateB - dateA;
+          }
+          case 'oldest': {
+            const dateA = a.purchaseDate ? new Date(a.purchaseDate).getTime() : new Date(a.createdAt || 0).getTime();
+            const dateB = b.purchaseDate ? new Date(b.purchaseDate).getTime() : new Date(b.createdAt || 0).getTime();
+            return dateA - dateB;
+          }
+          case 'location_asc': {
+            const locA = a.storageLocation || a.roomLocation || '';
+            const locB = b.storageLocation || b.roomLocation || '';
+            return locA.localeCompare(locB);
+          }
+          case 'color_asc':
+            return (a.color || '').localeCompare(b.color || '');
+          case 'condition': {
+            const condOrder: Record<string, number> = {
+              'Pristine / New': 1,
+              'Excellent': 2,
+              'Good': 3,
+              'Vintage / Well-Loved': 4,
+            };
+            return (condOrder[a.condition] || 99) - (condOrder[b.condition] || 99);
+          }
+          case 'for_sale': {
+            const aInSale = saleItemByWardrobeId.has(a.id) ? 1 : 0;
+            const bInSale = saleItemByWardrobeId.has(b.id) ? 1 : 0;
+            return bInSale - aInSale;
+          }
           default:
             return 0;
         }
@@ -788,6 +990,7 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
     selectedSeason,
     selectedCondition,
     favoritesOnly,
+    saleItemByWardrobeId,
     searchQuery,
     sortBy,
   ]);
@@ -863,8 +1066,7 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
   };
 
   const handleQuickDeleteCategory = (itemId: string) => {
-    const fallbackCategory = categories[0] || 'Tops';
-    updateItem(itemId, { category: fallbackCategory });
+    updateItem(itemId, { category: '' });
   };
 
   const handleAddNewCategory = () => {
@@ -1048,30 +1250,42 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
               </span>
             </div>
             {displaySettings.showStatsBanner && (
-              <p className="text-xs text-[#767670] mt-0.5 flex flex-wrap items-center gap-x-1.5">
-                <span>Showing {filteredItems.length} matching pieces</span>
-                <span>•</span>
-                <span>
-                  Valuation: <strong className="text-[#1A1A1A] font-mono">{formatGbp(filteredTotalValue)}</strong>
+              <div className="text-xs text-[#767670] mt-1 flex flex-wrap items-center gap-y-1 leading-relaxed">
+                <span className="inline-flex items-center whitespace-nowrap shrink-0">
+                  Showing {filteredItems.length} matching {filteredItems.length === 1 ? 'piece' : 'pieces'}
                 </span>
+
+                <span className="inline-flex items-center whitespace-nowrap shrink-0">
+                  <span className="text-[#A5A59E] mx-2 select-none shrink-0" aria-hidden="true">•</span>
+                  <span>
+                    Valuation:&nbsp;<strong className="text-[#1A1A1A] font-mono">{formatGbp(filteredTotalValue)}</strong>
+                  </span>
+                </span>
+
                 {filteredTotalRrp > 0 && (
-                  <>
-                    <span>•</span>
+                  <span className="inline-flex items-center whitespace-nowrap shrink-0">
+                    <span className="text-[#A5A59E] mx-2 select-none shrink-0" aria-hidden="true">•</span>
                     <span>
-                      Est. Retail RRP: <strong className="text-[#5A5A55] font-mono">{formatGbp(filteredTotalRrp)}</strong>
+                      Est. Retail RRP:&nbsp;<strong className="text-[#5A5A55] font-mono">{formatGbp(filteredTotalRrp)}</strong>
                     </span>
                     {filteredTotalRrp > filteredTotalValue && (
-                      <span className="text-emerald-700 font-mono text-[11px] font-bold">
+                      <span className="ml-1.5 text-emerald-700 font-mono text-[11px] font-bold whitespace-nowrap shrink-0">
                         (Saved {formatGbp(filteredTotalRrp - filteredTotalValue)} / {Math.round(((filteredTotalRrp - filteredTotalValue) / filteredTotalRrp) * 100)}%)
                       </span>
                     )}
-                  </>
+                  </span>
                 )}
-                <span>•</span>
-                <span>
-                  Total Wears Logged: <strong className="text-[#1A1A1A] font-mono">{filteredTotalWears} wears</strong>
+
+                <span className="inline-flex items-center whitespace-nowrap shrink-0">
+                  <span className="text-[#A5A59E] mx-2 select-none shrink-0" aria-hidden="true">•</span>
+                  <span>
+                    Total Wears Logged:&nbsp;
+                    <strong className="text-[#1A1A1A] font-mono">
+                      {filteredTotalWears} {filteredTotalWears === 1 ? 'wear' : 'wears'}
+                    </strong>
+                  </span>
                 </span>
-              </p>
+              </div>
             )}
           </div>
 
@@ -1164,33 +1378,98 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
           </div>
         </div>
 
-        {/* Quick URL Auto-Add Inline Bar */}
-        {displaySettings.showQuickUrlBar && (
-          <div className="mt-3 pt-3 border-t border-[#E5E5E1] flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-            <div className="flex-1 relative">
-              <input
-                type="url"
-                placeholder="Quick link import: Paste product URL (e.g. Barbour, Zara, Arket, Net-A-Porter) and press Enter..."
-                value={quickUrl}
-                onChange={(e) => setQuickUrl(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && quickUrl.trim()) {
-                    setIsAutoImportOpen(true);
-                  }
+        {/* Dedicated Line: Batch Paste Lines & Quick URL Import */}
+        <div className="mt-3 pt-3 border-t border-[#E5E5E1] flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
+          {displaySettings.showQuickUrlBar ? (
+            <div className="flex-1 flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+              <div className="flex-1 relative">
+                <input
+                  type="url"
+                  placeholder="Quick link import: Paste product URL (e.g. Barbour, Zara, Arket, Net-A-Porter) and press Enter..."
+                  value={quickUrl}
+                  onChange={(e) => setQuickUrl(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      setAutoImportTab('url');
+                      setIsAutoImportOpen(true);
+                    }
+                  }}
+                  className="w-full pl-8 pr-3 py-1.5 bg-[#F8F7F4] border border-[#E5E5E1] text-xs text-[#1A1A1A] placeholder:text-[#A5A59E] focus:bg-white focus:outline-none focus:border-[#8C7355]"
+                />
+                <Link2 className="w-3.5 h-3.5 text-[#8C7355] absolute left-2.5 top-2" />
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setAutoImportTab('url');
+                  setIsAutoImportOpen(true);
                 }}
-                className="w-full pl-8 pr-3 py-1.5 bg-[#F8F7F4] border border-[#E5E5E1] text-xs text-[#1A1A1A] placeholder:text-[#A5A59E] focus:bg-white focus:outline-none focus:border-[#8C7355]"
-              />
-              <Link2 className="w-3.5 h-3.5 text-[#8C7355] absolute left-2.5 top-2" />
+                className="px-3 py-1.5 bg-[#F2F1ED] hover:bg-[#E5E3DC] border border-[#E5E5E1] text-xs font-mono text-[#4A4A45] hover:text-[#1A1A1A] transition-colors cursor-pointer flex items-center justify-center gap-1 shrink-0"
+              >
+                <Sparkles className="w-3 h-3 text-[#8C7355]" />
+                Import from URL
+              </button>
             </div>
+          ) : (
+            <div className="text-xs text-[#767670] font-mono">
+              Fast batch entry tools:
+            </div>
+          )}
+
+          {/* Batch & Bulk Suite Actions */}
+          <div className="flex items-center gap-2 shrink-0">
             <button
-              onClick={() => setIsAutoImportOpen(true)}
-              className="px-3 py-1.5 bg-[#F2F1ED] hover:bg-[#E5E3DC] border border-[#E5E5E1] text-xs font-mono text-[#4A4A45] hover:text-[#1A1A1A] transition-colors cursor-pointer flex items-center justify-center gap-1 shrink-0"
+              type="button"
+              onClick={() => handleOpenBulkSuite('text_parser')}
+              id="wardrobe-bulk-suite-btn"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono font-medium text-[#1A1A1A] bg-[#FAF9F5] hover:bg-[#F2F1ED] border border-[#8C7355] text-[#8C7355] hover:text-[#735D43] transition-colors cursor-pointer shadow-xs"
+              title="Open Bulk Suite: Fast text line parser, multi-colorway generator, and batch variant editor"
             >
-              <Sparkles className="w-3 h-3 text-[#8C7355]" />
-              Import from URL
+              <Layers className="w-3.5 h-3.5 text-[#8C7355]" />
+              <span className="font-bold">Bulk &amp; Colorway Suite</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => handleOpenBulkSuite('colorways')}
+              className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-mono font-medium text-[#4A4A45] bg-[#F8F7F4] hover:bg-[#EAE8E3] border border-[#D5D5D0] transition-colors cursor-pointer shadow-xs"
+              title="Generate multiple of the same item in different colours, sizes and materials"
+            >
+              <Palette className="w-3.5 h-3.5 text-[#8C7355]" />
+              <span>Colorway Matrix</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsBatchPasteOpen(true)}
+              id="wardrobe-batch-paste-lines-btn"
+              className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-mono font-medium text-[#5A5A55] bg-[#F8F7F4] hover:bg-[#EAE8E3] border border-[#D5D5D0] transition-colors cursor-pointer shadow-xs"
+              title="Paste multi-line text (brand - item - colour - material - size - price)"
+            >
+              <ListPlus className="w-3.5 h-3.5 text-[#767670]" />
+              <span>Paste Lines</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsTravelCapsuleOpen(true)}
+              id="wardrobe-travel-capsule-btn"
+              className="hidden md:flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-mono font-medium text-[#4A4A45] bg-[#F8F7F4] hover:bg-[#EAE8E3] border border-[#D5D5D0] transition-colors cursor-pointer shadow-xs"
+              title="Open Travel Capsule & Packing Studio: Destination & luggage optimizer"
+            >
+              <Compass className="w-3.5 h-3.5 text-[#8C7355]" />
+              <span>Travel Capsule</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsFlatlayStudioOpen(true)}
+              id="wardrobe-flatlay-studio-btn"
+              className="hidden md:flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-mono font-medium text-[#4A4A45] bg-[#F8F7F4] hover:bg-[#EAE8E3] border border-[#D5D5D0] transition-colors cursor-pointer shadow-xs"
+              title="Open Flatlay & Moodboard Studio: Drag-and-drop editorial canvas"
+            >
+              <Palette className="w-3.5 h-3.5 text-[#8C7355]" />
+              <span>Flatlay Studio</span>
             </button>
           </div>
-        )}
+        </div>
       </div>
 
       {/* Interactive Pipeline Status Tabs */}
@@ -1280,6 +1559,88 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
       {/* Category Managers & Filter Bars (Garments & Homeware Duplicated Sections) */}
       {displaySettings.showCategoryTabs && (
         <div className="space-y-3">
+          {/* Taxonomy Scope Switcher: Garments vs Homeware vs All Pieces */}
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#E5E5E1] pb-2">
+            <div className="flex items-center gap-1.5 p-0.5 bg-[#F0EFEA] border border-[#E5E5E1] rounded-xs">
+              <button
+                type="button"
+                onClick={() => {
+                  setCategoryFilterScope('garments');
+                  setSelectedGarmentCategory('All');
+                  setSelectedGarmentTag('All');
+                  try {
+                    localStorage.setItem('inventory_category_filter_scope', 'garments');
+                    localStorage.setItem('inventory_selected_garment_category', 'All');
+                    localStorage.setItem('inventory_selected_garment_tag', 'All');
+                  } catch (e) {}
+                }}
+                className={`px-3 py-1 text-xs font-mono font-medium flex items-center gap-1.5 transition-all cursor-pointer rounded-xs ${
+                  categoryFilterScope === 'garments'
+                    ? 'bg-white text-[#1A1A1A] font-bold shadow-xs border border-[#D5D5D0]'
+                    : 'text-[#6A6A64] hover:text-[#1A1A1A] hover:bg-white/60'
+                }`}
+              >
+                <Shirt className="w-3.5 h-3.5 text-[#8C7355]" />
+                <span>Wardrobe Garments ({garmentItemsCount})</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setCategoryFilterScope('homeware');
+                  setSelectedHomewareCategory('All');
+                  setSelectedHomewareTag('All');
+                  try {
+                    localStorage.setItem('inventory_category_filter_scope', 'homeware');
+                    localStorage.setItem('inventory_selected_homeware_category', 'All');
+                    localStorage.setItem('inventory_selected_homeware_tag', 'All');
+                  } catch (e) {}
+                }}
+                className={`px-3 py-1 text-xs font-mono font-medium flex items-center gap-1.5 transition-all cursor-pointer rounded-xs ${
+                  categoryFilterScope === 'homeware'
+                    ? 'bg-white text-[#1A1A1A] font-bold shadow-xs border border-[#D5D5D0]'
+                    : 'text-[#6A6A64] hover:text-[#1A1A1A] hover:bg-white/60'
+                }`}
+              >
+                <Package className="w-3.5 h-3.5 text-[#8C7355]" />
+                <span>Homeware &amp; Living ({homewareItemsCount})</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setCategoryFilterScope('all');
+                  setSelectedCategory('All');
+                  setSelectedTag('All');
+                  try {
+                    localStorage.setItem('inventory_category_filter_scope', 'all');
+                    localStorage.setItem('inventory_selected_category', 'All');
+                    localStorage.setItem('inventory_selected_tag', 'All');
+                  } catch (e) {}
+                }}
+                className={`px-3 py-1 text-xs font-mono font-medium flex items-center gap-1.5 transition-all cursor-pointer rounded-xs ${
+                  categoryFilterScope === 'all'
+                    ? 'bg-white text-[#1A1A1A] font-bold shadow-xs border border-[#D5D5D0]'
+                    : 'text-[#6A6A64] hover:text-[#1A1A1A] hover:bg-white/60'
+                }`}
+              >
+                <Layers className="w-3.5 h-3.5 text-[#8C7355]" />
+                <span>All Pieces ({items.length})</span>
+              </button>
+            </div>
+
+            {categoryFilterScope === 'all' && (
+              <button
+                type="button"
+                onClick={() => setShowHomewareBarInAll(!showHomewareBarInAll)}
+                className="text-xs font-mono text-[#8C7355] hover:text-[#1A1A1A] flex items-center gap-1 cursor-pointer bg-white px-2 py-1 border border-[#E5E5E1]"
+              >
+                <Package className="w-3 h-3" />
+                <span>{showHomewareBarInAll ? 'Hide Homeware Bar' : `Show Homeware Bar (${homewareCategories.length})`}</span>
+              </button>
+            )}
+          </div>
+
           {/* Active Category Filter Global Banner (if filtered) */}
           {categoryFilterScope !== 'all' && (
             <div className="bg-[#FAF9F6] border border-[#8C7355]/30 px-3 py-1.5 flex items-center justify-between shadow-xs">
@@ -1309,9 +1670,40 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
           )}
 
           {/* 1. Garment Categories & Collections */}
-          <div className={`bg-white border p-3 space-y-2.5 shadow-xs transition-colors ${
-            categoryFilterScope === 'garments' ? 'border-[#8C7355]' : 'border-[#E5E5E1]'
-          }`}>
+          {(categoryFilterScope === 'garments' || categoryFilterScope === 'all') && (
+            <div
+              onDragOver={(e) => {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+                if (!isDraggingOverGarments) setIsDraggingOverGarments(true);
+              }}
+              onDragLeave={(e) => {
+                if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+                  setIsDraggingOverGarments(false);
+                }
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                setIsDraggingOverGarments(false);
+                try {
+                  const dataStr = e.dataTransfer.getData('application/json');
+                  const data = dataStr ? JSON.parse(dataStr) : null;
+                  if (data?.category && data.sourceSection === 'homeware') {
+                    moveCategory(data.category, 'garments');
+                  }
+                } catch {
+                  const plain = e.dataTransfer.getData('text/plain');
+                  if (plain) moveCategory(plain, 'garments');
+                }
+              }}
+              className={`bg-white border p-3 space-y-2.5 shadow-xs transition-colors ${
+                isDraggingOverGarments
+                  ? 'border-2 border-dashed border-[#8C7355] bg-amber-50/40'
+                  : categoryFilterScope === 'garments'
+                  ? 'border-[#8C7355]'
+                  : 'border-[#E5E5E1]'
+              }`}
+            >
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Shirt className="w-3.5 h-3.5 text-[#8C7355]" />
@@ -1332,7 +1724,7 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
                 )}
               </div>
 
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2 sm:gap-3">
                 {categoryFilterScope === 'garments' && (selectedGarmentCategory !== 'All' || selectedGarmentTag !== 'All') && (
                   <button
                     type="button"
@@ -1347,6 +1739,17 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
                     Clear garment filter ({selectedGarmentCategory !== 'All' ? selectedGarmentCategory : `#${selectedGarmentTag}`})
                   </button>
                 )}
+
+                {/* Organize / Drag & Drop Modal Button */}
+                <button
+                  type="button"
+                  onClick={() => setIsOrganizeCategoriesOpen(true)}
+                  className="flex items-center gap-1 px-2 py-1 text-xs font-mono font-medium text-[#8C7355] bg-[#F8F7F4] hover:bg-[#EAE8E3] border border-[#E5E5E1] transition-colors cursor-pointer"
+                  title="Drag and drop or sort categories between Clothes and Homeware"
+                >
+                  <Layers className="w-3 h-3" />
+                  <span>Organize</span>
+                </button>
 
                 {!isAddingGarmentCategory ? (
                   <button
@@ -1393,13 +1796,19 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
                       resetGarmentCategories();
                     }
                   }}
-                  className="text-[10px] font-mono text-[#A5A59E] hover:text-[#5A5A55] hover:underline cursor-pointer"
+                  className="text-[10px] font-mono text-[#A5A59E] hover:text-[#5A5A55] hover:underline cursor-pointer hidden sm:inline"
                   title="Reset to default 8 garment categories"
                 >
                   Reset Defaults
                 </button>
               </div>
             </div>
+
+            {isDraggingOverGarments && (
+              <div className="border border-dashed border-[#8C7355] bg-amber-50/70 p-2 text-center text-xs font-mono text-[#8C7355] font-semibold">
+                Drop category chip here to move it to Clothes &amp; Garments
+              </div>
+            )}
 
             {/* Garment Category Chips */}
             <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-1">
@@ -1456,16 +1865,23 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
                 return (
                   <div
                     key={cat}
-                    className={`group inline-flex items-center gap-1 px-2.5 py-1 text-xs border transition-all whitespace-nowrap font-mono ${
+                    draggable={true}
+                    onDragStart={(e) => {
+                      e.dataTransfer.setData('application/json', JSON.stringify({ category: cat, sourceSection: 'garments' }));
+                      e.dataTransfer.setData('text/plain', cat);
+                      e.dataTransfer.effectAllowed = 'move';
+                    }}
+                    className={`group inline-flex items-center gap-1 px-2.5 py-1 text-xs border transition-all whitespace-nowrap font-mono cursor-grab active:cursor-grabbing ${
                       isSelected
                         ? 'bg-[#8C7355] text-white border-[#8C7355] font-semibold shadow-xs'
                         : 'bg-[#F8F7F4] text-[#4A4A45] hover:bg-[#EAE8E3] border-[#E5E5E1]'
                     }`}
                   >
+                    <GripVertical className="w-2.5 h-2.5 text-[#A5A59E] opacity-40 group-hover:opacity-100 shrink-0" />
                     <span
                       onClick={() => handleSelectGarmentCategory(cat)}
                       className="cursor-pointer hover:underline"
-                      title={`Filter by garment category ${cat}`}
+                      title={`Filter by garment category "${cat}". Drag to Homeware to reclassify.`}
                     >
                       {cat} ({count})
                     </span>
@@ -1482,6 +1898,19 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
                       title={`Rename garment category "${cat}"`}
                     >
                       <Edit2 className="w-2.5 h-2.5" />
+                    </button>
+
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        moveCategory(cat, 'homeware');
+                      }}
+                      className={`p-0.5 opacity-40 hover:opacity-100 cursor-pointer ${
+                        isSelected ? 'text-white hover:text-amber-200' : 'text-[#767670] hover:text-[#8C7355]'
+                      }`}
+                      title={`Move "${cat}" to Homeware section`}
+                    >
+                      <ArrowRightLeft className="w-2.5 h-2.5" />
                     </button>
 
                     <button
@@ -1542,11 +1971,43 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
               </div>
             )}
           </div>
+          )}
 
-          {/* 2. Homeware Categories & Collections (Duplicated Separate Heading & Management Box) */}
-          <div className={`bg-white border p-3 space-y-2.5 shadow-xs transition-colors ${
-            categoryFilterScope === 'homeware' ? 'border-[#8C7355]' : 'border-[#E5E5E1]'
-          }`}>
+          {/* 2. Homeware Categories & Collections (Separated and Only Shown in Homeware or Expanded) */}
+          {(categoryFilterScope === 'homeware' || (categoryFilterScope === 'all' && showHomewareBarInAll)) && (
+            <div
+              onDragOver={(e) => {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+                if (!isDraggingOverHomeware) setIsDraggingOverHomeware(true);
+              }}
+              onDragLeave={(e) => {
+                if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+                  setIsDraggingOverHomeware(false);
+                }
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                setIsDraggingOverHomeware(false);
+                try {
+                  const dataStr = e.dataTransfer.getData('application/json');
+                  const data = dataStr ? JSON.parse(dataStr) : null;
+                  if (data?.category && data.sourceSection === 'garments') {
+                    moveCategory(data.category, 'homeware');
+                  }
+                } catch {
+                  const plain = e.dataTransfer.getData('text/plain');
+                  if (plain) moveCategory(plain, 'homeware');
+                }
+              }}
+              className={`bg-white border p-3 space-y-2.5 shadow-xs transition-colors ${
+                isDraggingOverHomeware
+                  ? 'border-2 border-dashed border-[#8C7355] bg-amber-50/40'
+                  : categoryFilterScope === 'homeware'
+                  ? 'border-[#8C7355]'
+                  : 'border-[#E5E5E1]'
+              }`}
+            >
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Package className="w-3.5 h-3.5 text-[#8C7355]" />
@@ -1567,7 +2028,7 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
                 )}
               </div>
 
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2 sm:gap-3">
                 {categoryFilterScope === 'homeware' && (selectedHomewareCategory !== 'All' || selectedHomewareTag !== 'All') && (
                   <button
                     type="button"
@@ -1582,6 +2043,17 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
                     Clear homeware filter ({selectedHomewareCategory !== 'All' ? selectedHomewareCategory : `#${selectedHomewareTag}`})
                   </button>
                 )}
+
+                {/* Organize / Drag & Drop Modal Button */}
+                <button
+                  type="button"
+                  onClick={() => setIsOrganizeCategoriesOpen(true)}
+                  className="flex items-center gap-1 px-2 py-1 text-xs font-mono font-medium text-[#8C7355] bg-[#F8F7F4] hover:bg-[#EAE8E3] border border-[#E5E5E1] transition-colors cursor-pointer"
+                  title="Drag and drop or sort categories between Clothes and Homeware"
+                >
+                  <Layers className="w-3 h-3" />
+                  <span>Organize</span>
+                </button>
 
                 {!isAddingHomewareCategory ? (
                   <button
@@ -1628,13 +2100,19 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
                       resetHomewareCategories();
                     }
                   }}
-                  className="text-[10px] font-mono text-[#A5A59E] hover:text-[#5A5A55] hover:underline cursor-pointer"
+                  className="text-[10px] font-mono text-[#A5A59E] hover:text-[#5A5A55] hover:underline cursor-pointer hidden sm:inline"
                   title="Reset to default 6 homeware categories"
                 >
                   Reset Defaults
                 </button>
               </div>
             </div>
+
+            {isDraggingOverHomeware && (
+              <div className="border border-dashed border-[#8C7355] bg-amber-50/70 p-2 text-center text-xs font-mono text-[#8C7355] font-semibold">
+                Drop category chip here to move it to Homeware &amp; Living
+              </div>
+            )}
 
             {/* Homeware Category Chips */}
             <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-1">
@@ -1691,16 +2169,23 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
                 return (
                   <div
                     key={cat}
-                    className={`group inline-flex items-center gap-1 px-2.5 py-1 text-xs border transition-all whitespace-nowrap font-mono ${
+                    draggable={true}
+                    onDragStart={(e) => {
+                      e.dataTransfer.setData('application/json', JSON.stringify({ category: cat, sourceSection: 'homeware' }));
+                      e.dataTransfer.setData('text/plain', cat);
+                      e.dataTransfer.effectAllowed = 'move';
+                    }}
+                    className={`group inline-flex items-center gap-1 px-2.5 py-1 text-xs border transition-all whitespace-nowrap font-mono cursor-grab active:cursor-grabbing ${
                       isSelected
                         ? 'bg-[#8C7355] text-white border-[#8C7355] font-semibold shadow-xs'
                         : 'bg-[#F8F7F4] text-[#4A4A45] hover:bg-[#EAE8E3] border-[#E5E5E1]'
                     }`}
                   >
+                    <GripVertical className="w-2.5 h-2.5 text-[#A5A59E] opacity-40 group-hover:opacity-100 shrink-0" />
                     <span
                       onClick={() => handleSelectHomewareCategory(cat)}
                       className="cursor-pointer hover:underline"
-                      title={`Filter by homeware category ${cat}`}
+                      title={`Filter by homeware category "${cat}". Drag to Clothes to reclassify.`}
                     >
                       {cat} ({count})
                     </span>
@@ -1717,6 +2202,19 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
                       title={`Rename homeware category "${cat}"`}
                     >
                       <Edit2 className="w-2.5 h-2.5" />
+                    </button>
+
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        moveCategory(cat, 'garments');
+                      }}
+                      className={`p-0.5 opacity-40 hover:opacity-100 cursor-pointer ${
+                        isSelected ? 'text-white hover:text-amber-200' : 'text-[#767670] hover:text-[#8C7355]'
+                      }`}
+                      title={`Move "${cat}" to Clothes section`}
+                    >
+                      <ArrowRightLeft className="w-2.5 h-2.5" />
                     </button>
 
                     <button
@@ -1777,6 +2275,7 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
               </div>
             )}
           </div>
+          )}
         </div>
       )}
 
@@ -1900,6 +2399,47 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
                 )}
               </div>
 
+              {/* Missing Details Audit Filter */}
+              <div className="flex items-center gap-1 text-xs">
+                <span className="text-[#767670] font-mono text-[11px] flex items-center gap-1">
+                  <AlertTriangle className="w-3 h-3 text-amber-600" />
+                  Audit:
+                </span>
+                <div className="relative">
+                  <select
+                    value={missingDetailsFilter}
+                    onChange={(e) => handleSetMissingDetailsFilter(e.target.value as MissingCriteria)}
+                    className={`border text-xs px-2 py-1 pr-6 focus:outline-none appearance-none font-medium cursor-pointer rounded-xs ${
+                      missingDetailsFilter !== 'all'
+                        ? 'bg-amber-50 border-amber-300 text-amber-900 font-bold'
+                        : 'bg-[#F8F7F4] border-[#E5E5E1] text-[#1A1A1A] focus:border-[#8C7355]'
+                    }`}
+                    title="Filter clothes by missing attributes (size, brand, material, price)"
+                  >
+                    <option value="all">Missing Details (Off)</option>
+                    <option value="missing_size">Missing Size ({missingStats.missingSize})</option>
+                    <option value="missing_brand">Missing Brand ({missingStats.missingBrand})</option>
+                    <option value="missing_material">Missing Material ({missingStats.missingMaterial})</option>
+                    <option value="missing_color">Missing Color ({missingStats.missingColor})</option>
+                    <option value="missing_price">Missing Price / £0 ({missingStats.missingPrice})</option>
+                    <option value="missing_rrp">Missing RRP ({missingStats.missingRrp})</option>
+                    <option value="missing_location">Missing Location ({missingStats.missingLocation})</option>
+                    <option value="any_missing">Any Missing Detail ({missingStats.anyMissing})</option>
+                    <option value="complete">Complete / Fully Detailed ({missingStats.complete})</option>
+                  </select>
+                  <ChevronDown className="w-3 h-3 text-[#767670] absolute right-1.5 top-2 pointer-events-none" />
+                </div>
+                {missingDetailsFilter !== 'all' && (
+                  <button
+                    onClick={() => handleSetMissingDetailsFilter('all')}
+                    className="text-[#767670] hover:text-rose-600 p-0.5 cursor-pointer"
+                    title="Clear missing details filter"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                )}
+              </div>
+
               {/* Favorites Toggle */}
               <button
                 onClick={() => handleSetFavoritesOnly(!favoritesOnly)}
@@ -1938,6 +2478,7 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
                 selectedBrand !== 'All' ||
                 selectedSeason !== 'All' ||
                 selectedCondition !== 'All' ||
+                missingDetailsFilter !== 'all' ||
                 favoritesOnly ||
                 searchQuery) && (
                 <button
@@ -1947,6 +2488,7 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
                     handleSetSelectedBrand('All');
                     handleSetSelectedSeason('All');
                     handleSetSelectedCondition('All');
+                    handleSetMissingDetailsFilter('all');
                     handleSetFavoritesOnly(false);
                     setSearchQuery('');
                   }}
@@ -1966,11 +2508,27 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
                     onChange={(e) => handleSetSortBy(e.target.value as any)}
                     className="bg-[#F8F7F4] border border-[#E5E5E1] text-[#1A1A1A] text-xs px-2 py-1 pr-6 focus:outline-none focus:border-[#8C7355] appearance-none font-medium"
                   >
-                    <option value="wears_desc">Most Worn (Frequency)</option>
-                    <option value="price_desc">Price: High to Low (£)</option>
-                    <option value="price_asc">Price: Low to High (£)</option>
-                    <option value="rrp_desc">RRP: High to Low (£)</option>
-                    <option value="newest">Recently Added</option>
+                    <optgroup label="Brand & Name">
+                      <option value="brand_asc">Brand: A to Z</option>
+                      <option value="brand_desc">Brand: Z to A</option>
+                      <option value="name_asc">Item Name: A to Z</option>
+                      <option value="name_desc">Item Name: Z to A</option>
+                    </optgroup>
+                    <optgroup label="Location & Status">
+                      <option value="location_asc">Storage Location: A to Z</option>
+                      <option value="for_sale">Listed for Sale First</option>
+                      <option value="color_asc">Colour: A to Z</option>
+                      <option value="condition">Condition: Pristine First</option>
+                    </optgroup>
+                    <optgroup label="Usage & Value">
+                      <option value="wears_desc">Most Worn (Frequency)</option>
+                      <option value="wears_asc">Least Worn</option>
+                      <option value="price_desc">Price: High to Low (£)</option>
+                      <option value="price_asc">Price: Low to High (£)</option>
+                      <option value="rrp_desc">RRP: High to Low (£)</option>
+                      <option value="newest">Recently Acquired / Added</option>
+                      <option value="oldest">Oldest Acquired / Added</option>
+                    </optgroup>
                   </select>
                   <ChevronDown className="w-3 h-3 text-[#767670] absolute right-1.5 top-2 pointer-events-none" />
                 </div>
@@ -1990,6 +2548,7 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
             selectedBrand !== 'All' ||
             selectedSeason !== 'All' ||
             selectedCondition !== 'All' ||
+            missingDetailsFilter !== 'all' ||
             favoritesOnly) && (
             <div className="flex flex-wrap items-center gap-1.5 pt-2 border-t border-[#E5E5E1] text-[11px] font-mono">
               <span className="text-[#767670] uppercase tracking-wider text-[10px]">Active Filters:</span>
@@ -2151,8 +2710,104 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
                   </button>
                 </span>
               )}
+
+              {missingDetailsFilter !== 'all' && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-amber-50 border border-amber-300 text-amber-900 font-bold rounded-xs">
+                  <AlertTriangle className="w-3 h-3 text-amber-600" />
+                  Missing:{' '}
+                  {missingDetailsFilter === 'missing_size'
+                    ? 'Size'
+                    : missingDetailsFilter === 'missing_brand'
+                    ? 'Brand'
+                    : missingDetailsFilter === 'missing_material'
+                    ? 'Material'
+                    : missingDetailsFilter === 'missing_color'
+                    ? 'Color'
+                    : missingDetailsFilter === 'missing_price'
+                    ? 'Price (£0)'
+                    : missingDetailsFilter === 'missing_rrp'
+                    ? 'RRP'
+                    : missingDetailsFilter === 'missing_location'
+                    ? 'Location'
+                    : missingDetailsFilter === 'complete'
+                    ? 'Fully Detailed'
+                    : 'Any Detail'}
+                  <button
+                    type="button"
+                    onClick={() => handleSetMissingDetailsFilter('all')}
+                    className="hover:text-rose-600 cursor-pointer ml-0.5"
+                    title="Remove missing filter"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </span>
+              )}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Missing Details Remediation Banner */}
+      {missingDetailsFilter !== 'all' && (
+        <div className="bg-amber-50/90 border border-amber-300 px-4 py-2.5 flex flex-wrap items-center justify-between gap-3 text-xs font-mono text-amber-900 shadow-xs mb-3">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+            <span>
+              <strong>Audit View Active:</strong> Showing {filteredItems.length} wardrobe pieces with{' '}
+              <span className="font-bold underline">
+                {missingDetailsFilter === 'missing_size'
+                  ? 'Missing Size'
+                  : missingDetailsFilter === 'missing_brand'
+                  ? 'Missing Brand'
+                  : missingDetailsFilter === 'missing_material'
+                  ? 'Missing Fabric/Material'
+                  : missingDetailsFilter === 'missing_color'
+                  ? 'Missing Color'
+                  : missingDetailsFilter === 'missing_price'
+                  ? 'Missing Price (£0)'
+                  : missingDetailsFilter === 'missing_rrp'
+                  ? 'Missing RRP'
+                  : missingDetailsFilter === 'complete'
+                  ? 'All Details Complete'
+                  : 'Missing Details'}
+              </span>
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                const allFilteredIds = filteredItems.map((i) => i.id);
+                setSelectedItemIds(new Set(allFilteredIds));
+              }}
+              className="px-2.5 py-1 bg-white hover:bg-amber-100 border border-amber-300 text-amber-900 rounded-xs text-[11px] font-bold cursor-pointer transition shadow-2xs"
+            >
+              Select All ({filteredItems.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const allFilteredIds = filteredItems.map((i) => i.id);
+                setSelectedItemIds(new Set(allFilteredIds));
+                setIsBulkEditOpen(true);
+              }}
+              className="px-2.5 py-1 bg-[#8C7355] hover:bg-[#735D43] text-white rounded-xs text-[11px] font-bold cursor-pointer transition shadow-2xs flex items-center gap-1"
+            >
+              <Sliders className="w-3 h-3" />
+              <span>Multi-Edit ({filteredItems.length})</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const allFilteredIds = filteredItems.map((i) => i.id);
+                handleOpenBulkSuite('batch_edit', null, allFilteredIds);
+              }}
+              className="px-2.5 py-1 bg-white hover:bg-[#FAF9F5] border border-[#8C7355] text-[#8C7355] rounded-xs text-[11px] font-bold cursor-pointer transition shadow-2xs flex items-center gap-1"
+            >
+              <Layers className="w-3 h-3" />
+              <span>Open in Multi-Edit Suite</span>
+            </button>
+          </div>
         </div>
       )}
 
@@ -2179,6 +2834,15 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
         }}
         onBulkEdit={() => setIsBulkEditOpen(true)}
         onBulkDelete={handleDeleteSelected}
+        customActions={[
+          {
+            label: 'Open in Bulk Suite',
+            icon: Layers,
+            onClick: () => handleOpenBulkSuite('batch_edit', null, Array.from(selectedItemIds)),
+            variant: 'secondary',
+            title: 'Edit all selected garments in Bulk Suite matrix editor',
+          },
+        ]}
       />
 
       {/* Wardrobe Items Display */}
@@ -2222,17 +2886,48 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
             const isEditingWear = editingFieldId === `${item.id}_wearCount`;
             const isEditingColor = editingFieldId === `${item.id}_color`;
             const isEditingLocation = editingFieldId === `${item.id}_storageLocation`;
+            const isEditingSize = editingFieldId === `${item.id}_size`;
+            const isEditingMaterial = editingFieldId === `${item.id}_material`;
             const isSelected = selectedItemIds.has(item.id);
+            const linkedSale = saleItemByWardrobeId.get(item.id);
 
             return (
               <div
                 key={item.id}
-                className={`bg-white border transition-all flex flex-col justify-between group shadow-xs ${
+                draggable={true}
+                onDragStart={(e) => {
+                  e.dataTransfer.setData('text/plain', item.id);
+                  e.dataTransfer.setData('application/json', JSON.stringify({ type: 'wardrobe_item', id: item.id }));
+                  e.dataTransfer.effectAllowed = 'copyMove';
+                }}
+                className={`transition-all flex flex-col justify-between group shadow-xs cursor-grab active:cursor-grabbing ${
                   isSelected
                     ? 'border-[#8C7355] ring-2 ring-[#8C7355]/40 bg-amber-50/10'
-                    : 'border-[#E5E5E1] hover:border-[#8C7355]'
+                    : linkedSale
+                    ? 'border-amber-400 ring-1 ring-amber-400/50 bg-amber-50/15 hover:border-amber-500'
+                    : 'bg-white border-[#E5E5E1] hover:border-[#8C7355]'
                 }`}
               >
+                {/* Selling Pipeline Banner Indicator */}
+                {linkedSale && (
+                  <div
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onSelectItem(item);
+                    }}
+                    className="bg-amber-100/95 border-b border-amber-300/90 px-2 py-1 flex items-center justify-between text-[9.5px] font-mono text-amber-900 cursor-pointer"
+                    title={`Listed in sales pipeline (${linkedSale.platform}, Status: ${linkedSale.status})`}
+                  >
+                    <span className="flex items-center gap-1 font-bold">
+                      <Tag className="w-3 h-3 text-amber-700 shrink-0" />
+                      {linkedSale.status === 'Draft' ? 'SALES DRAFT' : 'LISTED FOR SALE'}
+                    </span>
+                    <span className="font-bold text-amber-950">
+                      £{linkedSale.listingPrice} <span className="font-normal text-[8.5px] text-amber-700">({linkedSale.platform})</span>
+                    </span>
+                  </div>
+                )}
+
                 {/* Image & Quick Badges */}
                 {displaySettings.showImage && (
                   <div
@@ -2247,9 +2942,9 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
                       containerClassName="w-full h-full flex items-center justify-center bg-[#F8F7F4]"
                     />
 
-                    {/* Top Left: Multi-Select Checkbox & Category Badge */}
+                    {/* Top Left: Multi-Select Checkbox Only */}
                     <div
-                      className="absolute top-2 left-2 flex items-center gap-1.5 z-10"
+                      className="absolute top-2 left-2 z-10"
                       onClick={(e) => e.stopPropagation()}
                     >
                       <button
@@ -2265,65 +2960,66 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
                       >
                         <CheckSquare className="w-3.5 h-3.5" />
                       </button>
-
-                      {displaySettings.showCategory && (
-                        <div className="flex items-center gap-0.5">
-                          <select
-                            value={item.category}
-                            onChange={(e) =>
-                              handleQuickCategoryChange(item.id, e.target.value)
-                            }
-                            className="text-[10px] font-mono font-medium px-1.5 py-0.5 bg-white/95 text-[#1A1A1A] border border-[#D5D5D0] shadow-xs focus:outline-none cursor-pointer max-w-[90px] truncate"
-                            title="Change category inline"
-                          >
-                            {categories.map((c) => (
-                              <option key={c} value={c}>
-                                {c}
-                              </option>
-                            ))}
-                          </select>
-
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleQuickDeleteCategory(item.id);
-                            }}
-                            className="p-0.5 bg-white/95 text-[#767670] hover:text-rose-600 border border-[#D5D5D0] shadow-xs cursor-pointer"
-                            title={`Reset category (✕)`}
-                          >
-                            <X className="w-2.5 h-2.5" />
-                          </button>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Top Right: Favorite & Quick Delete */}
-                    <div className="absolute top-2 right-2 flex items-center gap-1 z-10">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          toggleItemFavorite(item.id);
-                        }}
-                        className="p-1.5 bg-white/95 text-[#767670] hover:text-rose-600 border border-[#D5D5D0] shadow-xs transition-colors cursor-pointer"
-                        title="Toggle Favorite"
-                      >
-                        <Heart
-                          className={`w-3.5 h-3.5 ${
-                            item.isFavorite ? 'fill-rose-600 text-rose-600' : ''
-                          }`}
-                        />
-                      </button>
-
-                      <button
-                        onClick={(e) => handleDeleteSingleItem(item.id, e)}
-                        className="p-1.5 bg-white/95 text-[#767670] hover:text-rose-600 border border-[#D5D5D0] shadow-xs transition-colors cursor-pointer"
-                        title="Delete garment (✕)"
-                      >
-                        <Trash2 className="w-3 h-3" />
-                      </button>
                     </div>
                   </div>
                 )}
+
+                {/* Sub-Image Clean Action Bar: Category dropdown with X, and Heart + Bin */}
+                <div
+                  className="px-3 py-1.5 bg-[#FAF9F7] border-b border-[#EAE8E3] flex items-center justify-between gap-1.5"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {/* Category Dropdown and Reset (X) */}
+                  {displaySettings.showCategory ? (
+                    <div className="flex items-center gap-1 min-w-0 flex-1 max-w-[170px]">
+                      <CategorySelect
+                        value={item.category}
+                        onChange={(newCat) =>
+                          handleQuickCategoryChange(item.id, newCat)
+                        }
+                        garmentCategories={garmentCategories}
+                        homewareCategories={homewareCategories}
+                        className="text-[10px] font-mono font-medium px-1.5 py-0.5 bg-white text-[#1A1A1A] border border-[#D5D5D0] shadow-2xs focus:outline-none cursor-pointer truncate w-full"
+                        title="Change category inline"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleQuickDeleteCategory(item.id)}
+                        className="p-1 bg-white text-[#767670] hover:text-rose-600 border border-[#D5D5D0] shadow-2xs hover:border-rose-300 cursor-pointer shrink-0 transition-colors"
+                        title="Reset category (✕)"
+                      >
+                        <X className="w-2.5 h-2.5" />
+                      </button>
+                    </div>
+                  ) : <div />}
+
+                  {/* Favorite (Heart) & Delete (Bin) */}
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => toggleItemFavorite(item.id)}
+                      className={`p-1 bg-white border border-[#D5D5D0] shadow-2xs hover:border-rose-300 transition-colors cursor-pointer ${
+                        item.isFavorite ? 'text-rose-600 border-rose-300 bg-rose-50/50' : 'text-[#767670] hover:text-rose-600'
+                      }`}
+                      title="Toggle Favorite"
+                    >
+                      <Heart
+                        className={`w-3.5 h-3.5 ${
+                          item.isFavorite ? 'fill-rose-600 text-rose-600' : ''
+                        }`}
+                      />
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={(e) => handleDeleteSingleItem(item.id, e)}
+                      className="p-1 bg-white text-[#767670] hover:text-rose-600 border border-[#D5D5D0] shadow-2xs hover:border-rose-300 hover:bg-rose-50 transition-colors cursor-pointer"
+                      title="Delete garment (✕)"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
 
                 {/* Garment Details & Inline Editable Elements */}
                 <div className="p-3 space-y-2.5 flex-1 flex flex-col justify-between">
@@ -2594,12 +3290,98 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
                           </select>
                         </span>
                       )}
+
+                      {/* Size Pill */}
+                      {displaySettings.showSize && (
+                        isEditingSize ? (
+                          <div className="flex items-center gap-1">
+                            <input
+                              type="text"
+                              value={editingValue}
+                              onChange={(e) => setEditingValue(e.target.value)}
+                              onBlur={() => handleSaveInline(item.id, 'size')}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') handleSaveInline(item.id, 'size');
+                                if (e.key === 'Escape') setEditingFieldId(null);
+                              }}
+                              autoFocus
+                              placeholder="Size..."
+                              className="w-16 text-[10px] font-mono border border-[#8C7355] px-1 py-0.5 bg-white rounded-xs focus:outline-none"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => handleSaveInline(item.id, 'size')}
+                              className="text-emerald-700 hover:text-emerald-900 cursor-pointer"
+                            >
+                              <Check className="w-2.5 h-2.5" />
+                            </button>
+                          </div>
+                        ) : (
+                          <span className="inline-flex items-center gap-1">
+                            <span className="text-[#B0B0A8]">•</span>
+                            <span
+                              onClick={() => {
+                                setEditingFieldId(`${item.id}_size`);
+                                setEditingValue(item.size || '');
+                              }}
+                              className="text-[10px] font-mono px-1.5 py-0.2 bg-[#F2F1ED] hover:bg-[#EAE8E3] border border-[#E5E5E1] rounded-xs text-[#4A4A45] hover:text-[#1A1A1A] cursor-pointer inline-flex items-center gap-0.5 group/size"
+                              title="Click to edit size inline"
+                            >
+                              <span>{item.size || <span className="text-[#A5A59E] italic">+ Size</span>}</span>
+                              <Pencil className="w-2 h-2 opacity-0 group-hover/size:opacity-60 text-[#8C7355]" />
+                            </span>
+                          </span>
+                        )
+                      )}
+
+                      {/* Material Pill */}
+                      {displaySettings.showMaterial && (
+                        isEditingMaterial ? (
+                          <div className="flex items-center gap-1">
+                            <input
+                              type="text"
+                              value={editingValue}
+                              onChange={(e) => setEditingValue(e.target.value)}
+                              onBlur={() => handleSaveInline(item.id, 'material')}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') handleSaveInline(item.id, 'material');
+                                if (e.key === 'Escape') setEditingFieldId(null);
+                              }}
+                              autoFocus
+                              placeholder="Material..."
+                              className="w-24 text-[10px] font-mono border border-[#8C7355] px-1 py-0.5 bg-white rounded-xs focus:outline-none"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => handleSaveInline(item.id, 'material')}
+                              className="text-emerald-700 hover:text-emerald-900 cursor-pointer"
+                            >
+                              <Check className="w-2.5 h-2.5" />
+                            </button>
+                          </div>
+                        ) : (
+                          <span className="inline-flex items-center gap-1">
+                            <span className="text-[#B0B0A8]">•</span>
+                            <span
+                              onClick={() => {
+                                setEditingFieldId(`${item.id}_material`);
+                                setEditingValue(item.material || '');
+                              }}
+                              className="text-[10px] font-sans px-1.5 py-0.2 bg-[#F8F7F4] hover:bg-[#F2F1ED] border border-[#E5E5E1] rounded-xs text-[#555] hover:text-[#1A1A1A] cursor-pointer inline-flex items-center gap-0.5 group/mat max-w-[130px] truncate"
+                              title={item.material ? `Material: ${item.material}` : 'Click to edit fabric material inline'}
+                            >
+                              <span className="truncate">{item.material || <span className="text-[#A5A59E] italic">+ Material</span>}</span>
+                              <Pencil className="w-2 h-2 opacity-0 group-hover/mat:opacity-60 text-[#8C7355] shrink-0" />
+                            </span>
+                          </span>
+                        )
+                      )}
                     </div>
 
-                    {/* Storage Location (Inline Editable) */}
-                    {displaySettings.showLocation && (
-                      <div className="pt-0.5">
-                        {isEditingLocation ? (
+                    {/* Storage Location & Selling Pipeline Indicator */}
+                    <div className="pt-0.5 space-y-1">
+                      {displaySettings.showLocation && (
+                        isEditingLocation ? (
                           <div className="flex items-center gap-1">
                             <MapPin className="w-2.5 h-2.5 text-[#8C7355] shrink-0" />
                             <input
@@ -2624,23 +3406,46 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
                             </button>
                           </div>
                         ) : (
-                          <p
-                            onClick={() => {
-                              setEditingFieldId(`${item.id}_storageLocation`);
-                              setEditingValue(item.storageLocation || '');
-                            }}
-                            className="text-[10px] font-mono text-[#8C7355] flex items-center gap-1 hover:underline cursor-pointer group/loc"
-                            title="Click to edit storage location inline"
-                          >
-                            <MapPin className="w-2.5 h-2.5 shrink-0" />
-                            <span className="truncate">
-                              {item.storageLocation || <span className="text-[#A5A59E] italic">Add location...</span>}
-                            </span>
-                            <Pencil className="w-2.5 h-2.5 opacity-0 group-hover/loc:opacity-60 shrink-0" />
-                          </p>
-                        )}
-                      </div>
-                    )}
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <p
+                              onClick={() => {
+                                setEditingFieldId(`${item.id}_storageLocation`);
+                                setEditingValue(item.storageLocation || '');
+                              }}
+                              className="text-[10px] font-mono text-[#8C7355] flex items-center gap-1 hover:underline cursor-pointer group/loc"
+                              title="Click to edit storage location inline"
+                            >
+                              <MapPin className="w-2.5 h-2.5 shrink-0" />
+                              <span className="truncate">
+                                {item.storageLocation || <span className="text-[#A5A59E] italic">Add location...</span>}
+                              </span>
+                              <Pencil className="w-2.5 h-2.5 opacity-0 group-hover/loc:opacity-60 shrink-0" />
+                            </p>
+
+                            {linkedSale && (
+                              <span
+                                className="inline-flex items-center gap-1 px-1.5 py-0.2 bg-amber-100/90 text-amber-900 border border-amber-300 rounded-xs text-[9px] font-mono font-medium shadow-2xs"
+                                title={`Listed in sales pipeline (${linkedSale.platform}, Status: ${linkedSale.status})`}
+                              >
+                                <Tag className="w-2.5 h-2.5 text-amber-700 shrink-0" />
+                                <span className="font-bold">{linkedSale.status === 'Draft' ? 'Draft' : 'Listed'}</span>
+                                <span>• £{linkedSale.listingPrice}</span>
+                                <span className="text-[8.5px] text-amber-700">({linkedSale.platform})</span>
+                              </span>
+                            )}
+                          </div>
+                        )
+                      )}
+
+                      {!displaySettings.showLocation && linkedSale && (
+                        <div className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-amber-100 text-amber-900 border border-amber-300 rounded-xs text-[9.5px] font-mono font-medium shadow-2xs">
+                          <Tag className="w-2.5 h-2.5 text-amber-700 shrink-0" />
+                          <span className="font-bold">{linkedSale.status === 'Draft' ? 'Sales Draft' : 'Listed'}</span>
+                          <span>• £{linkedSale.listingPrice}</span>
+                          <span className="text-[9px] text-amber-700">({linkedSale.platform})</span>
+                        </div>
+                      )}
+                    </div>
 
                     {/* Vinted Order & Resale Info (Matching Purchases card view) */}
                     {(() => {
@@ -2839,6 +3644,17 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
+                            handleOpenBulkSuite('colorways', item);
+                          }}
+                          className="p-1 text-[#8C7355] hover:text-white border border-[#8C7355]/30 hover:bg-[#8C7355] transition-colors cursor-pointer"
+                          title="Generate multiple colorway variants of this garment in Bulk Suite"
+                        >
+                          <Palette className="w-3 h-3" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
                             onEditItem(item);
                           }}
                           className="p-1 text-[#767670] hover:text-[#1A1A1A] border border-[#E5E5E1] hover:bg-[#F2F1ED] transition-colors cursor-pointer"
@@ -2867,6 +3683,7 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
           onSelectItem={onSelectItem}
           onEditItem={onEditItem}
           onSellItem={(item) => moveWardrobeItemToSales(item.id)}
+          onAddColorways={(item) => handleOpenBulkSuite('colorways', item)}
         />
       )}
 
@@ -2898,6 +3715,23 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
         defaultTab="wardrobe"
       />
 
+      {/* Batch Line-by-Line Inventory Creator Modal */}
+      <BatchLinePasteModal
+        isOpen={isBatchPasteOpen}
+        onClose={() => setIsBatchPasteOpen(false)}
+        defaultDestination="wardrobe"
+      />
+
+      {/* Comprehensive Bulk & Colorway Suite Modal */}
+      <BulkSuiteModal
+        isOpen={isBulkSuiteOpen}
+        onClose={() => setIsBulkSuiteOpen(false)}
+        defaultDestination="wardrobe"
+        initialTab={bulkSuiteTab}
+        initialItemToVariant={bulkSuiteItemToVariant}
+        initialSelectedIds={bulkSuiteSelectedIds}
+      />
+
       {/* Inventory Display Settings Modal */}
       <InventoryDisplaySettingsModal
         isOpen={isDisplaySettingsOpen}
@@ -2908,6 +3742,25 @@ export const WardrobeView: React.FC<WardrobeViewProps> = ({
           localStorage.removeItem('inventory_table_widths_v2');
           window.location.reload();
         }}
+      />
+
+      {/* Cross-Section Taxonomy Organizer Modal */}
+      <OrganizeCategoriesModal
+        isOpen={isOrganizeCategoriesOpen}
+        onClose={() => setIsOrganizeCategoriesOpen(false)}
+      />
+
+      {/* Travel Capsule & Packing Studio Modal */}
+      <TravelCapsuleStudioModal
+        isOpen={isTravelCapsuleOpen}
+        onClose={() => setIsTravelCapsuleOpen(false)}
+        onSelectItem={onSelectItem}
+      />
+
+      {/* Flatlay & Moodboard Studio Modal */}
+      <FlatlayMoodboardModal
+        isOpen={isFlatlayStudioOpen}
+        onClose={() => setIsFlatlayStudioOpen(false)}
       />
     </div>
   );

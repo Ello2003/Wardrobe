@@ -34,7 +34,9 @@ import {
   Season,
 } from '../types';
 import { safeApiFetch } from '../utils/apiHelper';
+import { safeConfirm } from '../utils/safeConfirm';
 import { formatGbp } from '../utils/formatters';
+import { ShopTheLookModal } from './ShopTheLookModal';
 
 interface GoogleAiResearchStudioProps {
   onClose?: () => void;
@@ -108,6 +110,8 @@ export const GoogleAiResearchStudio: React.FC<GoogleAiResearchStudioProps> = ({
   const [savedToArchive, setSavedToArchive] = useState(false);
   const [addedGapsCount, setAddedGapsCount] = useState<number | null>(null);
   const [activeTab, setActiveTab] = useState<'studio' | 'archive'>('studio');
+  const [isShopTheLookOpen, setIsShopTheLookOpen] = useState(false);
+  const [shopTheLookQuery, setShopTheLookQuery] = useState('');
 
   // Archive State
   const [savedArchive, setSavedArchive] = useState<GoogleAiEditorialResearchResult[]>(() => {
@@ -188,7 +192,17 @@ export const GoogleAiResearchStudio: React.FC<GoogleAiResearchStudioProps> = ({
       setActiveTab('studio');
     } catch (err: any) {
       console.error('Editorial research failed:', err);
-      setError(err.message || 'An unexpected error occurred while executing Google AI research.');
+      let msg = err.message || 'An unexpected error occurred while executing Google AI research.';
+      if (typeof msg === 'string' && msg.trim().startsWith('{')) {
+        try {
+          const parsed = JSON.parse(msg.trim());
+          msg = parsed.error?.message || parsed.message || msg;
+        } catch {}
+      }
+      if (/429|quota|RESOURCE_EXHAUSTED|rate[- ]?limit/i.test(msg)) {
+        msg = 'AI rate limit or API quota reached. Please wait a moment before trying again, or explore the curated editorial archives.';
+      }
+      setError(msg);
     } finally {
       setIsLoading(false);
     }
@@ -289,8 +303,8 @@ export const GoogleAiResearchStudio: React.FC<GoogleAiResearchStudioProps> = ({
     gapPieces.forEach((piece) => {
       addShoppingItem({
         name: piece.name,
-        brand: piece.suggestedBrand || 'Curated Editorial',
-        category: piece.category || 'Outerwear',
+        brand: piece.suggestedBrand || '',
+        category: piece.category || '',
         estimatedPrice: piece.estimatedPrice || 150,
         priority: 'High',
         status: 'Researching',
@@ -589,12 +603,21 @@ export const GoogleAiResearchStudio: React.FC<GoogleAiResearchStudioProps> = ({
 
           {/* Error Message */}
           {error && (
-            <div className="bg-rose-50 border border-rose-200 rounded-xl p-4 flex items-start gap-3 text-rose-800 text-xs">
-              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
-              <div className="space-y-1">
-                <p className="font-semibold">Research Generation Alert</p>
-                <p>{error}</p>
+            <div className="bg-rose-50 border border-rose-200 rounded-xl p-4 flex items-start justify-between gap-3 text-rose-800 text-xs">
+              <div className="flex items-start gap-3">
+                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <p className="font-semibold">Research Generation Notice</p>
+                  <p>{error}</p>
+                </div>
               </div>
+              <button
+                type="button"
+                onClick={() => handleExecuteResearch()}
+                className="px-3 py-1 bg-white border border-rose-300 hover:border-rose-400 text-rose-700 font-mono text-[11px] rounded-md transition-colors cursor-pointer shrink-0"
+              >
+                Retry
+              </button>
             </div>
           )}
 
@@ -797,29 +820,45 @@ export const GoogleAiResearchStudio: React.FC<GoogleAiResearchStudioProps> = ({
                       </p>
                     </div>
 
-                    {/* Gap to Wishlist Action */}
-                    {currentResult.structuredBreakdown.pieces.some((p) => p.isGap) && (
+                    <div className="flex items-center gap-2">
+                      {/* Shop the Look Action */}
                       <button
-                        onClick={handleSendGapsToWishlist}
-                        id="ai-send-gaps-wishlist-btn"
+                        onClick={() => {
+                          const q = `${currentResult.structuredBreakdown?.title || currentResult.query} ${currentResult.structuredBreakdown?.aesthetic || ''}`.trim();
+                          setShopTheLookQuery(q);
+                          setIsShopTheLookOpen(true);
+                        }}
                         className="flex items-center gap-1.5 px-3 py-1.5 bg-[#FAF9F7] hover:bg-[#F3F2EE] text-[#8C7355] border border-[#8C7355] text-xs font-mono font-semibold rounded-md shadow-2xs transition-all cursor-pointer"
-                        title="Add missing wardrobe gap pieces to your Shopping Wishlist"
+                        title="Search similar items available to purchase online"
                       >
-                        {addedGapsCount !== null ? (
-                          <>
-                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                            <span className="text-emerald-700 font-bold">
-                              Added {addedGapsCount} Gap(s) to Wishlist!
-                            </span>
-                          </>
-                        ) : (
-                          <>
-                            <ShoppingBag className="w-3.5 h-3.5" />
-                            <span>Export Gaps to Wishlist</span>
-                          </>
-                        )}
+                        <ShoppingBag className="w-3.5 h-3.5" />
+                        <span>Shop the Look</span>
                       </button>
-                    )}
+
+                      {/* Gap to Wishlist Action */}
+                      {currentResult.structuredBreakdown.pieces.some((p) => p.isGap) && (
+                        <button
+                          onClick={handleSendGapsToWishlist}
+                          id="ai-send-gaps-wishlist-btn"
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-[#FAF9F7] hover:bg-[#F3F2EE] text-[#8C7355] border border-[#8C7355] text-xs font-mono font-semibold rounded-md shadow-2xs transition-all cursor-pointer"
+                          title="Add missing wardrobe gap pieces to your Shopping Wishlist"
+                        >
+                          {addedGapsCount !== null ? (
+                            <>
+                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                              <span className="text-emerald-700 font-bold">
+                                Added {addedGapsCount} Gap(s) to Wishlist!
+                              </span>
+                            </>
+                          ) : (
+                            <>
+                              <ShoppingBag className="w-3.5 h-3.5" />
+                              <span>Export Gaps to Wishlist</span>
+                            </>
+                          )}
+                        </button>
+                      )}
+                    </div>
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
@@ -938,7 +977,7 @@ export const GoogleAiResearchStudio: React.FC<GoogleAiResearchStudioProps> = ({
             {savedArchive.length > 0 && (
               <button
                 onClick={() => {
-                  if (window.confirm('Clear all archived research studies?')) {
+                  if (safeConfirm('Clear all archived research studies?')) {
                     setSavedArchive([]);
                   }
                 }}
@@ -1038,6 +1077,15 @@ export const GoogleAiResearchStudio: React.FC<GoogleAiResearchStudioProps> = ({
           )}
         </div>
       )}
+
+      <ShopTheLookModal
+        isOpen={isShopTheLookOpen}
+        onClose={() => {
+          setIsShopTheLookOpen(false);
+          setShopTheLookQuery('');
+        }}
+        initialQuery={shopTheLookQuery}
+      />
     </div>
   );
 };

@@ -396,9 +396,9 @@ export const MarkSoldModal: React.FC<MarkSoldModalProps> = ({
             </div>
           </div>
 
-          {/* Wardrobe Auto-Archive Toggle */}
+          {/* Wardrobe Auto-Delete on Sold Toggle */}
           {saleItem.sourceWardrobeItemId && (
-            <div className="p-3 bg-amber-50/50 border border-amber-200 rounded-lg flex items-start gap-2.5">
+            <div className="p-3 bg-amber-50/60 border border-amber-300 rounded-lg flex items-start gap-2.5">
               <input
                 type="checkbox"
                 id="archiveWardrobeCheckbox"
@@ -412,10 +412,10 @@ export const MarkSoldModal: React.FC<MarkSoldModalProps> = ({
               >
                 <span className="font-semibold block flex items-center gap-1 text-[#8C7355]">
                   <Archive className="w-3.5 h-3.5" />
-                  Archive original garment in Wardrobe Inventory
+                  Delete original item from active Inventory (Sold)
                 </span>
                 <span className="text-[#767670] text-[11px]">
-                  Automatically flags the linked closet piece as archived with sold notes, removing it from daily rotation while preserving valuation and wear history.
+                  Automatically deletes this piece from active inventory upon confirming sale (safely backed up in Trash with complete sold details).
                 </span>
               </label>
             </div>

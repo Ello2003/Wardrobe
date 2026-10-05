@@ -111,7 +111,7 @@ const CATEGORIES: QuickNoteCategory[] = [
 ];
 
 export const QuickNoteWidget: React.FC = () => {
-  const { addShoppingItem } = useWardrobe();
+  const { addShoppingItem, garmentCategories = [], homewareCategories = [] } = useWardrobe();
 
   // Widget Open / Collapsed state
   const [isOpen, setIsOpen] = useState(false);
@@ -294,7 +294,7 @@ export const QuickNoteWidget: React.FC = () => {
       addShoppingItem({
         brand,
         name,
-        category: note.category === 'Homeware & Tech' ? 'Audio & Tech' : 'Tops',
+        category: note.category === 'Homeware & Tech' ? 'Homeware' : '',
         priority: 'Medium',
         status: 'To Buy',
         season: 'All-Season',

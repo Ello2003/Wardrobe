@@ -15,6 +15,7 @@ import {
   Shirt,
   Palette,
   Compass,
+  Flame,
 } from 'lucide-react';
 import { useWardrobe } from '../context/WardrobeContext';
 import { LookbookOutfit, WardrobeItem } from '../types';
@@ -27,6 +28,11 @@ import { formatGbp } from '../utils/formatters';
 import { EmptyState } from './common/EmptyState';
 import { GoogleAiResearchStudio } from './GoogleAiResearchStudio';
 import { InlineEditableTitle } from './common/InlineEditableTitle';
+import { WardrobeAiStylistModal } from './WardrobeAiStylistModal';
+import { ShopTheLookModal } from './ShopTheLookModal';
+import { OutfitMatcherModal } from './OutfitMatcherModal';
+import { TravelCapsuleStudioModal } from './travel/TravelCapsuleStudioModal';
+import { FlatlayMoodboardModal } from './flatlay/FlatlayMoodboardModal';
 
 interface LookbookViewProps {
   onOpenCreateLook: () => void;
@@ -61,6 +67,11 @@ export const LookbookView: React.FC<LookbookViewProps> = ({
   // Modals
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [selectedEditorialOutfit, setSelectedEditorialOutfit] = useState<LookbookOutfit | null>(null);
+  const [isAiStylistOpen, setIsAiStylistOpen] = useState(false);
+  const [isOutfitMatcherOpen, setIsOutfitMatcherOpen] = useState(false);
+  const [isTravelCapsuleOpen, setIsTravelCapsuleOpen] = useState(false);
+  const [isFlatlayStudioOpen, setIsFlatlayStudioOpen] = useState(false);
+  const [shopTheLookOutfit, setShopTheLookOutfit] = useState<LookbookOutfit | null>(null);
 
   const occasions = [
     'All',
@@ -219,15 +230,53 @@ export const LookbookView: React.FC<LookbookViewProps> = ({
             <span>Research &amp; Import Ideas</span>
           </button>
 
-          {/* AI Generator */}
+          {/* AI-Powered Outfit Matcher */}
           <button
-            onClick={handleGenerateAIOutfits}
-            disabled={isGeneratingAI}
-            id="lookbook-ai-gen-btn"
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md bg-[#F8F7F4] hover:bg-[#F3F2EE] text-[#5A5A55] border border-[#E5E5E1] shadow-xs transition-all disabled:opacity-50 cursor-pointer"
+            onClick={() => setIsOutfitMatcherOpen(true)}
+            id="lookbook-ai-outfit-matcher-btn"
+            className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-mono font-bold rounded-md bg-[#FAF9F7] hover:bg-[#F3F2EE] text-[#8C7355] border border-[#8C7355] shadow-2xs transition-all cursor-pointer"
+            title="Open AI Outfit Matcher: Synthesize cohesive combinations based on weather conditions & occasion"
           >
-            <Sparkles className={`w-3.5 h-3.5 ${isGeneratingAI ? 'animate-spin text-[#8C7355]' : 'text-[#8C7355]'}`} />
-            <span>{isGeneratingAI ? 'Styling with AI...' : 'AI Generate Looks'}</span>
+            <Sparkles className="w-3.5 h-3.5 text-amber-600" />
+            <span>AI Outfit Matcher</span>
+            <span className="text-[9px] px-1.5 py-0.2 bg-sky-100 text-sky-800 rounded font-mono font-semibold">
+              Weather &amp; Occasion
+            </span>
+          </button>
+
+          {/* AI Wardrobe Stylist & Combinations */}
+          <button
+            onClick={() => setIsAiStylistOpen(true)}
+            id="lookbook-ai-gen-btn"
+            className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-mono font-bold rounded-md bg-[#FAF9F7] hover:bg-[#F3F2EE] text-[#8C7355] border border-[#8C7355] shadow-2xs transition-all cursor-pointer"
+            title="Open AI Combinations: Generate outfit combinations based on colors, textures, and items"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-[#8C7355]" />
+            <span>AI Combinations</span>
+          </button>
+
+          {/* Travel Capsule & Packing Studio */}
+          <button
+            type="button"
+            onClick={() => setIsTravelCapsuleOpen(true)}
+            id="lookbook-travel-capsule-btn"
+            className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-mono font-bold rounded-md bg-[#FAF9F7] hover:bg-[#F3F2EE] text-[#8C7355] border border-[#8C7355] shadow-2xs transition-all cursor-pointer"
+            title="Open Travel Capsule & Packing Studio: Destination & weather packing optimizer"
+          >
+            <Compass className="w-3.5 h-3.5 text-[#8C7355]" />
+            <span>Travel Capsule Studio</span>
+          </button>
+
+          {/* Flatlay & Moodboard Studio */}
+          <button
+            type="button"
+            onClick={() => setIsFlatlayStudioOpen(true)}
+            id="lookbook-flatlay-studio-btn"
+            className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-mono font-bold rounded-md bg-[#FAF9F7] hover:bg-[#F3F2EE] text-[#8C7355] border border-[#8C7355] shadow-2xs transition-all cursor-pointer"
+            title="Open Flatlay & Moodboard Studio: Drag-and-drop editorial canvas"
+          >
+            <Palette className="w-3.5 h-3.5 text-[#8C7355]" />
+            <span>Flatlay Studio</span>
           </button>
 
           {/* Style New Look from Scratch */}
@@ -559,22 +608,12 @@ export const LookbookView: React.FC<LookbookViewProps> = ({
                     <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-white/90 text-[#1A1A1A] backdrop-blur-xs border border-[#E5E5E1]">
                       {outfit.season}
                     </span>
-                  </div>
-
-                  <div className="absolute top-2.5 right-2.5 flex items-center gap-1">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        toggleOutfitFavorite(outfit.id);
-                      }}
-                      className="p-1.5 rounded-full bg-white/90 hover:bg-white text-[#767670] hover:text-rose-600 backdrop-blur-xs border border-[#E5E5E1] cursor-pointer shadow-xs transition-colors"
-                    >
-                      <Heart
-                        className={`w-3.5 h-3.5 ${
-                          outfit.isFavorite ? 'fill-rose-500 text-rose-500' : ''
-                        }`}
-                      />
-                    </button>
+                    {typeof outfit.thermalCohesionScore === 'number' && (
+                      <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-800 backdrop-blur-xs border border-emerald-200 font-semibold flex items-center gap-0.5">
+                        <Flame className="w-2.5 h-2.5 text-emerald-600" />
+                        {outfit.thermalCohesionScore}/100
+                      </span>
+                    )}
                   </div>
 
                   {/* Photographic Mood / Valuation Tag */}
@@ -694,11 +733,36 @@ export const LookbookView: React.FC<LookbookViewProps> = ({
 
                     <div className="flex items-center gap-1">
                       <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setShopTheLookOutfit(outfit);
+                        }}
+                        className="p-1 text-[#767670] hover:text-[#8C7355] rounded hover:bg-[#F3F2EE] transition-colors cursor-pointer"
+                        title="Shop the Look: Find similar items available online"
+                      >
+                        <ShoppingBag className="w-3.5 h-3.5" />
+                      </button>
+
+                      <button
                         onClick={() => setSelectedEditorialOutfit(outfit)}
                         className="p-1 text-[#767670] hover:text-[#8C7355] rounded hover:bg-[#F3F2EE] transition-colors cursor-pointer"
                         title="Inspect Full Editorial Breakdown"
                       >
                         <Eye className="w-3.5 h-3.5" />
+                      </button>
+
+                      <button
+                        onClick={() => toggleOutfitFavorite(outfit.id)}
+                        className={`p-1 rounded transition-colors cursor-pointer ${
+                          outfit.isFavorite ? 'text-rose-600 bg-rose-50' : 'text-[#767670] hover:text-rose-600 hover:bg-[#F3F2EE]'
+                        }`}
+                        title="Toggle Favorite Look"
+                      >
+                        <Heart
+                          className={`w-3.5 h-3.5 ${
+                            outfit.isFavorite ? 'fill-rose-500 text-rose-500' : ''
+                          }`}
+                        />
                       </button>
 
                       <button
@@ -759,6 +823,56 @@ export const LookbookView: React.FC<LookbookViewProps> = ({
             outfitToRecreate.itemIds || []
           );
         }}
+      />
+
+      {/* AI Wardrobe Stylist & Combinations Modal */}
+      <WardrobeAiStylistModal
+        isOpen={isAiStylistOpen}
+        onClose={() => setIsAiStylistOpen(false)}
+        onSelectItem={onSelectItem}
+      />
+
+      {/* Shop The Look Modal */}
+      <ShopTheLookModal
+        isOpen={Boolean(shopTheLookOutfit)}
+        onClose={() => setShopTheLookOutfit(null)}
+        outfit={shopTheLookOutfit}
+      />
+
+      {/* AI Outfit Matcher Modal */}
+      <OutfitMatcherModal
+        isOpen={isOutfitMatcherOpen}
+        onClose={() => setIsOutfitMatcherOpen(false)}
+        onSelectItem={onSelectItem}
+        onOpenShopTheLook={(combo) => {
+          setIsOutfitMatcherOpen(false);
+          setShopTheLookOutfit({
+            id: combo.id,
+            title: combo.title,
+            description: combo.stylingRationale,
+            occasion: combo.occasion as any,
+            season: combo.season as any,
+            itemIds: combo.itemIds,
+            tags: combo.stylingTips || [],
+            isFavorite: false,
+            timesWorn: 0,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          });
+        }}
+      />
+
+      {/* Travel Capsule & Packing Studio Modal */}
+      <TravelCapsuleStudioModal
+        isOpen={isTravelCapsuleOpen}
+        onClose={() => setIsTravelCapsuleOpen(false)}
+        onSelectItem={onSelectItem}
+      />
+
+      {/* Flatlay & Moodboard Studio Modal */}
+      <FlatlayMoodboardModal
+        isOpen={isFlatlayStudioOpen}
+        onClose={() => setIsFlatlayStudioOpen(false)}
       />
     </div>
   );

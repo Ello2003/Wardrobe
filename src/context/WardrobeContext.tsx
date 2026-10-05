@@ -21,6 +21,7 @@ import {
   DEFAULT_CUSTOM_LABELS,
   normalizeCategoryName,
   isHomewareCategory,
+  deduplicateCategoriesCaseInsensitive,
   TrashItem,
   TrashReason,
 } from '../types';
@@ -48,7 +49,6 @@ import {
   INITIAL_HOMEWARE_CATEGORIES,
 } from '../data/initialData';
 import {
-  isGarmentDuplicate,
   consolidateWardrobeDuplicates,
   consolidateShoppingDuplicates,
   consolidateSaleDuplicates,
@@ -207,6 +207,10 @@ interface WardrobeContextType {
   deleteHomewareCategory: (name: string) => void;
   resetHomewareCategories: () => void;
 
+  // Taxonomy Organization & Cross-Section Category Movement
+  moveCategory: (categoryName: string, targetSection: 'garments' | 'homeware') => void;
+  reorderCategories: (section: 'garments' | 'homeware', newCategories: string[]) => void;
+
   // Wardrobe Item Actions
   addItem: (itemData: Omit<WardrobeItem, 'id' | 'createdAt' | 'updatedAt' | 'wearCount'>, checkDuplicate?: boolean) => string;
   updateItem: (id: string, updates: Partial<WardrobeItem>, consolidateDuplicates?: boolean) => void;
@@ -295,6 +299,8 @@ interface WardrobeContextType {
     listingData: {
       listingPrice: number;
       platform: SellingPlatform;
+      status?: SellingStatus;
+      shippingStatus?: ShippingStatus;
       condition?: Condition;
       description?: string;
       tags?: string[];
@@ -699,11 +705,11 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const saved = localStorage.getItem(`${STORAGE_KEY}_garment_categories`);
       const parsed = saved ? JSON.parse(saved) : null;
       if (Array.isArray(parsed) && parsed.length > 0) {
-        return Array.from(new Set([...parsed, ...INITIAL_GARMENT_CATEGORIES]));
+        return deduplicateCategoriesCaseInsensitive(parsed);
       }
-      return INITIAL_GARMENT_CATEGORIES;
+      return deduplicateCategoriesCaseInsensitive(INITIAL_GARMENT_CATEGORIES);
     } catch {
-      return INITIAL_GARMENT_CATEGORIES;
+      return deduplicateCategoriesCaseInsensitive(INITIAL_GARMENT_CATEGORIES);
     }
   });
 
@@ -712,16 +718,16 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const saved = localStorage.getItem(`${STORAGE_KEY}_homeware_categories`);
       const parsed = saved ? JSON.parse(saved) : null;
       if (Array.isArray(parsed) && parsed.length > 0) {
-        return Array.from(new Set([...parsed, ...INITIAL_HOMEWARE_CATEGORIES]));
+        return deduplicateCategoriesCaseInsensitive(parsed);
       }
-      return INITIAL_HOMEWARE_CATEGORIES;
+      return deduplicateCategoriesCaseInsensitive(INITIAL_HOMEWARE_CATEGORIES);
     } catch {
-      return INITIAL_HOMEWARE_CATEGORIES;
+      return deduplicateCategoriesCaseInsensitive(INITIAL_HOMEWARE_CATEGORIES);
     }
   });
 
   const categories = useMemo(
-    () => Array.from(new Set([...garmentCategories, ...homewareCategories])),
+    () => deduplicateCategoriesCaseInsensitive([...garmentCategories, ...homewareCategories]),
     [garmentCategories, homewareCategories]
   );
 
@@ -918,6 +924,84 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     saveEntitySafely(`${STORAGE_KEY}_garment_categories`, garmentCategories, STORAGE_KEY);
     saveEntitySafely(`${STORAGE_KEY}_homeware_categories`, homewareCategories, STORAGE_KEY);
   }, [categories, garmentCategories, homewareCategories]);
+
+  // Startup category hygiene & migration:
+  // 1. Ensure Shoe Care items & category are linked to Wardrobe / Clothes, not homeware/electronics.
+  // 2. Case-insensitively deduplicate categories (e.g. "tops" and "Tops").
+  // 3. Remove cross-section duplicates so a category exists in only one section without overriding user placement.
+  useEffect(() => {
+    const shoeCareKeywords = ['shoe care', 'shoecare', 'shoe care & maintenance'];
+    let changed = false;
+
+    let cleanGarments = deduplicateCategoriesCaseInsensitive(garmentCategories);
+    let cleanHomeware = deduplicateCategoriesCaseInsensitive(homewareCategories);
+
+    // Migration: if Shoe Care is currently in homeware, relocate to garments
+    const shoeCareInHomeware = cleanHomeware.filter((c) =>
+      shoeCareKeywords.includes(c.trim().toLowerCase())
+    );
+    if (shoeCareInHomeware.length > 0) {
+      changed = true;
+      cleanHomeware = cleanHomeware.filter(
+        (c) => !shoeCareKeywords.includes(c.trim().toLowerCase())
+      );
+      cleanGarments = deduplicateCategoriesCaseInsensitive([
+        ...cleanGarments,
+        ...shoeCareInHomeware,
+      ]);
+    } else if (!cleanGarments.some((c) => shoeCareKeywords.includes(c.trim().toLowerCase()))) {
+      // Ensure canonical Shoe Care is present in garments
+      cleanGarments = deduplicateCategoriesCaseInsensitive([...cleanGarments, 'Shoe Care']);
+      changed = true;
+    }
+
+    // Cross-section deduplication: if category is in garments, remove from homeware
+    const garmentLowers = new Set(cleanGarments.map((c) => c.toLowerCase()));
+    const deDuplicatedHomeware = cleanHomeware.filter((c) => !garmentLowers.has(c.toLowerCase()));
+    if (deDuplicatedHomeware.length !== cleanHomeware.length) {
+      cleanHomeware = deDuplicatedHomeware;
+      changed = true;
+    }
+
+    if (
+      changed ||
+      cleanGarments.length !== garmentCategories.length ||
+      cleanHomeware.length !== homewareCategories.length
+    ) {
+      setGarmentCategories(cleanGarments);
+      setHomewareCategories(cleanHomeware);
+    }
+
+    // Fix items typed incorrectly: align itemType with category section
+    setItems((prev) => {
+      let itemsChanged = false;
+      const updated = prev.map((it) => {
+        const catLower = (it.category || '').trim().toLowerCase();
+        const isShoe =
+          shoeCareKeywords.includes(catLower) ||
+          catLower.includes('shoe care') ||
+          catLower.includes('shoe tree');
+
+        if (
+          (isShoe || cleanGarments.some((c) => c.toLowerCase() === catLower)) &&
+          it.itemType !== 'clothing'
+        ) {
+          itemsChanged = true;
+          return { ...it, itemType: 'clothing' };
+        }
+        if (
+          cleanHomeware.some((c) => c.toLowerCase() === catLower) &&
+          !isShoe &&
+          it.itemType !== 'homeware_lifestyle'
+        ) {
+          itemsChanged = true;
+          return { ...it, itemType: 'homeware_lifestyle' };
+        }
+        return it;
+      });
+      return itemsChanged ? updated : prev;
+    });
+  }, []);
 
   useEffect(() => {
     saveEntitySafely(`${STORAGE_KEY}_budget`, monthlyBudget, STORAGE_KEY);
@@ -1401,29 +1485,10 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return removed;
   }, []);
 
-  // 1. ADD WARDROBE ITEM (With Humidor duplicate prevention & auto-consolidation)
+  // 1. ADD WARDROBE ITEM (Always creates a distinct new garment record; never auto-merges)
   const addItem = useCallback(
-    (itemData: Omit<WardrobeItem, 'id' | 'createdAt' | 'updatedAt' | 'wearCount'>, checkDuplicate: boolean = false) => {
+    (itemData: Omit<WardrobeItem, 'id' | 'createdAt' | 'updatedAt' | 'wearCount'>, _checkDuplicate: boolean = false) => {
       const now = new Date().toISOString();
-
-      // Humidor Auto-Merge: If an instance of this garment already exists and checkDuplicate is requested
-      if (checkDuplicate) {
-        const existingExact = items.find((it) => isGarmentDuplicate(itemData, it));
-
-        if (existingExact) {
-          updateItem(
-            existingExact.id,
-            {
-              ...itemData,
-              purchasePrice: itemData.purchasePrice || existingExact.purchasePrice,
-              imageUrl: itemData.imageUrl || existingExact.imageUrl,
-              category: normalizeCategoryName(itemData.category) as Category,
-            },
-            false
-          );
-          return existingExact.id;
-        }
-      }
 
       const id = generateUniqueId('item');
       const newItem: WardrobeItem = {
@@ -1540,99 +1605,8 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           updatedAt: now,
         };
 
-        if (!consolidateDuplicates) {
-          return prev.map((item) => (item.id === id ? updatedItem : item));
-        }
-
-        // Humidor Duplicate Detection: Only merge if explicit consolidation was opted into
-        const duplicateSecondaries = prev.filter((item) => {
-          if (item.id === id) return false;
-          return isGarmentDuplicate(updatedItem, item);
-        });
-
-        if (duplicateSecondaries.length === 0) {
-          return prev.map((item) => (item.id === id ? updatedItem : item));
-        }
-
-        // Move all secondary duplicate copies into Trash as 'consolidated' so they can be restored at any time!
-        duplicateSecondaries.forEach((sec) => {
-          moveToTrashRef.current(
-            sec,
-            'wardrobe',
-            'consolidated',
-            `Consolidated duplicate merged into master item "${updatedItem.brand} ${updatedItem.name}"`,
-            { id: updatedItem.id, name: `${updatedItem.brand} ${updatedItem.name}` }
-          );
-        });
-
-        // Consolidate all secondary duplicate copies into the single master updated item!
-        const secondaryIds = new Set(duplicateSecondaries.map((s) => s.id));
-        const allTags = Array.from(
-          new Set([...(updatedItem.tags || []), ...duplicateSecondaries.flatMap((s) => s.tags || [])])
-        );
-        const totalWears =
-          (updatedItem.wearCount || 0) +
-          duplicateSecondaries.reduce((acc, s) => acc + (s.wearCount || 0), 0);
-        const maxVal = Math.max(
-          updatedItem.currentValuation || updatedItem.purchasePrice || 0,
-          ...duplicateSecondaries.map((s) => s.currentValuation || s.purchasePrice || 0)
-        );
-        const fallbackImage =
-          updatedItem.imageUrl || duplicateSecondaries.find((s) => s.imageUrl)?.imageUrl || '';
-        const fallbackColor =
-          updatedItem.color || duplicateSecondaries.find((s) => s.color && s.color !== 'Unspecified')?.color || 'Unspecified';
-        const fallbackColorHex =
-          updatedItem.colorHex || duplicateSecondaries.find((s) => s.colorHex)?.colorHex;
-        const fallbackSize = updatedItem.size || duplicateSecondaries.find((s) => s.size)?.size;
-        const fallbackMaterial =
-          updatedItem.material || duplicateSecondaries.find((s) => s.material)?.material;
-        const fallbackCare =
-          updatedItem.careNotes || duplicateSecondaries.find((s) => s.careNotes)?.careNotes;
-        const fallbackLocation =
-          updatedItem.storageLocation || duplicateSecondaries.find((s) => s.storageLocation)?.storageLocation;
-        const fallbackSubcategory =
-          updatedItem.subcategory || duplicateSecondaries.find((s) => s.subcategory)?.subcategory;
-        const fallbackSeller =
-          updatedItem.seller || duplicateSecondaries.find((s) => s.seller)?.seller;
-
-        const notePieces = [
-          updatedItem.notes,
-          ...duplicateSecondaries.map((s) => s.notes).filter(Boolean),
-        ].filter(Boolean) as string[];
-        const mergedNotes = Array.from(new Set(notePieces)).join(' | ');
-
-        const masterConsolidatedItem: WardrobeItem = {
-          ...updatedItem,
-          imageUrl: fallbackImage,
-          color: fallbackColor,
-          colorHex: fallbackColorHex,
-          size: fallbackSize,
-          material: fallbackMaterial,
-          careNotes: fallbackCare,
-          storageLocation: fallbackLocation,
-          subcategory: fallbackSubcategory,
-          seller: fallbackSeller,
-          tags: allTags,
-          wearCount: totalWears,
-          currentValuation: maxVal,
-          notes: mergedNotes || undefined,
-          updatedAt: now,
-        };
-
-        // Remap any lookbook outfits referencing secondary IDs to point to the master item ID
-        setOutfits((outfitPrev) =>
-          outfitPrev.map((o) => ({
-            ...o,
-            itemIds: Array.from(
-              new Set(o.itemIds.map((itemRefId) => (secondaryIds.has(itemRefId) ? id : itemRefId)))
-            ),
-            updatedAt: now,
-          }))
-        );
-
-        return prev
-          .filter((item) => !secondaryIds.has(item.id))
-          .map((item) => (item.id === id ? masterConsolidatedItem : item));
+        // Strictly update the target item ONLY. Never touch, delete, or merge other inventory items.
+        return prev.map((item) => (item.id === id ? updatedItem : item));
       });
 
       if (targetItem) {
@@ -1640,7 +1614,7 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           'ITEM_UPDATED',
           'wardrobe_item',
           `${updates.brand || targetItem.brand} ${updates.name || targetItem.name}`,
-          `Updated details and consolidated duplicates for "${updates.brand || targetItem.brand} ${updates.name || targetItem.name}".`,
+          `Updated details for "${updates.brand || targetItem.brand} ${updates.name || targetItem.name}".`,
           id,
           {
             oldValue: targetItem,
@@ -2306,7 +2280,7 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         brand: shoppingItem.brand,
         category: shoppingItem.category,
         subcategory: shoppingItem.tags?.[0] || 'Staple',
-        color: 'Neutral',
+        color: shoppingItem.color || '',
         season: [shoppingItem.season],
         purchaseDate: today,
         purchasePrice: finalPrice,
@@ -2422,6 +2396,29 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
       if (targetSale) {
         const itemToRecord = updatedEntity || { ...targetSale, ...updates };
+
+        // If status was updated to Sold, delete linked wardrobe piece from active inventory
+        if (updates.status === 'Sold' && targetSale.status !== 'Sold' && targetSale.sourceWardrobeItemId) {
+          const sourceId = targetSale.sourceWardrobeItemId;
+          const itemToDelete = items.find((w) => w.id === sourceId);
+          if (itemToDelete) {
+            moveToTrashRef.current(
+              itemToDelete,
+              'wardrobe',
+              'sold',
+              `Deleted from inventory after sale listing status was updated to SOLD for "${itemToRecord.brand} ${itemToRecord.name}"`,
+              { id: itemToDelete.id, name: `${itemToDelete.brand} ${itemToDelete.name}` }
+            );
+          }
+          setItems((prev) => prev.filter((w) => w.id !== sourceId));
+          setOutfits((prevOutfits) =>
+            prevOutfits.map((outfit) => ({
+              ...outfit,
+              itemIds: outfit.itemIds.filter((wId) => wId !== sourceId),
+            }))
+          );
+        }
+
         recordChange(
           'SALE_UPDATED',
           'sale_item',
@@ -2572,19 +2569,24 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           updatedAt: now,
         };
 
-        // If linked to a wardrobe item, optionally archive it
-        if (existing.sourceWardrobeItemId && soldData.archiveFromWardrobe) {
-          setItems((wPrev) =>
-            wPrev.map((w) =>
-              w.id === existing.sourceWardrobeItemId
-                ? {
-                    ...w,
-                    isArchived: true,
-                    notes: `${w.notes ? w.notes + ' | ' : ''}Sold on ${existing.platform} for £${soldPrice} on ${today}.`,
-                    updatedAt: now,
-                  }
-                : w
-            )
+        // When marked as sold, delete from active inventory and back up to Trash
+        if (existing.sourceWardrobeItemId) {
+          const itemToDelete = items.find((w) => w.id === existing.sourceWardrobeItemId);
+          if (itemToDelete) {
+            moveToTrashRef.current(
+              itemToDelete,
+              'wardrobe',
+              'sold',
+              `Deleted from inventory after piece was marked as SOLD on ${existing.platform} for £${soldPrice} on ${today}`,
+              { id: itemToDelete.id, name: `${itemToDelete.brand} ${itemToDelete.name}` }
+            );
+          }
+          setItems((wPrev) => wPrev.filter((w) => w.id !== existing.sourceWardrobeItemId));
+          setOutfits((prevOutfits) =>
+            prevOutfits.map((outfit) => ({
+              ...outfit,
+              itemIds: outfit.itemIds.filter((wId) => wId !== existing.sourceWardrobeItemId),
+            }))
           );
         }
 
@@ -2611,6 +2613,8 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       listingData: {
         listingPrice: number;
         platform: SellingPlatform;
+        status?: SellingStatus;
+        shippingStatus?: ShippingStatus;
         condition?: Condition;
         description?: string;
         tags?: string[];
@@ -2633,16 +2637,17 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         rrp: wardrobeItem.rrp,
         listingPrice: listingData.listingPrice,
         platform: listingData.platform,
-        status: 'Listed',
-        shippingStatus: 'Not Required',
+        status: listingData.status || 'Draft',
+        shippingStatus: listingData.shippingStatus || 'Not Required',
         sourceWardrobeItemId: wardrobeItem.id,
         imageUrl: wardrobeItem.imageUrl,
         description:
-          listingData.description ||
-          `Authentic ${wardrobeItem.brand} ${wardrobeItem.name}. Size ${wardrobeItem.size || 'N/A'}. Condition: ${listingData.condition || wardrobeItem.condition}. Worn ${wardrobeItem.wearCount || 0} times.`,
-        tags: listingData.tags || [...(wardrobeItem.tags || []), 'Wardrobe Sale'],
+          listingData.description !== undefined
+            ? listingData.description
+            : (wardrobeItem.notes || wardrobeItem.careNotes || ''),
+        tags: listingData.tags !== undefined ? listingData.tags : (wardrobeItem.tags ? [...wardrobeItem.tags] : []),
         listedDate: today,
-        notes: listingData.notes || 'Listed from wardrobe inventory.',
+        notes: listingData.notes !== undefined ? listingData.notes : (wardrobeItem.notes || ''),
         platformFees: 0,
         shippingCostPaidBySeller: 0,
         createdAt: now,
@@ -2715,7 +2720,7 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         brand: shopItem.brand,
         category: shopItem.category,
         size: shopItem.size,
-        color: shopItem.color || 'Neutral',
+        color: shopItem.color || '',
         condition: 'Pristine / New',
         originalPricePaid: shopItem.actualPricePaid || shopItem.estimatedPrice || 0,
         rrp: shopItem.rrp,
@@ -2781,9 +2786,11 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const saleId = listWardrobeItemForSale(item, {
         listingPrice: price,
         platform,
+        status: 'Draft',
         condition: item.condition,
-        tags: [...(item.tags || []), 'sale', 'resale'],
-        notes: `Listed directly from active wardrobe.`,
+        description: item.notes || item.careNotes || '',
+        tags: item.tags && Array.isArray(item.tags) ? [...item.tags] : [],
+        notes: item.notes || '',
       });
 
       if (removeFromWardrobe) {
@@ -2874,7 +2881,7 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         brand: sale.brand,
         category: sale.category,
         subcategory: sale.tags?.[0] || 'Staple',
-        color: sale.color || 'Neutral',
+        color: sale.color || '',
         season: ['All-Season'],
         purchaseDate: today,
         purchasePrice: sale.originalPricePaid || sale.listingPrice || 0,
@@ -4615,7 +4622,7 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         const inferredBrand = (order.brand && !/^vinted/i.test(order.brand))
           ? order.brand
           : extractBrandFromTitleAndDesc(orderTitle, order.description || '', order.brand);
-        const inferredColor = order.color || order.colour || extractColorFromTitleAndDesc(orderTitle, order.description || '') || 'Neutral';
+        const inferredColor = order.color || order.colour || extractColorFromTitleAndDesc(orderTitle, order.description || '') || '';
         const orderRrp = order.rrp ? (typeof order.rrp === 'number' ? order.rrp : parseFloat(String(order.rrp).replace(/[^0-9.]/g, '')) || orderPrice) : orderPrice;
 
         if (order.type === 'sold' || (order.type as any) === 'active' || order.status === 'Listed') {
@@ -5532,18 +5539,23 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         }
 
         const allExtracted = Array.from(extractedCategories);
-        const resolvedGarments = Array.from(
-          new Set([
-            ...INITIAL_GARMENT_CATEGORIES,
-            ...allExtracted.filter((c) => !isHomewareCategory(c)),
-          ])
-        );
-        const resolvedHomeware = Array.from(
-          new Set([
-            ...INITIAL_HOMEWARE_CATEGORIES,
-            ...allExtracted.filter((c) => isHomewareCategory(c)),
-          ])
-        );
+        const baseGarments =
+          mode === 'merge' && garmentCategories.length > 0
+            ? garmentCategories
+            : INITIAL_GARMENT_CATEGORIES;
+        const baseHomeware =
+          mode === 'merge' && homewareCategories.length > 0
+            ? homewareCategories
+            : INITIAL_HOMEWARE_CATEGORIES;
+
+        const resolvedGarments = deduplicateCategoriesCaseInsensitive([
+          ...baseGarments,
+          ...allExtracted.filter((c) => !isHomewareCategory(c, baseGarments, baseHomeware)),
+        ]);
+        const resolvedHomeware = deduplicateCategoriesCaseInsensitive([
+          ...baseHomeware,
+          ...allExtracted.filter((c) => isHomewareCategory(c, baseGarments, baseHomeware)),
+        ]);
         const totalCategoriesCount = resolvedGarments.length + resolvedHomeware.length;
         setGarmentCategories(resolvedGarments);
         setHomewareCategories(resolvedHomeware);
@@ -5687,6 +5699,10 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const trimmed = name.trim();
       if (!trimmed) return;
       captureUndoState(`Created garment category "${trimmed}"`);
+      // Remove from homeware if it was there to prevent cross-section duplicates
+      setHomewareCategories((prev) =>
+        prev.filter((c) => c.toLowerCase() !== trimmed.toLowerCase())
+      );
       setGarmentCategories((prev) => {
         if (prev.some((c) => c.toLowerCase() === trimmed.toLowerCase())) return prev;
         return [...prev, trimmed];
@@ -5704,24 +5720,33 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const updateGarmentCategory = useCallback(
     (oldName: string, newName: string) => {
       const trimmed = newName.trim();
-      if (!trimmed || trimmed === oldName) return;
+      const oldClean = oldName.trim().toLowerCase();
+      if (!trimmed || trimmed.toLowerCase() === oldClean) return;
 
       captureUndoState(`Renamed garment category "${oldName}" to "${trimmed}"`);
-      setGarmentCategories((prev) => prev.map((c) => (c === oldName ? trimmed : c)));
+      setGarmentCategories((prev) =>
+        prev.map((c) => (c.toLowerCase() === oldClean ? trimmed : c))
+      );
 
       // Update in items
       setItems((prev) =>
-        prev.map((item) => (item.category === oldName ? { ...item, category: trimmed } : item))
+        prev.map((item) =>
+          (item.category || '').toLowerCase() === oldClean ? { ...item, category: trimmed } : item
+        )
       );
 
       // Update in shopping list
       setShoppingList((prev) =>
-        prev.map((s) => (s.category === oldName ? { ...s, category: trimmed } : s))
+        prev.map((s) =>
+          (s.category || '').toLowerCase() === oldClean ? { ...s, category: trimmed } : s
+        )
       );
 
       // Update in sale items
       setSaleItems((prev) =>
-        prev.map((s) => (s.category === oldName ? { ...s, category: trimmed } : s))
+        prev.map((s) =>
+          (s.category || '').toLowerCase() === oldClean ? { ...s, category: trimmed } : s
+        )
       );
 
       recordChange(
@@ -5736,29 +5761,36 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const deleteGarmentCategory = useCallback(
     (nameToDelete: string) => {
+      const targetLower = nameToDelete.trim().toLowerCase();
       captureUndoState(`Deleted garment category "${nameToDelete}"`);
       setGarmentCategories((prev) => {
-        const remaining = prev.filter((c) => c !== nameToDelete);
-        const fallback = remaining[0] || 'Tops';
+        const remaining = prev.filter((c) => c.toLowerCase() !== targetLower);
+        const fallback = remaining[0] || 'Outerwear';
 
         // Reassign affected items
         setItems((itemPrev) =>
           itemPrev.map((item) =>
-            item.category === nameToDelete ? { ...item, category: fallback } : item
+            (item.category || '').trim().toLowerCase() === targetLower
+              ? { ...item, category: fallback }
+              : item
           )
         );
 
         // Reassign affected shopping items
         setShoppingList((shopPrev) =>
           shopPrev.map((s) =>
-            s.category === nameToDelete ? { ...s, category: fallback } : s
+            (s.category || '').trim().toLowerCase() === targetLower
+              ? { ...s, category: fallback }
+              : s
           )
         );
 
         // Reassign affected sale items
         setSaleItems((salePrev) =>
           salePrev.map((s) =>
-            s.category === nameToDelete ? { ...s, category: fallback } : s
+            (s.category || '').trim().toLowerCase() === targetLower
+              ? { ...s, category: fallback }
+              : s
           )
         );
 
@@ -5786,6 +5818,10 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const trimmed = name.trim();
       if (!trimmed) return;
       captureUndoState(`Created homeware category "${trimmed}"`);
+      // Remove from garments if it was there to prevent cross-section duplicates
+      setGarmentCategories((prev) =>
+        prev.filter((c) => c.toLowerCase() !== trimmed.toLowerCase())
+      );
       setHomewareCategories((prev) => {
         if (prev.some((c) => c.toLowerCase() === trimmed.toLowerCase())) return prev;
         return [...prev, trimmed];
@@ -5803,24 +5839,33 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const updateHomewareCategory = useCallback(
     (oldName: string, newName: string) => {
       const trimmed = newName.trim();
-      if (!trimmed || trimmed === oldName) return;
+      const oldClean = oldName.trim().toLowerCase();
+      if (!trimmed || trimmed.toLowerCase() === oldClean) return;
 
       captureUndoState(`Renamed homeware category "${oldName}" to "${trimmed}"`);
-      setHomewareCategories((prev) => prev.map((c) => (c === oldName ? trimmed : c)));
+      setHomewareCategories((prev) =>
+        prev.map((c) => (c.toLowerCase() === oldClean ? trimmed : c))
+      );
 
       // Update in items
       setItems((prev) =>
-        prev.map((item) => (item.category === oldName ? { ...item, category: trimmed } : item))
+        prev.map((item) =>
+          (item.category || '').toLowerCase() === oldClean ? { ...item, category: trimmed } : item
+        )
       );
 
       // Update in shopping list
       setShoppingList((prev) =>
-        prev.map((s) => (s.category === oldName ? { ...s, category: trimmed } : s))
+        prev.map((s) =>
+          (s.category || '').toLowerCase() === oldClean ? { ...s, category: trimmed } : s
+        )
       );
 
       // Update in sale items
       setSaleItems((prev) =>
-        prev.map((s) => (s.category === oldName ? { ...s, category: trimmed } : s))
+        prev.map((s) =>
+          (s.category || '').toLowerCase() === oldClean ? { ...s, category: trimmed } : s
+        )
       );
 
       recordChange(
@@ -5835,29 +5880,36 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const deleteHomewareCategory = useCallback(
     (nameToDelete: string) => {
+      const targetLower = nameToDelete.trim().toLowerCase();
       captureUndoState(`Deleted homeware category "${nameToDelete}"`);
       setHomewareCategories((prev) => {
-        const remaining = prev.filter((c) => c !== nameToDelete);
+        const remaining = prev.filter((c) => c.toLowerCase() !== targetLower);
         const fallback = remaining[0] || 'Homeware';
 
         // Reassign affected items
         setItems((itemPrev) =>
           itemPrev.map((item) =>
-            item.category === nameToDelete ? { ...item, category: fallback } : item
+            (item.category || '').trim().toLowerCase() === targetLower
+              ? { ...item, category: fallback }
+              : item
           )
         );
 
         // Reassign affected shopping items
         setShoppingList((shopPrev) =>
           shopPrev.map((s) =>
-            s.category === nameToDelete ? { ...s, category: fallback } : s
+            (s.category || '').trim().toLowerCase() === targetLower
+              ? { ...s, category: fallback }
+              : s
           )
         );
 
         // Reassign affected sale items
         setSaleItems((salePrev) =>
           salePrev.map((s) =>
-            s.category === nameToDelete ? { ...s, category: fallback } : s
+            (s.category || '').trim().toLowerCase() === targetLower
+              ? { ...s, category: fallback }
+              : s
           )
         );
 
@@ -5882,18 +5934,21 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   // UNIFIED CATEGORY MANAGEMENT (Backward-Compatible)
   const addCategory = useCallback(
     (name: string) => {
-      if (isHomewareCategory(name)) {
-        addHomewareCategory(name);
+      const trimmed = name.trim();
+      if (!trimmed) return;
+      if (isHomewareCategory(trimmed, garmentCategories, homewareCategories)) {
+        addHomewareCategory(trimmed);
       } else {
-        addGarmentCategory(name);
+        addGarmentCategory(trimmed);
       }
     },
-    [addHomewareCategory, addGarmentCategory]
+    [addHomewareCategory, addGarmentCategory, garmentCategories, homewareCategories]
   );
 
   const updateCategory = useCallback(
     (oldName: string, newName: string) => {
-      if (homewareCategories.includes(oldName)) {
+      const lower = oldName.trim().toLowerCase();
+      if (homewareCategories.some((c) => c.toLowerCase() === lower)) {
         updateHomewareCategory(oldName, newName);
       } else {
         updateGarmentCategory(oldName, newName);
@@ -5904,13 +5959,10 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const deleteCategory = useCallback(
     (nameToDelete: string) => {
-      if (homewareCategories.includes(nameToDelete)) {
-        deleteHomewareCategory(nameToDelete);
-      } else {
-        deleteGarmentCategory(nameToDelete);
-      }
+      deleteGarmentCategory(nameToDelete);
+      deleteHomewareCategory(nameToDelete);
     },
-    [homewareCategories, deleteHomewareCategory, deleteGarmentCategory]
+    [deleteGarmentCategory, deleteHomewareCategory]
   );
 
   const resetCategories = useCallback(() => {
@@ -5918,6 +5970,94 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     setGarmentCategories(INITIAL_GARMENT_CATEGORIES);
     setHomewareCategories(INITIAL_HOMEWARE_CATEGORIES);
   }, [captureUndoState]);
+
+  // CROSS-SECTION TAXONOMY REORGANIZATION
+  const moveCategory = useCallback(
+    (categoryName: string, targetSection: 'garments' | 'homeware') => {
+      const trimmed = categoryName.trim();
+      if (!trimmed) return;
+
+      captureUndoState(
+        `Moved category "${trimmed}" to ${targetSection === 'homeware' ? 'Homeware & Living' : 'Clothes & Garments'}`
+      );
+
+      const lower = trimmed.toLowerCase();
+      const isShoe =
+        lower === 'shoe care' ||
+        lower === 'shoecare' ||
+        lower === 'shoe care & maintenance' ||
+        lower.includes('shoe care') ||
+        lower.includes('shoe tree');
+
+      const matchesCategory = (catStr: string | undefined | null) => {
+        if (!catStr) return false;
+        const cLower = catStr.trim().toLowerCase();
+        if (cLower === lower) return true;
+        if (isShoe && (cLower === 'shoe care' || cLower === 'shoecare' || cLower === 'shoe care & maintenance' || cLower.includes('shoe care') || cLower.includes('shoe tree'))) {
+          return true;
+        }
+        return false;
+      };
+
+      if (targetSection === 'homeware') {
+        // Remove from garmentCategories
+        setGarmentCategories((prev) =>
+          prev.filter((c) => !matchesCategory(c))
+        );
+        // Add to homewareCategories
+        setHomewareCategories((prev) => {
+          if (prev.some((c) => matchesCategory(c))) return prev;
+          return deduplicateCategoriesCaseInsensitive([...prev, trimmed]);
+        });
+        // Update all items with this category to homeware_lifestyle
+        setItems((prev) =>
+          prev.map((item) =>
+            matchesCategory(item.category)
+              ? { ...item, itemType: 'homeware_lifestyle' }
+              : item
+          )
+        );
+      } else {
+        // Remove from homewareCategories
+        setHomewareCategories((prev) =>
+          prev.filter((c) => !matchesCategory(c))
+        );
+        // Add to garmentCategories
+        setGarmentCategories((prev) => {
+          if (prev.some((c) => matchesCategory(c))) return prev;
+          return deduplicateCategoriesCaseInsensitive([...prev, trimmed]);
+        });
+        // Update all items with this category to clothing
+        setItems((prev) =>
+          prev.map((item) =>
+            matchesCategory(item.category)
+              ? { ...item, itemType: 'clothing' }
+              : item
+          )
+        );
+      }
+
+      recordChange(
+        'ITEM_UPDATED',
+        'system',
+        `Category Reorganized: ${trimmed}`,
+        `Moved category "${trimmed}" into ${targetSection === 'homeware' ? 'Homeware & Living' : 'Clothes & Garments'}.`
+      );
+    },
+    [captureUndoState, recordChange]
+  );
+
+  const reorderCategories = useCallback(
+    (section: 'garments' | 'homeware', newCategories: string[]) => {
+      const cleaned = deduplicateCategoriesCaseInsensitive(newCategories);
+      if (section === 'garments') {
+        setGarmentCategories(cleaned);
+      } else {
+        setHomewareCategories(cleaned);
+      }
+    },
+    []
+  );
 
   // 21. RESET TO DEFAULT DATA
   const resetToDefaultData = useCallback(() => {
@@ -6149,6 +6289,8 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       updateHomewareCategory,
       deleteHomewareCategory,
       resetHomewareCategories,
+      moveCategory,
+      reorderCategories,
       addItem,
       updateItem,
       deleteItem,
@@ -6271,6 +6413,8 @@ export const WardrobeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       updateHomewareCategory,
       deleteHomewareCategory,
       resetHomewareCategories,
+      moveCategory,
+      reorderCategories,
       addItem,
       updateItem,
       deleteItem,

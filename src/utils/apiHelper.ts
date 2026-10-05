@@ -105,10 +105,33 @@ export async function safeApiFetch<T = any>(
     const jsonData = await res.json();
 
     if (!res.ok) {
+      let rawErr: any = jsonData.error || jsonData.message;
+      if (typeof rawErr === 'object' && rawErr !== null) {
+        rawErr = rawErr.message || JSON.stringify(rawErr);
+      }
+      if (typeof rawErr === 'string' && rawErr.trim().startsWith('{')) {
+        try {
+          const parsed = JSON.parse(rawErr.trim());
+          rawErr = parsed.error?.message || parsed.message || rawErr;
+        } catch {
+          // ignore
+        }
+      }
+      const errStr = typeof rawErr === 'string' ? rawErr : `Request failed with status ${res.status}`;
+      
+      // Clean up 429 / quota exceeded error
+      if (res.status === 429 || /quota|RESOURCE_EXHAUSTED|rate[- ]?limit|exceeded your current quota/i.test(errStr)) {
+        return {
+          success: false,
+          status: 429,
+          error: 'AI service rate limit or quota reached. Please wait a brief moment before retrying, or use curated presets.',
+        };
+      }
+
       return {
         success: false,
         status: res.status,
-        error: jsonData.error || jsonData.message || `Request failed with status ${res.status}`,
+        error: errStr,
       };
     }
 

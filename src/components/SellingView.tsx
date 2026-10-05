@@ -41,6 +41,8 @@ import {
   ChevronUp,
   Ban,
   Pencil,
+  GripVertical,
+  Kanban,
 } from 'lucide-react';
 import {
   SaleItem,
@@ -63,6 +65,7 @@ import { SellingDatabaseTable } from './SellingDatabaseTable';
 import { BulkActionBar } from './common/BulkActionBar';
 import { EmptyState } from './common/EmptyState';
 import { InlineEditableTitle } from './common/InlineEditableTitle';
+import { CategorySelect } from './common/CategorySelect';
 import {
   SellingDisplaySettingsModal,
   SellingDisplaySettings,
@@ -82,6 +85,8 @@ export { getSaleItemPipelineStage };
 export const SellingView: React.FC = () => {
   const {
     saleItems,
+    items,
+    listWardrobeItemForSale,
     categories,
     searchQuery,
     setSearchQuery,
@@ -238,9 +243,115 @@ export const SellingView: React.FC = () => {
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
   const [selectedTag, setSelectedTag] = useState<string>('All');
   const [sortBy, setSortBy] = useState<string>('newest');
-  const [viewMode, setViewMode] = useState<'grid' | 'table'>(
-    (displaySettings.viewMode as string) === 'database' || displaySettings.viewMode === 'table' ? 'table' : 'grid'
+  const [viewMode, setViewMode] = useState<'grid' | 'table' | 'board'>(
+    displaySettings.viewMode === 'table' ? 'table' : (displaySettings.viewMode === 'board' ? 'board' : 'grid')
   );
+
+  // Drag & Drop Between Sections State
+  const [draggedSaleItemId, setDraggedSaleItemId] = useState<string | null>(null);
+  const [hoveredDropStage, setHoveredDropStage] = useState<string | null>(null);
+  const [dropNotice, setDropNotice] = useState<string | null>(null);
+
+  const handleDragStart = (e: React.DragEvent, itemId: string) => {
+    setDraggedSaleItemId(itemId);
+    e.dataTransfer.setData('text/plain', itemId);
+    e.dataTransfer.setData('application/json', JSON.stringify({ type: 'sale_item', id: itemId }));
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
+  const handleDragEnd = () => {
+    setDraggedSaleItemId(null);
+    setHoveredDropStage(null);
+  };
+
+  const handleDropOnStage = (e: React.DragEvent, targetStage: string) => {
+    e.preventDefault();
+    setHoveredDropStage(null);
+    const rawJson = e.dataTransfer.getData('application/json');
+    let itemId = e.dataTransfer.getData('text/plain');
+    let itemType = 'sale_item';
+
+    if (rawJson) {
+      try {
+        const parsed = JSON.parse(rawJson);
+        if (parsed.id) itemId = parsed.id;
+        if (parsed.type) itemType = parsed.type;
+      } catch {}
+    }
+
+    if (!itemId) return;
+
+    // Handle dropping a wardrobe garment dragged into a sales section
+    if (itemType === 'wardrobe_item') {
+      const wardrobeItem = items.find((i) => i.id === itemId);
+      if (wardrobeItem) {
+        let newStatus: SellingStatus = 'Draft';
+        let shippingStatus: ShippingStatus | undefined = undefined;
+        if (targetStage === 'Listed') newStatus = 'Listed';
+        else if (targetStage === 'Reserved') newStatus = 'Reserved';
+        else if (targetStage === 'Awaiting Dispatch') {
+          newStatus = 'Sold';
+          shippingStatus = 'To Pack';
+        } else if (targetStage === 'In Transit') {
+          newStatus = 'Shipped';
+          shippingStatus = 'In Transit';
+        } else if (targetStage === 'Completed') {
+          newStatus = 'Completed';
+          shippingStatus = 'Delivered';
+        } else if (targetStage === 'Cancelled') {
+          newStatus = 'Cancelled';
+        }
+
+        listWardrobeItemForSale(wardrobeItem, {
+          listingPrice: wardrobeItem.currentValuation || wardrobeItem.purchasePrice || 0,
+          platform: 'Vinted',
+          status: newStatus,
+          shippingStatus,
+          condition: wardrobeItem.condition,
+          description: wardrobeItem.notes || wardrobeItem.careNotes || '',
+          tags: wardrobeItem.tags && Array.isArray(wardrobeItem.tags) ? [...wardrobeItem.tags] : [],
+          notes: wardrobeItem.notes || '',
+        });
+        setDropNotice(`Listed "${wardrobeItem.brand} ${wardrobeItem.name}" in ${targetStage}!`);
+        setTimeout(() => setDropNotice(null), 3000);
+        return;
+      }
+    }
+
+    // Moving existing sale item between sections
+    const saleItem = saleItems.find((s) => s.id === itemId);
+    if (!saleItem) return;
+
+    let newStatus: SellingStatus = 'Draft';
+    let newShipping: ShippingStatus | undefined = undefined;
+    if (targetStage === 'Listed') newStatus = 'Listed';
+    else if (targetStage === 'Reserved') newStatus = 'Reserved';
+    else if (targetStage === 'Awaiting Dispatch') {
+      newStatus = 'Sold';
+      newShipping = 'To Pack';
+    } else if (targetStage === 'In Transit') {
+      newStatus = 'Shipped';
+      newShipping = 'In Transit';
+    } else if (targetStage === 'Completed') {
+      newStatus = 'Completed';
+      newShipping = 'Delivered';
+    } else if (targetStage === 'Cancelled') {
+      newStatus = 'Cancelled';
+    } else if (targetStage === 'Draft') {
+      newStatus = 'Draft';
+    } else {
+      return;
+    }
+
+    if (saleItem.status !== newStatus || (newShipping && saleItem.shippingStatus !== newShipping)) {
+      updateSaleItem(itemId, {
+        status: newStatus,
+        ...(newShipping ? { shippingStatus: newShipping } : {}),
+      });
+      setDropNotice(`Moved "${saleItem.brand} ${saleItem.name}" to ${targetStage}`);
+      setTimeout(() => setDropNotice(null), 3000);
+    }
+  };
 
   // Inline editing state for card view
   const [editingFieldId, setEditingFieldId] = useState<string | null>(null);
@@ -261,7 +372,7 @@ export const SellingView: React.FC = () => {
   };
 
   // Sync viewMode changes to displaySettings
-  const handleSetViewMode = (mode: 'grid' | 'table') => {
+  const handleSetViewMode = (mode: 'grid' | 'table' | 'board') => {
     setViewMode(mode);
     handleUpdateDisplaySettings({ ...displaySettings, viewMode: mode });
   };
@@ -272,7 +383,7 @@ export const SellingView: React.FC = () => {
       const mode =
         (displaySettings.viewMode as string) === 'database' || displaySettings.viewMode === 'table'
           ? 'table'
-          : 'grid';
+          : (displaySettings.viewMode === 'board' ? 'board' : 'grid');
       setViewMode(mode);
     }
   }, [displaySettings.viewMode]);
@@ -553,7 +664,7 @@ export const SellingView: React.FC = () => {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            {/* View Mode Toggle: Grid vs Database Table (Icon-Only) */}
+            {/* View Mode Toggle: Grid vs Board vs Database Table */}
             <div className="flex items-center border border-[#E5E5E1] p-0.5 bg-[#F8F7F4]">
               <button
                 type="button"
@@ -567,6 +678,19 @@ export const SellingView: React.FC = () => {
                 aria-label="Grid Cards View"
               >
                 <LayoutGrid className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSetViewMode('board')}
+                className={`p-1.5 text-xs transition-colors cursor-pointer ${
+                  viewMode === 'board'
+                    ? 'bg-white text-[#1A1A1A] shadow-xs font-bold'
+                    : 'text-[#767670] hover:text-[#1A1A1A]'
+                }`}
+                title="Sections Board View (Drag and drop items in and out of sections)"
+                aria-label="Sections Board View"
+              >
+                <Kanban className="w-3.5 h-3.5" />
               </button>
               <button
                 type="button"
@@ -684,7 +808,7 @@ export const SellingView: React.FC = () => {
           )}
         </div>
 
-        {/* Workflow Stage Buttons */}
+        {/* Workflow Stage Buttons - Also act as Drag & Drop targets to move items between sections */}
         <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-1">
           {/* All */}
           <button
@@ -705,11 +829,23 @@ export const SellingView: React.FC = () => {
           <button
             type="button"
             onClick={() => handleSetSalesPipelineStage('Draft')}
+            onDragOver={(e) => {
+              e.preventDefault();
+              e.dataTransfer.dropEffect = 'move';
+              setHoveredDropStage('Draft');
+            }}
+            onDragLeave={() => setHoveredDropStage(null)}
+            onDrop={(e) => handleDropOnStage(e, 'Draft')}
             className={`px-3 py-1.5 text-xs font-mono transition-all cursor-pointer border flex items-center gap-1.5 whitespace-nowrap ${
-              salesPipelineStage === 'Draft'
+              hoveredDropStage === 'Draft'
+                ? 'bg-amber-100 text-amber-950 border-amber-500 ring-2 ring-amber-500 scale-105 font-bold shadow-md'
+                : draggedSaleItemId
+                ? 'border-dashed border-amber-400 bg-amber-50/50 text-[#4A4A45]'
+                : salesPipelineStage === 'Draft'
                 ? 'bg-[#4A4A45] text-white border-[#4A4A45] shadow-xs font-bold'
                 : 'bg-white text-[#4A4A45] border-[#D5D5D0] hover:border-[#8C7355]'
             }`}
+            title="Drop item here to move to Draft"
           >
             <Clock className="w-3 h-3 text-amber-500" />
             <span>Draft</span>
@@ -720,11 +856,23 @@ export const SellingView: React.FC = () => {
           <button
             type="button"
             onClick={() => handleSetSalesPipelineStage('Listed')}
+            onDragOver={(e) => {
+              e.preventDefault();
+              e.dataTransfer.dropEffect = 'move';
+              setHoveredDropStage('Listed');
+            }}
+            onDragLeave={() => setHoveredDropStage(null)}
+            onDrop={(e) => handleDropOnStage(e, 'Listed')}
             className={`px-3 py-1.5 text-xs font-mono transition-all cursor-pointer border flex items-center gap-1.5 whitespace-nowrap ${
-              salesPipelineStage === 'Listed'
+              hoveredDropStage === 'Listed'
+                ? 'bg-amber-100 text-amber-950 border-[#8C7355] ring-2 ring-[#8C7355] scale-105 font-bold shadow-md'
+                : draggedSaleItemId
+                ? 'border-dashed border-[#8C7355] bg-amber-50/50 text-[#4A4A45]'
+                : salesPipelineStage === 'Listed'
                 ? 'bg-[#8C7355] text-white border-[#8C7355] shadow-xs font-bold'
                 : 'bg-white text-[#4A4A45] border-[#D5D5D0] hover:border-[#8C7355]'
             }`}
+            title="Drop item here to move to Listed"
           >
             <Tag className="w-3 h-3 text-amber-200" />
             <span>Listed</span>
@@ -735,11 +883,23 @@ export const SellingView: React.FC = () => {
           <button
             type="button"
             onClick={() => handleSetSalesPipelineStage('Reserved')}
+            onDragOver={(e) => {
+              e.preventDefault();
+              e.dataTransfer.dropEffect = 'move';
+              setHoveredDropStage('Reserved');
+            }}
+            onDragLeave={() => setHoveredDropStage(null)}
+            onDrop={(e) => handleDropOnStage(e, 'Reserved')}
             className={`px-3 py-1.5 text-xs font-mono transition-all cursor-pointer border flex items-center gap-1.5 whitespace-nowrap ${
-              salesPipelineStage === 'Reserved'
+              hoveredDropStage === 'Reserved'
+                ? 'bg-indigo-100 text-indigo-950 border-indigo-600 ring-2 ring-indigo-500 scale-105 font-bold shadow-md'
+                : draggedSaleItemId
+                ? 'border-dashed border-indigo-400 bg-indigo-50/50 text-[#4A4A45]'
+                : salesPipelineStage === 'Reserved'
                 ? 'bg-indigo-800 text-white border-indigo-800 shadow-xs font-bold'
                 : 'bg-white text-[#4A4A45] border-[#D5D5D0] hover:border-indigo-700 hover:text-indigo-800'
             }`}
+            title="Drop item here to move to Reserved"
           >
             <Package className="w-3 h-3 text-indigo-300" />
             <span>Reserved</span>
@@ -750,11 +910,23 @@ export const SellingView: React.FC = () => {
           <button
             type="button"
             onClick={() => handleSetSalesPipelineStage('Awaiting Dispatch')}
+            onDragOver={(e) => {
+              e.preventDefault();
+              e.dataTransfer.dropEffect = 'move';
+              setHoveredDropStage('Awaiting Dispatch');
+            }}
+            onDragLeave={() => setHoveredDropStage(null)}
+            onDrop={(e) => handleDropOnStage(e, 'Awaiting Dispatch')}
             className={`px-3 py-1.5 text-xs font-mono transition-all cursor-pointer border flex items-center gap-1.5 whitespace-nowrap ${
-              salesPipelineStage === 'Awaiting Dispatch'
+              hoveredDropStage === 'Awaiting Dispatch'
+                ? 'bg-amber-100 text-amber-950 border-amber-700 ring-2 ring-amber-600 scale-105 font-bold shadow-md'
+                : draggedSaleItemId
+                ? 'border-dashed border-amber-500 bg-amber-50/50 text-[#4A4A45]'
+                : salesPipelineStage === 'Awaiting Dispatch'
                 ? 'bg-amber-800 text-white border-amber-800 shadow-xs font-bold'
                 : 'bg-white text-[#4A4A45] border-[#D5D5D0] hover:border-amber-700 hover:text-amber-800'
             }`}
+            title="Drop item here to move to Awaiting Dispatch"
           >
             <CheckSquare className="w-3 h-3 text-amber-300" />
             <span>Awaiting Dispatch</span>
@@ -765,11 +937,23 @@ export const SellingView: React.FC = () => {
           <button
             type="button"
             onClick={() => handleSetSalesPipelineStage('In Transit')}
+            onDragOver={(e) => {
+              e.preventDefault();
+              e.dataTransfer.dropEffect = 'move';
+              setHoveredDropStage('In Transit');
+            }}
+            onDragLeave={() => setHoveredDropStage(null)}
+            onDrop={(e) => handleDropOnStage(e, 'In Transit')}
             className={`px-3 py-1.5 text-xs font-mono transition-all cursor-pointer border flex items-center gap-1.5 whitespace-nowrap ${
-              salesPipelineStage === 'In Transit'
+              hoveredDropStage === 'In Transit'
+                ? 'bg-blue-100 text-blue-950 border-blue-600 ring-2 ring-blue-500 scale-105 font-bold shadow-md'
+                : draggedSaleItemId
+                ? 'border-dashed border-blue-400 bg-blue-50/50 text-[#4A4A45]'
+                : salesPipelineStage === 'In Transit'
                 ? 'bg-blue-800 text-white border-blue-800 shadow-xs font-bold'
                 : 'bg-white text-[#4A4A45] border-[#D5D5D0] hover:border-blue-700 hover:text-blue-800'
             }`}
+            title="Drop item here to move to In Transit"
           >
             <Truck className="w-3 h-3 text-blue-300" />
             <span>In Transit</span>
@@ -780,11 +964,23 @@ export const SellingView: React.FC = () => {
           <button
             type="button"
             onClick={() => handleSetSalesPipelineStage('Completed')}
+            onDragOver={(e) => {
+              e.preventDefault();
+              e.dataTransfer.dropEffect = 'move';
+              setHoveredDropStage('Completed');
+            }}
+            onDragLeave={() => setHoveredDropStage(null)}
+            onDrop={(e) => handleDropOnStage(e, 'Completed')}
             className={`px-3 py-1.5 text-xs font-mono transition-all cursor-pointer border flex items-center gap-1.5 whitespace-nowrap ${
-              salesPipelineStage === 'Completed'
+              hoveredDropStage === 'Completed'
+                ? 'bg-emerald-100 text-emerald-950 border-emerald-600 ring-2 ring-emerald-500 scale-105 font-bold shadow-md'
+                : draggedSaleItemId
+                ? 'border-dashed border-emerald-400 bg-emerald-50/50 text-[#4A4A45]'
+                : salesPipelineStage === 'Completed'
                 ? 'bg-emerald-800 text-white border-emerald-800 shadow-xs font-bold'
                 : 'bg-white text-[#4A4A45] border-[#D5D5D0] hover:border-emerald-700 hover:text-emerald-800'
             }`}
+            title="Drop item here to move to Completed / Sold"
           >
             <CheckCircle className="w-3 h-3 text-emerald-300" />
             <span>Completed</span>
@@ -795,11 +991,23 @@ export const SellingView: React.FC = () => {
           <button
             type="button"
             onClick={() => handleSetSalesPipelineStage('Cancelled')}
+            onDragOver={(e) => {
+              e.preventDefault();
+              e.dataTransfer.dropEffect = 'move';
+              setHoveredDropStage('Cancelled');
+            }}
+            onDragLeave={() => setHoveredDropStage(null)}
+            onDrop={(e) => handleDropOnStage(e, 'Cancelled')}
             className={`px-3 py-1.5 text-xs font-mono transition-all cursor-pointer border flex items-center gap-1.5 whitespace-nowrap ${
-              salesPipelineStage === 'Cancelled'
+              hoveredDropStage === 'Cancelled'
+                ? 'bg-rose-100 text-rose-950 border-rose-600 ring-2 ring-rose-500 scale-105 font-bold shadow-md'
+                : draggedSaleItemId
+                ? 'border-dashed border-rose-400 bg-rose-50/50 text-[#4A4A45]'
+                : salesPipelineStage === 'Cancelled'
                 ? 'bg-rose-800 text-white border-rose-800 shadow-xs font-bold'
                 : 'bg-white text-[#4A4A45] border-[#D5D5D0] hover:border-rose-700 hover:text-rose-800'
             }`}
+            title="Drop item here to move to Cancelled"
           >
             <Ban className="w-3 h-3 text-rose-300" />
             <span>Cancelled</span>
@@ -984,21 +1192,20 @@ export const SellingView: React.FC = () => {
                 <option value="Cancelled">Cancelled / Delisted ({pipelineStats.Cancelled.count})</option>
               </select>
 
-              <select
-                value={selectedCategory}
-                onChange={(e) => setSelectedCategory(e.target.value)}
-                className="bg-white border border-[#E5E5E1] px-2.5 py-1 text-xs font-mono text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none cursor-pointer"
-              >
-                <option value="All">All Categories</option>
-                {categories.map((cat) => {
-                  const count = categoryCounts.get(cat.toLowerCase()) || 0;
-                  return (
-                    <option key={cat} value={cat}>
-                      {cat} {count > 0 ? `(${count})` : ''}
-                    </option>
-                  );
-                })}
-              </select>
+              <div className="w-44">
+                <CategorySelect
+                  value={selectedCategory}
+                  onChange={(val) => setSelectedCategory(val)}
+                  categories={categories}
+                  counts={categoryCounts}
+                  formatCategoryLabel={(cat, count) =>
+                    `${cat} ${count !== undefined && count > 0 ? `(${count})` : ''}`
+                  }
+                  includeAllOption={true}
+                  allOptionLabel="All Categories"
+                  className="px-2.5 py-1 text-xs"
+                />
+              </div>
 
               <select
                 value={selectedTag}
@@ -1210,8 +1417,232 @@ export const SellingView: React.FC = () => {
         ]}
       />
 
-      {/* Content View: Grid or Database Table */}
-      {viewMode === 'grid' ? (
+      {/* Content View: Board, Grid, or Database Table */}
+      {viewMode === 'board' ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4 items-start">
+          {[
+            {
+              id: 'draft',
+              title: 'Drafts',
+              stageKey: 'Draft' as SalesPipelineStage,
+              defaultStatus: 'Draft' as SellingStatus,
+              icon: Clock,
+              accentBorder: 'border-zinc-400',
+              accentHeader: 'bg-zinc-100/90 text-zinc-900 border-zinc-200',
+              items: filteredSales.filter((i) => i.status === 'Draft'),
+            },
+            {
+              id: 'listed',
+              title: 'Active Listings',
+              stageKey: 'Listed' as SalesPipelineStage,
+              defaultStatus: 'Listed' as SellingStatus,
+              icon: Tag,
+              accentBorder: 'border-amber-500',
+              accentHeader: 'bg-amber-100/80 text-amber-950 border-amber-300',
+              items: filteredSales.filter((i) => i.status === 'Listed'),
+            },
+            {
+              id: 'reserved',
+              title: 'Reserved',
+              stageKey: 'Reserved' as SalesPipelineStage,
+              defaultStatus: 'Reserved' as SellingStatus,
+              icon: Package,
+              accentBorder: 'border-indigo-500',
+              accentHeader: 'bg-indigo-100/80 text-indigo-950 border-indigo-300',
+              items: filteredSales.filter((i) => i.status === 'Reserved'),
+            },
+            {
+              id: 'dispatch',
+              title: 'Dispatch & Transit',
+              stageKey: 'Awaiting Dispatch' as SalesPipelineStage,
+              defaultStatus: 'Sold' as SellingStatus,
+              icon: Truck,
+              accentBorder: 'border-blue-500',
+              accentHeader: 'bg-blue-100/80 text-blue-950 border-blue-300',
+              items: filteredSales.filter(
+                (i) => getSaleItemPipelineStage(i) === 'Awaiting Dispatch' || getSaleItemPipelineStage(i) === 'In Transit'
+              ),
+            },
+            {
+              id: 'completed',
+              title: 'Sold & Completed',
+              stageKey: 'Completed' as SalesPipelineStage,
+              defaultStatus: 'Completed' as SellingStatus,
+              icon: CheckCircle,
+              accentBorder: 'border-emerald-500',
+              accentHeader: 'bg-emerald-100/80 text-emerald-950 border-emerald-300',
+              items: filteredSales.filter((i) => i.status === 'Completed' || i.status === 'Sold'),
+            },
+          ].map((col) => {
+            const Icon = col.icon;
+            const isDropHovered = hoveredDropStage === col.stageKey || hoveredDropStage === col.id;
+            const totalColValue = col.items.reduce((acc, it) => acc + (it.listingPrice ?? it.soldPrice ?? 0), 0);
+
+            return (
+              <div
+                key={col.id}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = 'move';
+                  setHoveredDropStage(col.stageKey);
+                }}
+                onDragLeave={() => setHoveredDropStage(null)}
+                onDrop={(e) => handleDropOnStage(e, col.stageKey)}
+                className={`bg-[#FDFCFB] border transition-all flex flex-col min-h-[500px] shadow-2xs rounded-xs ${
+                  isDropHovered
+                    ? 'border-2 border-dashed border-[#8C7355] bg-amber-50/60 ring-2 ring-[#8C7355]/30'
+                    : draggedSaleItemId
+                    ? 'border-dashed border-[#D5D5D0] hover:border-[#8C7355]'
+                    : 'border-[#E5E5E1]'
+                }`}
+              >
+                {/* Column Section Header */}
+                <div className={`px-3 py-2.5 border-b flex items-center justify-between ${col.accentHeader}`}>
+                  <div className="flex items-center gap-2">
+                    <Icon className="w-3.5 h-3.5 shrink-0" />
+                    <span className="font-mono text-xs font-bold uppercase tracking-wider">{col.title}</span>
+                    <span className="text-[10px] font-mono px-1.5 py-0.2 rounded-full bg-white/80 border border-black/10 font-bold">
+                      {col.items.length}
+                    </span>
+                  </div>
+                  <span className="text-[10px] font-mono font-semibold">
+                    {formatCurrency(totalColValue)}
+                  </span>
+                </div>
+
+                {/* Drop Area / Cards List */}
+                <div className="p-2.5 space-y-2.5 flex-1 flex flex-col">
+                  {col.items.length === 0 ? (
+                    <div
+                      className={`flex-1 flex flex-col items-center justify-center p-4 border border-dashed text-center min-h-[140px] rounded-xs transition-colors ${
+                        isDropHovered ? 'border-[#8C7355] bg-amber-100/40 text-[#8C7355]' : 'border-zinc-300 text-[#767670]'
+                      }`}
+                    >
+                      <Icon className="w-5 h-5 mb-1.5 opacity-40" />
+                      <p className="text-[11px] font-mono font-medium">Empty Section</p>
+                      <p className="text-[10px] text-zinc-400 mt-0.5">Drag & drop items here</p>
+                    </div>
+                  ) : (
+                    col.items.map((item) => {
+                      const isDraggingThis = draggedSaleItemId === item.id;
+                      const isSelected = selectedSaleIds.has(item.id);
+                      return (
+                        <div
+                          key={item.id}
+                          draggable={true}
+                          onDragStart={(e) => handleDragStart(e, item.id)}
+                          onDragEnd={handleDragEnd}
+                          className={`bg-white border p-2.5 space-y-2 shadow-2xs hover:shadow-xs transition-all cursor-grab active:cursor-grabbing rounded-xs ${
+                            isDraggingThis
+                              ? 'opacity-35 ring-2 ring-[#8C7355] scale-95'
+                              : isSelected
+                              ? 'border-[#8C7355] ring-1 ring-[#8C7355]/40'
+                              : 'border-[#E5E5E1] hover:border-[#8C7355]'
+                          }`}
+                        >
+                          {/* Card Top Row: Grip Handle, Selection, Image Thumbnail, and Brand */}
+                          <div className="flex items-start gap-2">
+                            <div
+                              className="text-zinc-400 hover:text-zinc-700 cursor-grab active:cursor-grabbing pt-0.5 shrink-0"
+                              title="Drag to move across sections"
+                            >
+                              <GripVertical className="w-3.5 h-3.5" />
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => toggleSelectSale(item.id)}
+                              className={`p-1 rounded-xs border transition-colors cursor-pointer shrink-0 ${
+                                isSelected
+                                  ? 'bg-[#8C7355] border-[#8C7355] text-white'
+                                  : 'bg-white border-zinc-200 text-zinc-300 hover:text-zinc-600'
+                              }`}
+                              title={isSelected ? 'Deselect' : 'Select'}
+                            >
+                              <CheckSquare className="w-3 h-3" />
+                            </button>
+
+                            <div className="w-10 h-10 bg-[#F8F7F4] border border-[#E5E5E1] shrink-0 overflow-hidden rounded-xs">
+                              <GarmentImage
+                                src={item.imageUrl}
+                                alt={item.name}
+                                category={item.category}
+                                className="w-full h-full object-cover"
+                              />
+                            </div>
+
+                            <div className="flex-1 min-w-0">
+                              <p className="text-[10px] font-mono uppercase tracking-wider text-[#8C7355] font-bold truncate">
+                                {item.brand || 'Unbranded'}
+                              </p>
+                              <p className="text-xs font-medium text-[#1A1A1A] truncate" title={item.name}>
+                                {item.name}
+                              </p>
+                              <p className="text-[10px] font-mono text-zinc-500">
+                                {item.platform} • {item.category}
+                              </p>
+                            </div>
+                          </div>
+
+                          {/* Card Bottom Row: Price, Quick Dropdown & Actions */}
+                          <div className="flex items-center justify-between pt-1 border-t border-[#F2F1ED]">
+                            <div className="font-mono text-xs font-bold text-[#1A1A1A]">
+                              {formatCurrency(item.listingPrice ?? item.soldPrice ?? 0)}
+                            </div>
+
+                            <div className="flex items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSaleItemToEdit(item);
+                                  setIsSaleFormOpen(true);
+                                }}
+                                className="p-1 text-zinc-400 hover:text-zinc-800 border border-zinc-200 hover:bg-zinc-50 rounded-xs transition-colors"
+                                title="Edit Listing"
+                              >
+                                <Edit2 className="w-3 h-3" />
+                              </button>
+                              {item.status !== 'Completed' && item.status !== 'Sold' && (
+                                <button
+                                  type="button"
+                                  onClick={() => setMarkSoldItem(item)}
+                                  className="px-1.5 py-0.5 bg-emerald-700 hover:bg-emerald-800 text-white text-[9.5px] font-mono font-medium rounded-xs transition"
+                                  title="Mark Sold"
+                                >
+                                  Sold
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (safeConfirm(`Delete listing for "${item.name}"?`)) {
+                                    deleteSaleItem(item.id);
+                                  }
+                                }}
+                                className="p-1 text-zinc-400 hover:text-rose-600 border border-zinc-200 hover:bg-rose-50 rounded-xs transition-colors"
+                                title="Delete"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+
+                  {/* Gentle Drop Zone at bottom of column when column has items */}
+                  {col.items.length > 0 && isDropHovered && (
+                    <div className="p-3 border-2 border-dashed border-[#8C7355] bg-amber-100/50 text-[#8C7355] text-center rounded-xs text-[11px] font-mono font-medium animate-pulse">
+                      Drop here to move into {col.title}
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : viewMode === 'grid' ? (
         filteredSales.length === 0 ? (
           <EmptyState
             icon={Tag}
@@ -1232,7 +1663,12 @@ export const SellingView: React.FC = () => {
               return (
                 <div
                   key={item.id}
-                  className={`group bg-white border transition-all flex flex-col justify-between ${
+                  draggable={true}
+                  onDragStart={(e) => handleDragStart(e, item.id)}
+                  onDragEnd={handleDragEnd}
+                  className={`group bg-white border transition-all flex flex-col justify-between cursor-grab active:cursor-grabbing ${
+                    draggedSaleItemId === item.id ? 'opacity-40 ring-2 ring-[#8C7355] scale-98 shadow-inner' : ''
+                  } ${
                     isSelected
                       ? 'border-[#8C7355] ring-2 ring-[#8C7355]/20 shadow-md'
                       : 'border-[#E5E5E1] shadow-2xs hover:shadow-xs hover:border-[#8C7355]'
@@ -1247,8 +1683,14 @@ export const SellingView: React.FC = () => {
                       className="w-full h-full object-cover group-hover:scale-103 transition-transform duration-300"
                     />
 
-                    {/* Top Left: Tick Box with unified Sales aesthetic */}
+                    {/* Top Left: Drag Handle & Selection Checkbox */}
                     <div className="absolute top-2 left-2 z-10 flex items-center gap-1.5">
+                      <div
+                        className="p-1 rounded-md backdrop-blur-xs shadow-xs border bg-white/95 border-zinc-200 text-zinc-400 group-hover:text-zinc-700 transition-colors cursor-grab active:cursor-grabbing"
+                        title="Drag item to any stage or section"
+                      >
+                        <GripVertical className="w-3.5 h-3.5" />
+                      </div>
                       <button
                         type="button"
                         onClick={() => toggleSelectSale(item.id)}
@@ -1797,6 +2239,14 @@ export const SellingView: React.FC = () => {
             setAiGeneratorItem(null);
           }}
         />
+      )}
+
+      {/* Floating Drag & Drop Notice Toast */}
+      {dropNotice && (
+        <div className="fixed bottom-6 right-6 z-50 bg-[#1A1A1A] text-white text-xs font-mono px-4 py-2.5 shadow-xl border border-[#8C7355] flex items-center gap-2 animate-in fade-in slide-in-from-bottom-2 duration-200">
+          <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" />
+          <span>{dropNotice}</span>
+        </div>
       )}
     </div>
   );

@@ -19,6 +19,7 @@ import { InlineEditableTitle } from './common/InlineEditableTitle';
 
 interface NavigationProps {
   onOpenAddItem: () => void;
+  onOpenBulkSuite?: () => void;
   onOpenCreateLook: () => void;
   onOpenCreateSnapshot: () => void;
   onOpenSettings: () => void;
@@ -46,6 +47,7 @@ const tabs: readonly TabItem[] = [
 
 export const Navigation = ({
   onOpenAddItem,
+  onOpenBulkSuite,
   onOpenCreateLook,
   onOpenCreateSnapshot,
   onOpenSettings,
@@ -181,6 +183,17 @@ export const Navigation = ({
               <Plus className="h-3.5 w-3.5 text-[#767670]" />
               <span className="hidden sm:inline">Add Item</span>
             </button>
+            {onOpenBulkSuite && (
+              <button
+                type="button"
+                onClick={onOpenBulkSuite}
+                className="inline-flex items-center gap-1 rounded-md border border-[#8C7355]/40 bg-[#FAF9F5] hover:bg-[#F2F1ED] px-2.5 py-1.5 text-xs font-semibold text-[#8C7355] shadow-xs transition-all cursor-pointer"
+                title="Bulk Suite: Multi-line text parser, colorway matrix & batch editor"
+              >
+                <Layers className="h-3.5 w-3.5 text-[#8C7355]" />
+                <span className="hidden md:inline">Bulk Suite</span>
+              </button>
+            )}
             <button
               type="button"
               onClick={() => window.dispatchEvent(new CustomEvent('toggle-quick-notes'))}

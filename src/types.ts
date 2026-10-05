@@ -1,105 +1,40 @@
-export type Category = string;
+import type { Category, GroupedCategoriesResult } from './constants/categories';
+import {
+  CANONICAL_GARMENT_CATEGORIES,
+  CANONICAL_HOMEWARE_CATEGORIES,
+  DEFAULT_GARMENT_CATEGORIES,
+  DEFAULT_HOMEWARE_CATEGORIES,
+  DEFAULT_CATEGORIES,
+  deduplicateCategoriesCaseInsensitive,
+  isHomewareCategory,
+  normalizeCategoryName,
+  CATEGORY_SYNONYMS,
+  getSafeCategories,
+  canonicalizeCategory,
+  getGroupedCategories,
+} from './constants/categories';
 
-export const DEFAULT_GARMENT_CATEGORIES: string[] = [
-  'Outerwear',
-  'Knitwear',
-  'Tops',
-  'Shirts',
-  'T-Shirts',
-  'Bottoms',
-  'Trousers',
-  'Jeans',
-  'Tailoring',
-  'Coats',
-  'Jacket',
-  'Dresses & Jumpsuits',
-  'Shoes',
-  'Bags',
-  'Accessories',
-  'Resort Wear',
-  'Socks',
-  'Formalwear',
-  'Activewear',
-];
-
-export const DEFAULT_HOMEWARE_CATEGORIES: string[] = [
-  'Homeware',
-  'Furniture & Living',
-  'Lighting & Lamps',
-  'Audio & Tech',
-  'Electronics & Tech',
-  'Cameras & Optics',
-  'Hobbies & Instruments',
-  'Vinyl',
-  'Art & Books',
-  'Textiles & Bedding',
-  'Tableware & Dining',
-  'Kitchen & Cookware',
-  'Decor & Vases',
-  'Tools & EDC',
-  'Shoe Care & Maintenance',
-  'Misc Homeware',
-];
-
-export const DEFAULT_CATEGORIES: string[] = Array.from(
-  new Set([...DEFAULT_GARMENT_CATEGORIES, ...DEFAULT_HOMEWARE_CATEGORIES])
-);
-
-export const isHomewareCategory = (category: string | undefined | null): boolean => {
-  if (!category) return false;
-  const lower = category.trim().toLowerCase();
-  const homewareKeywords = [
-    'homeware',
-    'vinyl',
-    'bedding',
-    'textiles',
-    'tableware',
-    'dining',
-    'kitchen',
-    'cookware',
-    'lighting',
-    'lamps',
-    'decor',
-    'vases',
-    'furniture',
-    'living',
-    'audio',
-    'tech',
-    'electronics',
-    'gadget',
-    'camera',
-    'hobby',
-    'hobbies',
-    'instrument',
-    'tool',
-    'books',
-    'art & books',
-    'shoe care',
-    'cigar',
-    'humidor',
-    'misc',
-  ];
-  return (
-    DEFAULT_HOMEWARE_CATEGORIES.some((c) => c.toLowerCase() === lower) ||
-    homewareKeywords.some((kw) => lower.includes(kw))
-  );
-};
-
-export const normalizeCategoryName = (
-  category: string | undefined | null,
-  availableCategories: string[] = DEFAULT_CATEGORIES
-): string => {
-  if (!category || !category.trim()) return availableCategories[0] || 'Outerwear';
-  const clean = category.trim();
-  const found = availableCategories.find((c) => c.toLowerCase() === clean.toLowerCase());
-  return found || clean;
+export type { Category, GroupedCategoriesResult };
+export {
+  CANONICAL_GARMENT_CATEGORIES,
+  CANONICAL_HOMEWARE_CATEGORIES,
+  DEFAULT_GARMENT_CATEGORIES,
+  DEFAULT_HOMEWARE_CATEGORIES,
+  DEFAULT_CATEGORIES,
+  deduplicateCategoriesCaseInsensitive,
+  isHomewareCategory,
+  normalizeCategoryName,
+  CATEGORY_SYNONYMS,
+  getSafeCategories,
+  canonicalizeCategory,
+  getGroupedCategories,
 };
 
 export const normalizeHomewareCategoryName = (
   category: string | undefined | null,
   availableCategories: string[] = DEFAULT_HOMEWARE_CATEGORIES
 ): string => {
-  if (!category || !category.trim()) return availableCategories[0] || 'Homeware';
+  if (!category || !category.trim()) return '';
   const clean = category.trim();
   const found = availableCategories.find((c) => c.toLowerCase() === clean.toLowerCase());
   return found || clean;
@@ -470,11 +405,63 @@ export interface LookbookOutfit {
   pieceBreakdown?: LookbookOutfitPiece[]; // decomposed garments from the photographic look
   isEditorialIdea?: boolean; // flag indicating it's an imported research idea / cookbook recipe
   photographicMood?: string; // e.g. "Editorial Street Style", "Studio Flatlay", "Runway Snapshot"
+  thermalCohesionScore?: number; // 0-100 comfort & breathability score
+  thermalComfortRange?: string; // e.g. "5°C - 14°C"
+  layeringFormula?: string; // e.g. "Base Layer + Mid Layer + Outerwear + Footwear"
+  flatlayData?: { items: FlatlayCanvasItem[]; canvasTheme?: string };
   isFavorite: boolean;
   timesWorn: number;
   lastWornDate?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface TravelCapsuleTrip {
+  id: string;
+  destination: string;
+  startDate: string;
+  endDate: string;
+  daysCount: number;
+  vibe: string;
+  temperatureRange: string;
+  weatherAdvice: string;
+  luggageType: string;
+  selectedItemIds: string[];
+  packedItemIds: string[];
+  transitItemIds: string[];
+  laundryDays?: number[]; // e.g. [3, 7] - days where laundry refresh occurs
+  laundryTurnaroundNotes?: string;
+  weatherForecast?: Array<{
+    day: number;
+    date: string;
+    tempMin: number;
+    tempMax: number;
+    rainProb: number;
+    condition: string;
+    icon: string;
+  }>;
+  dailyOutfits: Array<{
+    day: number;
+    title: string;
+    itemIds: string[];
+    occasion: string;
+    notes?: string;
+    weatherMatchScore?: number;
+  }>;
+  allPermutationsCount?: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface FlatlayCanvasItem {
+  id: string;
+  wardrobeItemId: string;
+  x: number;
+  y: number;
+  scale: number;
+  rotation: number;
+  zIndex: number;
+  silhouetteCutout: boolean;
 }
 
 export interface ShoppingItem {
@@ -521,6 +508,61 @@ export interface ShoppingItem {
   lastUpdatedDate?: string;
   originalListingColor?: string;
   engineUsed?: string;
+}
+
+export interface ShopTheLookItem {
+  id: string;
+  title: string;
+  brand: string;
+  category: string;
+  priceGbp: number;
+  originalPriceGbp?: number;
+  retailer: string;
+  retailerDomain?: string;
+  productUrl: string;
+  imageUrl?: string;
+  similarityScore?: number; // 0 - 100 percentage
+  similarityReason?: string;
+  color?: string;
+  material?: string;
+  season?: string;
+  inStock?: boolean;
+}
+
+export interface OutfitMatcherWeatherPreset {
+  id: string;
+  label: string;
+  icon: string;
+  temperature: string;
+  tempRange: [number, number];
+  conditionDescription: string;
+  layeringFocus: string;
+}
+
+export interface OutfitMatcherCombination {
+  id: string;
+  title: string;
+  occasion: string;
+  season: string;
+  weatherRecommendation?: string;
+  itemIds: string[];
+  items?: WardrobeItem[];
+  stylingRationale: string;
+  colorPalette?: string[];
+  stylingTips?: string[];
+  vibe?: string;
+  cohesionScore?: number;
+  engineUsed?: string;
+  groundingInsights?: string;
+  weatherConditions?: string;
+  suggestedMissingPiece?: {
+    name: string;
+    category: string;
+    suggestedRetailer: string;
+    searchQuery: string;
+    estimatedPriceGbp: number;
+    reason: string;
+  };
 }
 
 export type SellingPlatform =
@@ -821,7 +863,8 @@ export type TrashReason =
   | 'deleted'
   | 'consolidated'
   | 'bulk_deleted'
-  | 'import_replaced';
+  | 'import_replaced'
+  | 'sold';
 
 export interface TrashItem {
   id: string; // Unique trash entry identifier

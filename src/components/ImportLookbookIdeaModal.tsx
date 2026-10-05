@@ -25,6 +25,7 @@ import { LookbookOutfit, Category, Season, LookbookOutfitPiece } from '../types'
 import { EDITORIAL_RESEARCH_IDEAS, EditorialResearchIdea } from '../data/editorialInspirations';
 import { GarmentImage } from './GarmentImage';
 import { safeApiFetch } from '../utils/apiHelper';
+import { ShopTheLookModal } from './ShopTheLookModal';
 
 interface ImportLookbookIdeaModalProps {
   isOpen: boolean;
@@ -65,6 +66,8 @@ export const ImportLookbookIdeaModal: React.FC<ImportLookbookIdeaModalProps> = (
   const [copiedHex, setCopiedHex] = useState<string | null>(null);
   const [addedWishlistPieces, setAddedWishlistPieces] = useState<Set<string>>(new Set());
   const [saveSuccessMessage, setSaveSuccessMessage] = useState<string | null>(null);
+  const [isShopTheLookOpen, setIsShopTheLookOpen] = useState(false);
+  const [pieceToShop, setPieceToShop] = useState<{ name: string; category?: string; brand?: string } | null>(null);
 
   if (!isOpen) return null;
 
@@ -752,7 +755,20 @@ export const ImportLookbookIdeaModal: React.FC<ImportLookbookIdeaModalProps> = (
                           </div>
 
                           {/* Matching Status */}
-                          <div className="flex items-center gap-2 flex-shrink-0">
+                          <div className="flex items-center gap-1.5 flex-shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setPieceToShop(piece);
+                                setIsShopTheLookOpen(true);
+                              }}
+                              className="flex items-center gap-1 px-2 py-1 text-[11px] font-mono font-medium bg-[#F8F7F4] hover:bg-[#F3F2EE] text-[#8C7355] border border-[#8C7355]/40 transition-colors cursor-pointer"
+                              title="Search online retailers for similar items"
+                            >
+                              <ShoppingBag className="w-3 h-3" />
+                              <span>Shop Online</span>
+                            </button>
+
                             {matchedItem ? (
                               <div className="flex items-center gap-1.5 px-2 py-1 bg-emerald-50 border border-emerald-200 text-emerald-800 text-[11px] font-mono font-medium">
                                 <Check className="w-3.5 h-3.5 text-emerald-600" />
@@ -822,6 +838,19 @@ export const ImportLookbookIdeaModal: React.FC<ImportLookbookIdeaModalProps> = (
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
+                    onClick={() => {
+                      setPieceToShop(null);
+                      setIsShopTheLookOpen(true);
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-2 text-xs font-mono font-semibold bg-[#FAF9F7] hover:bg-[#F3F2EE] text-[#8C7355] border border-[#8C7355]/40 cursor-pointer transition-colors shadow-xs"
+                    title="Search online retailers for pieces matching this look"
+                  >
+                    <ShoppingBag className="w-3.5 h-3.5" />
+                    <span>Shop the Look</span>
+                  </button>
+
+                  <button
+                    type="button"
                     onClick={handleRecreateWithMyPieces}
                     className="flex items-center gap-1.5 px-3 py-2 text-xs font-mono font-semibold bg-[#F8F7F4] hover:bg-[#EFECE6] text-[#1A1A1A] border border-[#D5D5D0] cursor-pointer transition-colors shadow-xs"
                     title="Build an outfit with your closet items based on this formula"
@@ -844,6 +873,16 @@ export const ImportLookbookIdeaModal: React.FC<ImportLookbookIdeaModalProps> = (
           </div>
         </div>
       </div>
+
+      <ShopTheLookModal
+        isOpen={isShopTheLookOpen}
+        onClose={() => {
+          setIsShopTheLookOpen(false);
+          setPieceToShop(null);
+        }}
+        targetPiece={pieceToShop || undefined}
+        initialQuery={pieceToShop ? `${pieceToShop.brand || ''} ${pieceToShop.name}`.trim() : (stagedIdea?.title || '')}
+      />
     </div>
   );
 };

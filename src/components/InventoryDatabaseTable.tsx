@@ -7,6 +7,7 @@ import {
 } from '../types';
 import { useWardrobe } from '../context/WardrobeContext';
 import { GarmentImage } from './GarmentImage';
+import { CategorySelect } from './common/CategorySelect';
 import { ResizableHeaderCell } from './ResizableHeaderCell';
 import {
   InventoryDisplaySettings,
@@ -28,6 +29,7 @@ import {
   ShoppingBag,
   PoundSterling,
   Tag,
+  Palette,
 } from 'lucide-react';
 
 interface InventoryDatabaseTableProps {
@@ -41,6 +43,7 @@ interface InventoryDatabaseTableProps {
   onSelectItem: (item: WardrobeItem) => void;
   onEditItem: (item: WardrobeItem) => void;
   onSellItem?: (item: WardrobeItem) => void;
+  onAddColorways?: (item: WardrobeItem) => void;
 }
 
 type SortField =
@@ -65,6 +68,8 @@ const DEFAULT_COLUMN_WIDTHS: Record<string, number> = {
   condition: 140,
   season: 130,
   color: 110,
+  size: 90,
+  material: 140,
   location: 130,
   tags: 200,
   vinted: 160,
@@ -94,14 +99,28 @@ export const InventoryDatabaseTable: React.FC<InventoryDatabaseTableProps> = ({
   onSelectItem,
   onEditItem,
   onSellItem,
+  onAddColorways,
 }) => {
   const {
     updateItem,
     deleteItem,
     logItemWear,
     categories,
+    garmentCategories,
+    homewareCategories,
     formatCurrency,
+    saleItems,
   } = useWardrobe();
+
+  const saleItemByWardrobeId = useMemo(() => {
+    const map = new Map<string, typeof saleItems[0]>();
+    (saleItems || []).forEach((s) => {
+      if (s.sourceWardrobeItemId && s.status !== 'Delisted' && s.status !== 'Cancelled') {
+        map.set(s.sourceWardrobeItemId, s);
+      }
+    });
+    return map;
+  }, [saleItems]);
 
   const tableSettings: InventoryTableDisplaySettings = getInventoryTableSettings(displaySettings);
 
@@ -464,6 +483,34 @@ export const InventoryDatabaseTable: React.FC<InventoryDatabaseTableProps> = ({
               </ResizableHeaderCell>
             )}
 
+            {/* Size */}
+            {tableSettings.showSize && (
+              <ResizableHeaderCell
+                columnId="size"
+                width={getWidth('size')}
+                minWidth={70}
+                isResizing={resizingColumn === 'size'}
+                onResizeStart={startResize}
+                onDoubleClickReset={() => resetColumnWidth('size')}
+              >
+                Size
+              </ResizableHeaderCell>
+            )}
+
+            {/* Material */}
+            {tableSettings.showMaterial && (
+              <ResizableHeaderCell
+                columnId="material"
+                width={getWidth('material')}
+                minWidth={110}
+                isResizing={resizingColumn === 'material'}
+                onResizeStart={startResize}
+                onDoubleClickReset={() => resetColumnWidth('material')}
+              >
+                Material
+              </ResizableHeaderCell>
+            )}
+
             {/* Storage Location */}
             {tableSettings.showLocation && (
               <ResizableHeaderCell
@@ -533,10 +580,15 @@ export const InventoryDatabaseTable: React.FC<InventoryDatabaseTableProps> = ({
             const isEditingWear = editingFieldId === `${item.id}_wearCount`;
             const isEditingLocation = editingFieldId === `${item.id}_storageLocation`;
             const isEditingColor = editingFieldId === `${item.id}_color`;
+            const isEditingSize = editingFieldId === `${item.id}_size`;
+            const isEditingMaterial = editingFieldId === `${item.id}_material`;
             const isSelected = selectedItemIds.has(item.id);
+            const linkedSale = saleItemByWardrobeId.get(item.id);
 
             const rowBg = isSelected
               ? 'bg-amber-50/60'
+              : linkedSale
+              ? 'bg-amber-50/25 hover:bg-amber-50/40'
               : tableSettings.zebraStriping && idx % 2 === 1
               ? 'bg-[#FAF9F6] hover:bg-[#F3F2EE]'
               : 'bg-white hover:bg-[#FAF9F6]';
@@ -634,20 +686,11 @@ export const InventoryDatabaseTable: React.FC<InventoryDatabaseTableProps> = ({
                     style={getCellStyle('category')}
                     className={`${densityPadding} overflow-hidden`}
                   >
-                    <select
+                    <CategorySelect
                       value={item.category}
-                      onChange={(e) => handleQuickCategoryChange(item.id, e.target.value)}
+                      onChange={(newCat) => handleQuickCategoryChange(item.id, newCat)}
                       className="w-full bg-[#F8F7F4] border border-[#E5E5E1] text-[#1A1A1A] px-1.5 py-0.5 focus:outline-none focus:border-[#8C7355] cursor-pointer rounded-xs truncate font-mono text-[11px]"
-                    >
-                      {item.category && !categories.includes(item.category) && (
-                        <option value={item.category}>{item.category}</option>
-                      )}
-                      {categories.map((cat) => (
-                        <option key={cat} value={cat}>
-                          {cat}
-                        </option>
-                      ))}
-                    </select>
+                    />
                   </td>
                 )}
 
@@ -682,7 +725,15 @@ export const InventoryDatabaseTable: React.FC<InventoryDatabaseTableProps> = ({
                         }`}
                         title="Click to edit brand inline"
                       >
-                        <span className="truncate">{item.brand}</span>
+                        <span className="truncate">
+                          {!item.brand || item.brand.trim() === '' || item.brand.toLowerCase() === 'unbranded' ? (
+                            <span className="text-amber-800 bg-amber-50 px-1 py-0.5 rounded-2xs border border-amber-200 text-[10.5px] font-bold">
+                              Missing Brand
+                            </span>
+                          ) : (
+                            item.brand
+                          )}
+                        </span>
                         <Pencil className="w-2.5 h-2.5 opacity-0 group-hover/field:opacity-60 shrink-0" />
                       </div>
                     )}
@@ -721,7 +772,13 @@ export const InventoryDatabaseTable: React.FC<InventoryDatabaseTableProps> = ({
                         className="font-mono font-bold text-[#1A1A1A] hover:text-[#8C7355] cursor-pointer flex items-center gap-1 group/field"
                         title="Click to edit price inline"
                       >
-                        <span>{formatGbp(item.purchasePrice)}</span>
+                        {item.purchasePrice === 0 || !item.purchasePrice ? (
+                          <span className="text-amber-800 bg-amber-50 border border-amber-200 px-1 py-0.5 rounded-2xs text-[10px] font-bold">
+                            £0 (Missing)
+                          </span>
+                        ) : (
+                          <span>{formatGbp(item.purchasePrice)}</span>
+                        )}
                         <Pencil className="w-2.5 h-2.5 opacity-0 group-hover/field:opacity-60 shrink-0 text-[#8C7355]" />
                       </div>
                     )}
@@ -918,6 +975,98 @@ export const InventoryDatabaseTable: React.FC<InventoryDatabaseTableProps> = ({
                   </td>
                 )}
 
+                {/* Size (Inline Editable) */}
+                {tableSettings.showSize && (
+                  <td
+                    style={getCellStyle('size')}
+                    className={`${densityPadding} overflow-hidden`}
+                  >
+                    {isEditingSize ? (
+                      <input
+                        type="text"
+                        value={editingValue}
+                        onChange={(e) => setEditingValue(e.target.value)}
+                        onBlur={() => handleSaveInline(item.id, 'size')}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') handleSaveInline(item.id, 'size');
+                          if (e.key === 'Escape') setEditingFieldId(null);
+                        }}
+                        autoFocus
+                        placeholder="e.g. M, 40R, 32/32"
+                        className="w-full text-xs font-mono border border-[#8C7355] px-1.5 py-0.5 bg-white rounded-xs focus:outline-none"
+                      />
+                    ) : (
+                      <div
+                        onClick={() => {
+                          setEditingFieldId(`${item.id}_size`);
+                          setEditingValue(item.size || '');
+                        }}
+                        className={`text-[11px] font-mono text-[#1A1A1A] hover:text-[#8C7355] cursor-pointer flex items-center justify-between gap-1 group/field ${
+                          tableSettings.textWrap ? 'whitespace-normal' : 'truncate'
+                        }`}
+                        title="Click to edit size inline"
+                      >
+                        {item.size && item.size.trim() && item.size.toLowerCase() !== 'unknown' ? (
+                          <span className="font-semibold px-1.5 py-0.5 bg-[#F2F1ED] border border-[#E5E5E1] rounded-xs text-[10.5px]">
+                            {item.size}
+                          </span>
+                        ) : (
+                          <span className="text-amber-800 bg-amber-50 border border-amber-200 px-1 py-0.5 rounded-2xs text-[10px] font-bold">
+                            Missing Size
+                          </span>
+                        )}
+                        <Pencil className="w-2.5 h-2.5 opacity-0 group-hover/field:opacity-60 shrink-0 text-[#8C7355]" />
+                      </div>
+                    )}
+                  </td>
+                )}
+
+                {/* Material / Fabric Composition (Inline Editable) */}
+                {tableSettings.showMaterial && (
+                  <td
+                    style={getCellStyle('material')}
+                    className={`${densityPadding} overflow-hidden`}
+                  >
+                    {isEditingMaterial ? (
+                      <input
+                        type="text"
+                        value={editingValue}
+                        onChange={(e) => setEditingValue(e.target.value)}
+                        onBlur={() => handleSaveInline(item.id, 'material')}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') handleSaveInline(item.id, 'material');
+                          if (e.key === 'Escape') setEditingFieldId(null);
+                        }}
+                        autoFocus
+                        placeholder="e.g. 100% Wool, Cotton"
+                        className="w-full text-xs font-mono border border-[#8C7355] px-1.5 py-0.5 bg-white rounded-xs focus:outline-none"
+                      />
+                    ) : (
+                      <div
+                        onClick={() => {
+                          setEditingFieldId(`${item.id}_material`);
+                          setEditingValue(item.material || '');
+                        }}
+                        className={`text-[11px] text-[#1A1A1A] hover:text-[#8C7355] cursor-pointer flex items-center justify-between gap-1 group/field ${
+                          tableSettings.textWrap ? 'whitespace-normal' : 'truncate'
+                        }`}
+                        title="Click to edit fabric material inline"
+                      >
+                        <span className={tableSettings.textWrap ? '' : 'truncate'}>
+                          {item.material && item.material.trim() && item.material.toLowerCase() !== 'unknown' ? (
+                            item.material
+                          ) : (
+                            <span className="text-amber-800 bg-amber-50 border border-amber-200 px-1 py-0.5 rounded-2xs text-[10px] font-bold">
+                              Missing Material
+                            </span>
+                          )}
+                        </span>
+                        <Pencil className="w-2.5 h-2.5 opacity-0 group-hover/field:opacity-60 shrink-0 text-[#8C7355]" />
+                      </div>
+                    )}
+                  </td>
+                )}
+
                 {/* Storage Location */}
                 {tableSettings.showLocation && (
                   <td
@@ -939,18 +1088,31 @@ export const InventoryDatabaseTable: React.FC<InventoryDatabaseTableProps> = ({
                         className="w-full min-w-[120px] max-w-[360px] resize-x text-xs font-mono border border-[#8C7355] px-1.5 py-0.5 bg-white rounded-xs"
                       />
                     ) : (
-                      <div
-                        onClick={() => {
-                          setEditingFieldId(`${item.id}_storageLocation`);
-                          setEditingValue(item.storageLocation || '');
-                        }}
-                        className={`text-[11px] font-mono text-[#8C7355] hover:underline cursor-pointer flex items-center gap-1 ${
-                          tableSettings.textWrap ? 'whitespace-normal' : 'truncate'
-                        }`}
-                        title="Click to edit storage location"
-                      >
-                        <MapPin className="w-2.5 h-2.5 shrink-0" />
-                        <span className="truncate">{item.storageLocation || 'Unassigned'}</span>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <div
+                          onClick={() => {
+                            setEditingFieldId(`${item.id}_storageLocation`);
+                            setEditingValue(item.storageLocation || '');
+                          }}
+                          className={`text-[11px] font-mono text-[#8C7355] hover:underline cursor-pointer flex items-center gap-1 ${
+                            tableSettings.textWrap ? 'whitespace-normal' : 'truncate'
+                          }`}
+                          title="Click to edit storage location"
+                        >
+                          <MapPin className="w-2.5 h-2.5 shrink-0" />
+                          <span className="truncate">{item.storageLocation || 'Unassigned'}</span>
+                        </div>
+
+                        {linkedSale && (
+                          <span
+                            className="inline-flex items-center gap-1 px-1.5 py-0.2 bg-amber-100 text-amber-900 border border-amber-300 rounded-xs text-[9px] font-mono font-medium shadow-2xs"
+                            title={`Listed in sales pipeline (${linkedSale.platform}, Status: ${linkedSale.status})`}
+                          >
+                            <Tag className="w-2.5 h-2.5 text-amber-700 shrink-0" />
+                            <span className="font-bold">{linkedSale.status === 'Draft' ? 'Draft' : 'Listed'}</span>
+                            <span>• £{linkedSale.listingPrice}</span>
+                          </span>
+                        )}
                       </div>
                     )}
                   </td>
@@ -1053,6 +1215,19 @@ export const InventoryDatabaseTable: React.FC<InventoryDatabaseTableProps> = ({
                           title="List for Resale / Selling"
                         >
                           <Tag className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                      {onAddColorways && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onAddColorways(item);
+                          }}
+                          className="p-1 rounded text-[#8C7355] hover:text-[#735D43] hover:bg-[#FAF9F5] border border-[#8C7355]/30 cursor-pointer"
+                          title="Generate colorway variants of this piece in Bulk Suite"
+                        >
+                          <Palette className="w-3.5 h-3.5" />
                         </button>
                       )}
                       <button

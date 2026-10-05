@@ -491,10 +491,14 @@ async function scrapeWithStealthFetch(url: string): Promise<ScrapedPageResult> {
   };
 }
 
+import { findProductImageForGarment } from './productImageLookupService';
+
 /**
  * Single Source of Truth Scraper Method:
  * Attempts Firecrawl first (if FIRECRAWL_API_KEY is configured), then seamlessly
- * falls back to enhanced stealth browser fetch if unavailable or on error.
+ * falls back to enhanced stealth browser fetch. If images are missing or page was bot-blocked,
+ * automatically utilizes the autonomous product image search engine to ensure high-res photos
+ * are always populated.
  */
 export async function scrapeUrlUnified(url: string): Promise<ScrapedPageResult> {
   const cleanUrl = url.trim();
@@ -508,13 +512,14 @@ export async function scrapeUrlUnified(url: string): Promise<ScrapedPageResult> 
     };
   }
 
+  let finalResult: ScrapedPageResult | null = null;
   const firecrawlKey = process.env.FIRECRAWL_API_KEY;
 
   if (firecrawlKey && firecrawlKey.trim()) {
     try {
       const firecrawlResult = await scrapeWithFirecrawl(cleanUrl, firecrawlKey);
-      if (firecrawlResult.success) {
-        return firecrawlResult;
+      if (firecrawlResult.success && firecrawlResult.candidateImages.length > 0) {
+        finalResult = firecrawlResult;
       }
     } catch (firecrawlErr: any) {
       console.warn(
@@ -523,9 +528,50 @@ export async function scrapeUrlUnified(url: string): Promise<ScrapedPageResult> 
     }
   }
 
-  // Stealth fallback engine
-  const fallbackResult = await scrapeWithStealthFetch(cleanUrl);
-  return fallbackResult;
+  // Stealth fallback engine if Firecrawl was not available or had no images
+  if (!finalResult) {
+    finalResult = await scrapeWithStealthFetch(cleanUrl);
+  }
+
+  // Autonomous Image & Spec Fallback: If no candidate images were found, or bot challenge returned empty
+  if (!finalResult.mainImage || finalResult.candidateImages.length === 0) {
+    const brandToSearch = finalResult.brand && finalResult.brand !== 'Online Retailer' && finalResult.brand !== 'Pre-Loved Brand'
+      ? finalResult.brand
+      : inferBrandFromUrl(cleanUrl);
+
+    let titleToSearch = finalResult.title || '';
+    if (!titleToSearch || titleToSearch.includes('Access Denied') || titleToSearch.includes('Error Page')) {
+      // Decode slug
+      try {
+        const pName = new URL(cleanUrl).pathname.split('/').filter(Boolean).pop() || '';
+        titleToSearch = decodeURIComponent(pName)
+          .replace(/\.(html|php|aspx?)$/i, '')
+          .replace(/[_\-]+/g, ' ')
+          .replace(/\b\d{5,}\b/g, '')
+          .trim();
+      } catch {
+        titleToSearch = '';
+      }
+    }
+
+    if (titleToSearch || brandToSearch) {
+      try {
+        const imageLookup = await findProductImageForGarment(
+          brandToSearch,
+          titleToSearch || brandToSearch,
+          finalResult.color
+        );
+        if (imageLookup.primaryImageUrl) {
+          finalResult.mainImage = imageLookup.primaryImageUrl;
+          finalResult.candidateImages = imageLookup.candidateImages;
+        }
+      } catch (imgErr) {
+        console.warn('Autonomous image fallback lookup notice:', imgErr);
+      }
+    }
+  }
+
+  return finalResult;
 }
 
 /**

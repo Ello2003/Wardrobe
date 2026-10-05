@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   X,
   Plus,
@@ -10,18 +10,27 @@ import {
   PoundSterling,
   ExternalLink,
   ShieldCheck,
+  ShoppingBag,
+  Palette,
 } from 'lucide-react';
 import { WardrobeItem, isHomewareCategory } from '../types';
 import { useWardrobe } from '../context/WardrobeContext';
 import { GarmentImage } from './GarmentImage';
+import { ShopTheLookModal } from './ShopTheLookModal';
 
 interface ItemDetailModalProps {
   item: WardrobeItem | null;
   onClose: () => void;
   onEdit: (item: WardrobeItem) => void;
+  onAddColorwayVariant?: (item: WardrobeItem) => void;
 }
 
-export const ItemDetailModal: React.FC<ItemDetailModalProps> = ({ item, onClose, onEdit }) => {
+export const ItemDetailModal: React.FC<ItemDetailModalProps> = ({
+  item,
+  onClose,
+  onEdit,
+  onAddColorwayVariant,
+}) => {
   const {
     logItemWear,
     toggleItemFavorite,
@@ -29,11 +38,41 @@ export const ItemDetailModal: React.FC<ItemDetailModalProps> = ({ item, onClose,
     outfits,
     listWardrobeItemForSale,
     setActiveTab,
+    saleItems,
+    garmentCategories = [],
+    homewareCategories = [],
   } = useWardrobe();
+
+  const [isShopTheLookOpen, setIsShopTheLookOpen] = useState(false);
 
   if (!item) return null;
 
-  const isHomeware = isHomewareCategory(item.category);
+  const linkedSale = (saleItems || []).find(
+    (s) => s.sourceWardrobeItemId === item.id && s.status !== 'Delisted' && s.status !== 'Cancelled'
+  );
+
+  const catLower = (item.category || '').trim().toLowerCase();
+  const isShoeCare =
+    catLower === 'shoe care' ||
+    catLower === 'shoecare' ||
+    catLower === 'shoe care & maintenance' ||
+    catLower.includes('shoe care') ||
+    catLower.includes('shoe tree');
+  const isGarmentCat = garmentCategories.some((c) => c.toLowerCase() === catLower);
+  const isHomewareCat = homewareCategories.some((c) => c.toLowerCase() === catLower);
+
+  const isHomeware =
+    isShoeCare && !isHomewareCat
+      ? false
+      : isGarmentCat
+      ? false
+      : isHomewareCat
+      ? true
+      : item.itemType === 'clothing'
+      ? false
+      : item.itemType === 'homeware_lifestyle'
+      ? true
+      : isHomewareCategory(item.category, garmentCategories, homewareCategories);
   const itemTags = Array.isArray(item.tags) ? item.tags : [];
   const itemSeasons = Array.isArray(item.season)
     ? item.season
@@ -113,6 +152,43 @@ export const ItemDetailModal: React.FC<ItemDetailModalProps> = ({ item, onClose,
           </div>
         </div>
 
+        {/* Selling Pipeline Active Alert Banner */}
+        {linkedSale && (
+          <div className="mx-4 mt-3 p-3 bg-amber-50/90 border border-amber-300 rounded-lg flex items-center justify-between shadow-2xs">
+            <div className="flex items-center gap-2.5">
+              <div className="p-1.5 bg-amber-200/70 text-amber-900 rounded-md">
+                <Tag className="w-4 h-4" />
+              </div>
+              <div>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs font-mono font-bold text-amber-950 uppercase tracking-wide">
+                    {linkedSale.status === 'Draft' ? 'Draft For Selling' : 'Listed For Selling'}
+                  </span>
+                  <span className="px-1.5 py-0.2 bg-amber-200/80 text-amber-900 text-[10px] font-mono font-bold rounded-xs">
+                    {linkedSale.platform}
+                  </span>
+                </div>
+                <p className="text-[11px] text-amber-800 font-mono mt-0.5">
+                  Price: <span className="font-bold text-amber-950">£{linkedSale.listingPrice}</span>
+                  {item.storageLocation ? (
+                    <span> • Stored at: <span className="font-semibold text-amber-950">{item.storageLocation}</span></span>
+                  ) : null}
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => {
+                setActiveTab('sales');
+                onClose();
+              }}
+              className="px-2.5 py-1 text-xs font-mono font-bold text-amber-900 bg-amber-100 hover:bg-amber-200 border border-amber-300 rounded-md cursor-pointer flex items-center gap-1 transition-colors"
+            >
+              <span>View in Sales</span>
+              <ExternalLink className="w-3 h-3" />
+            </button>
+          </div>
+        )}
+
         {/* Content Body */}
         <div className="p-4 space-y-4">
           {/* Key Metrics Grid */}
@@ -188,7 +264,7 @@ export const ItemDetailModal: React.FC<ItemDetailModalProps> = ({ item, onClose,
           </div>
 
           {/* Homeware, Electronics & Hardware Specs Card if present */}
-          {(item.modelNumber || item.powerSpecs || item.connectivity || item.warrantyInfo || item.includedAccessories || item.weight) && (
+          {isHomeware && (item.modelNumber || item.powerSpecs || item.connectivity || item.warrantyInfo || item.includedAccessories || item.weight) && (
             <div className="p-3 bg-[#FAF8F5] border border-[#E8DEC8] rounded-lg space-y-2 text-xs">
               <div className="flex items-center justify-between text-[11px] font-mono font-semibold text-[#8C7355]">
                 <span className="flex items-center gap-1.5">
@@ -381,6 +457,16 @@ export const ItemDetailModal: React.FC<ItemDetailModalProps> = ({ item, onClose,
           <div className="flex items-center gap-1.5">
             <button
               type="button"
+              onClick={() => setIsShopTheLookOpen(true)}
+              className="flex items-center gap-1 px-3 py-1.5 text-xs font-semibold bg-[#FAF9F7] hover:bg-[#F3F2EE] text-[#8C7355] rounded-md border border-[#8C7355]/40 transition-colors cursor-pointer shadow-2xs"
+              title="Search similar items available to purchase online with direct retailer links"
+            >
+              <ShoppingBag className="w-3.5 h-3.5 text-[#8C7355]" />
+              <span>Shop Similar Online</span>
+            </button>
+
+            <button
+              type="button"
               onClick={() => {
                 onEdit(item);
                 onClose();
@@ -391,6 +477,21 @@ export const ItemDetailModal: React.FC<ItemDetailModalProps> = ({ item, onClose,
               <Edit2 className="w-3.5 h-3.5 text-[#8C7355]" />
               <span>Full Edit Mode</span>
             </button>
+
+            {onAddColorwayVariant && !isHomeware && (
+              <button
+                type="button"
+                onClick={() => {
+                  onAddColorwayVariant(item);
+                  onClose();
+                }}
+                className="flex items-center gap-1 px-3 py-1.5 text-xs font-semibold bg-[#FAF9F5] hover:bg-[#F2F1ED] text-[#8C7355] rounded-md border border-[#8C7355]/40 transition-colors cursor-pointer shadow-2xs"
+                title="Add multiple colorway variants of this piece in Bulk Suite"
+              >
+                <Palette className="w-3.5 h-3.5 text-[#8C7355]" />
+                <span>Colorway Matrix</span>
+              </button>
+            )}
 
             <button
               onClick={() => {
@@ -427,6 +528,12 @@ export const ItemDetailModal: React.FC<ItemDetailModalProps> = ({ item, onClose,
           </button>
         </div>
       </div>
+
+      <ShopTheLookModal
+        isOpen={isShopTheLookOpen}
+        onClose={() => setIsShopTheLookOpen(false)}
+        item={item}
+      />
     </div>
   );
 };

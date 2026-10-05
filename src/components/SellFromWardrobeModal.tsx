@@ -14,6 +14,7 @@ import {
 import { WardrobeItem, SellingPlatform, Condition } from '../types';
 import { useWardrobe } from '../context/WardrobeContext';
 import { GarmentImage } from './GarmentImage';
+import { CategorySelect } from './common/CategorySelect';
 
 interface SellFromWardrobeModalProps {
   isOpen: boolean;
@@ -26,7 +27,7 @@ export const SellFromWardrobeModal: React.FC<SellFromWardrobeModalProps> = ({
   onClose,
   initialWardrobeItem,
 }) => {
-  const { items, saleItems, listWardrobeItemForSale } = useWardrobe();
+  const { items, saleItems, categories, listWardrobeItemForSale } = useWardrobe();
 
   const [selectedItem, setSelectedItem] = useState<WardrobeItem | null>(null);
   const [search, setSearch] = useState('');
@@ -76,14 +77,10 @@ export const SellFromWardrobeModal: React.FC<SellFromWardrobeModalProps> = ({
     const recommended = Math.round(original * multiplier);
     setListingPrice(recommended.toString());
 
-    // Generate starter description
-    const desc = `Authentic ${item.brand} ${item.name} in ${item.color || 'classic tone'}. Size: ${
-      item.size || 'Unspecified'
-    }. Material: ${item.material || 'Premium fabric'}. Condition: ${
-      item.condition
-    }. Worn ${item.wearCount || 0} times. Carefully cared for and ready to ship.`;
-    setDescription(desc);
-    setNotes(`Listed from closet inventory on ${new Date().toLocaleDateString('en-GB')}.`);
+    // Faithfully mirror the wardrobe item's actual notes and description from inventory
+    const mirroredDesc = item.notes?.trim() || item.careNotes?.trim() || '';
+    setDescription(mirroredDesc);
+    setNotes(item.notes?.trim() || '');
   };
 
   const filteredWardrobe = useMemo(() => {
@@ -122,10 +119,11 @@ export const SellFromWardrobeModal: React.FC<SellFromWardrobeModalProps> = ({
     listWardrobeItemForSale(selectedItem, {
       listingPrice: priceNum,
       platform,
+      status: 'Draft',
       condition,
-      description: description.trim() || undefined,
-      notes: notes.trim() || undefined,
-      tags: [...(selectedItem.tags || []), 'Wardrobe Resale', platform],
+      description: description.trim() || selectedItem.notes || undefined,
+      notes: notes.trim() || selectedItem.notes || undefined,
+      tags: selectedItem.tags && Array.isArray(selectedItem.tags) ? [...selectedItem.tags] : [],
     });
 
     onClose();
@@ -142,10 +140,10 @@ export const SellFromWardrobeModal: React.FC<SellFromWardrobeModalProps> = ({
             </div>
             <div>
               <h2 className="text-sm font-serif font-bold text-[#1A1A1A]">
-                Sell Piece from Wardrobe
+                Add Piece to Sales Drafts
               </h2>
               <p className="text-[11px] text-[#767670]">
-                Convert an existing closet garment into an active resale listing with smart pricing.
+                Convert an existing inventory item into a draft resale listing ready in your Sales pipeline.
               </p>
             </div>
           </div>
@@ -171,15 +169,25 @@ export const SellFromWardrobeModal: React.FC<SellFromWardrobeModalProps> = ({
                 </span>
               </div>
 
-              {/* Search */}
-              <div className="relative">
-                <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-[#767670]" />
-                <input
-                  type="text"
-                  placeholder="Filter garments by name or brand..."
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  className="w-full pl-8 pr-3 py-1.5 bg-white border border-[#E5E5E1] rounded-md text-xs text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none"
+              {/* Search & Category Filter */}
+              <div className="space-y-1.5">
+                <div className="relative">
+                  <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-[#767670]" />
+                  <input
+                    type="text"
+                    placeholder="Filter pieces by name or brand..."
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    className="w-full pl-8 pr-3 py-1.5 bg-white border border-[#E5E5E1] rounded-md text-xs text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none"
+                  />
+                </div>
+                <CategorySelect
+                  value={categoryFilter}
+                  onChange={(val) => setCategoryFilter(val)}
+                  categories={categories}
+                  includeAllOption={true}
+                  allOptionLabel="All Categories"
+                  className="px-2.5 py-1 text-xs"
                 />
               </div>
             </div>
@@ -377,7 +385,7 @@ export const SellFromWardrobeModal: React.FC<SellFromWardrobeModalProps> = ({
                     className="px-4 py-1.5 text-xs font-semibold bg-[#1A1A1A] hover:bg-[#333333] text-white rounded-md shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
                   >
                     <Plus className="w-3.5 h-3.5 text-amber-300" />
-                    Publish Sale Listing
+                    Add to Sales Drafts
                   </button>
                 </div>
               </form>

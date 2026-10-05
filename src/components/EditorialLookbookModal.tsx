@@ -13,10 +13,12 @@ import {
   Tag,
   Palette,
   Sparkles,
+  Flame,
 } from 'lucide-react';
 import { useWardrobe } from '../context/WardrobeContext';
 import { LookbookOutfit, WardrobeItem, LookbookOutfitPiece } from '../types';
 import { GarmentImage } from './GarmentImage';
+import { ShopTheLookModal } from './ShopTheLookModal';
 
 interface EditorialLookbookModalProps {
   isOpen: boolean;
@@ -45,6 +47,8 @@ export const EditorialLookbookModal: React.FC<EditorialLookbookModalProps> = ({
 
   const [copiedHex, setCopiedHex] = useState<string | null>(null);
   const [addedWishlistGaps, setAddedWishlistGaps] = useState<Set<string>>(new Set());
+  const [isShopTheLookOpen, setIsShopTheLookOpen] = useState(false);
+  const [selectedPieceToShop, setSelectedPieceToShop] = useState<LookbookOutfitPiece | null>(null);
 
   if (!isOpen || !outfit) return null;
 
@@ -244,6 +248,28 @@ export const EditorialLookbookModal: React.FC<EditorialLookbookModalProps> = ({
                 )}
               </div>
 
+              {/* Thermal Cohesion & Layering Formula */}
+              {(typeof outfit.thermalCohesionScore === 'number' || outfit.layeringFormula) && (
+                <div className="p-3 bg-emerald-50/70 border border-emerald-200 text-xs font-mono space-y-1.5 shadow-2xs">
+                  <div className="flex items-center justify-between text-emerald-900 font-bold">
+                    <span className="flex items-center gap-1.5">
+                      <Flame className="w-3.5 h-3.5 text-emerald-600" />
+                      Thermal Cohesion Score: {outfit.thermalCohesionScore}/100
+                    </span>
+                    {outfit.thermalComfortRange && (
+                      <span className="text-[11px] font-normal text-emerald-800">
+                        {outfit.thermalComfortRange}
+                      </span>
+                    )}
+                  </div>
+                  {outfit.layeringFormula && (
+                    <div className="text-[11px] text-emerald-800 pt-1 border-t border-emerald-200/60 leading-relaxed">
+                      <strong>Editorial Formula:</strong> {outfit.layeringFormula}
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Tags */}
               {Array.isArray(outfit.tags) && outfit.tags.length > 0 && (
                 <div className="flex flex-wrap gap-1.5 pt-1">
@@ -306,7 +332,20 @@ export const EditorialLookbookModal: React.FC<EditorialLookbookModalProps> = ({
                             )}
                           </div>
 
-                          <div className="flex items-center gap-2 flex-shrink-0">
+                          <div className="flex items-center gap-1.5 flex-shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedPieceToShop(piece);
+                                setIsShopTheLookOpen(true);
+                              }}
+                              className="flex items-center gap-1 px-2 py-1 text-[11px] font-mono font-medium bg-[#F8F7F4] hover:bg-[#F3F2EE] text-[#8C7355] border border-[#8C7355]/40 transition-colors cursor-pointer"
+                              title="Search online retailers for similar items"
+                            >
+                              <ShoppingBag className="w-3 h-3" />
+                              <span>Shop Online</span>
+                            </button>
+
                             {matchedItem ? (
                               <button
                                 type="button"
@@ -410,6 +449,19 @@ export const EditorialLookbookModal: React.FC<EditorialLookbookModalProps> = ({
                 <button
                   type="button"
                   onClick={() => {
+                    setSelectedPieceToShop(null);
+                    setIsShopTheLookOpen(true);
+                  }}
+                  className="flex items-center gap-1 px-3 py-1.5 text-xs font-mono font-medium bg-[#FAF9F7] hover:bg-[#F3F2EE] text-[#8C7355] border border-[#8C7355]/40 cursor-pointer transition-colors shadow-xs"
+                  title="Search online retailers for pieces matching this look"
+                >
+                  <ShoppingBag className="w-3.5 h-3.5" />
+                  <span>Shop the Look</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
                     logOutfitWear(outfit.id);
                     onClose();
                   }}
@@ -449,6 +501,16 @@ export const EditorialLookbookModal: React.FC<EditorialLookbookModalProps> = ({
           </div>
         </div>
       </div>
+
+      <ShopTheLookModal
+        isOpen={isShopTheLookOpen}
+        onClose={() => {
+          setIsShopTheLookOpen(false);
+          setSelectedPieceToShop(null);
+        }}
+        outfit={selectedPieceToShop ? undefined : outfit}
+        targetPiece={selectedPieceToShop || undefined}
+      />
     </div>
   );
 };

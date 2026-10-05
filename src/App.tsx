@@ -16,6 +16,7 @@ import { ShoppingFormModal } from './components/ShoppingFormModal';
 import { CreateSnapshotModal } from './components/CreateSnapshotModal';
 import { SettingsModal } from './components/SettingsModal';
 import { DuplicateMergeModal } from './components/DuplicateMergeModal';
+import { BulkSuiteModal, BulkSuiteTab } from './components/bulk/BulkSuiteModal';
 import { TrashBinModal } from './components/TrashBinModal';
 import { GlobalSearchModal } from './components/common/GlobalSearchModal';
 import { QuickNoteWidget } from './components/QuickNoteWidget';
@@ -49,6 +50,26 @@ const MainAppContent: React.FC = () => {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isDuplicateMergeOpen, setIsDuplicateMergeOpen] = useState(false);
   const [isGlobalSearchOpen, setIsGlobalSearchOpen] = useState(false);
+
+  // Universal Bulk & Colorway Suite Modal
+  const [isBulkSuiteOpen, setIsBulkSuiteOpen] = useState(false);
+  const [bulkSuiteTab, setBulkSuiteTab] = useState<BulkSuiteTab>('text_parser');
+  const [bulkSuiteItemToVariant, setBulkSuiteItemToVariant] = useState<WardrobeItem | null>(null);
+  const [bulkSuiteSelectedIds, setBulkSuiteSelectedIds] = useState<string[]>([]);
+
+  const openBulkSuite = useCallback(
+    (
+      tab: BulkSuiteTab = 'text_parser',
+      itemToVariant: WardrobeItem | null = null,
+      selectedIds?: string[]
+    ) => {
+      setBulkSuiteTab(tab);
+      setBulkSuiteItemToVariant(itemToVariant);
+      setBulkSuiteSelectedIds(selectedIds || []);
+      setIsBulkSuiteOpen(true);
+    },
+    []
+  );
 
   useEffect(() => {
     document.title = 'Wardrobe & Style Studio';
@@ -111,6 +132,7 @@ const MainAppContent: React.FC = () => {
     <div className="min-h-screen bg-[#F8F7F4] text-[#1A1A1A] flex flex-col font-sans selection:bg-[#8C7355] selection:text-white">
       <Navigation
         onOpenAddItem={() => openItemForm()}
+        onOpenBulkSuite={() => openBulkSuite('text_parser')}
         onOpenCreateLook={() => openOutfitForm()}
         onOpenCreateSnapshot={() => setIsSnapshotModalOpen(true)}
         onOpenSettings={() => setIsSettingsOpen(true)}
@@ -171,6 +193,7 @@ const MainAppContent: React.FC = () => {
           item={selectedDetailItem}
           onClose={() => setSelectedDetailItem(null)}
           onEdit={openItemForm}
+          onAddColorwayVariant={(item) => openBulkSuite('colorways', item)}
         />
       </ErrorBoundary>
 
@@ -231,6 +254,19 @@ const MainAppContent: React.FC = () => {
         <TrashBinModal
           isOpen={isTrashModalOpen}
           onClose={closeTrashModal}
+        />
+      </ErrorBoundary>
+
+      <ErrorBoundary isModal onClose={() => setIsBulkSuiteOpen(false)}>
+        <BulkSuiteModal
+          isOpen={isBulkSuiteOpen}
+          onClose={() => setIsBulkSuiteOpen(false)}
+          defaultDestination={
+            activeTab === 'shopping' ? 'shopping' : activeTab === 'selling' ? 'selling' : 'wardrobe'
+          }
+          initialTab={bulkSuiteTab}
+          initialItemToVariant={bulkSuiteItemToVariant}
+          initialSelectedIds={bulkSuiteSelectedIds}
         />
       </ErrorBoundary>
 

@@ -31,6 +31,10 @@ import { DuplicateMergeModal } from './DuplicateMergeModal';
 import { AutoImportModal } from './AutoImportModal';
 import { EbayImportModal } from './EbayImportModal';
 import { ProperCaseTool } from './ProperCaseTool';
+import { InventoryScanEnrichModal } from './InventoryScanEnrichModal';
+import { BatchLinePasteModal } from './BatchLinePasteModal';
+import { BulkSuiteModal } from './bulk/BulkSuiteModal';
+import { checkItemIncomplete } from '../services/inventoryScannerService';
 import {
   buildDuplicateItemRefs,
   computeDuplicateClusters,
@@ -41,7 +45,7 @@ import { InlineEditableTitle } from './common/InlineEditableTitle';
 
 interface ToolsViewProps {
   onOpenCreateSnapshot: () => void;
-  defaultSubTab?: 'duplicates' | 'import' | 'casing' | 'audit' | 'trash';
+  defaultSubTab?: 'duplicates' | 'scanner' | 'batch_paste' | 'import' | 'casing' | 'audit' | 'trash';
 }
 
 export const ToolsView: React.FC<ToolsViewProps> = ({
@@ -65,7 +69,7 @@ export const ToolsView: React.FC<ToolsViewProps> = ({
   } = useWardrobe();
 
   const [activeSubTab, setActiveSubTab] = useState<
-    'duplicates' | 'import' | 'casing' | 'audit' | 'trash'
+    'duplicates' | 'scanner' | 'batch_paste' | 'import' | 'casing' | 'audit' | 'trash'
   >(defaultSubTab);
 
   // Duplicate Merge Modal State
@@ -73,6 +77,16 @@ export const ToolsView: React.FC<ToolsViewProps> = ({
   const [duplicateScope, setDuplicateScope] = useState<
     'all' | 'wardrobe' | 'shopping' | 'selling'
   >('all');
+
+  // Scanner & Batch Paste Modals State
+  const [isScanEnrichOpen, setIsScanEnrichOpen] = useState(false);
+  const [isBatchPasteOpen, setIsBatchPasteOpen] = useState(false);
+  const [isBulkSuiteOpen, setIsBulkSuiteOpen] = useState(false);
+
+  // Incomplete items count across active closet
+  const incompleteItemsCount = useMemo(() => {
+    return items.filter((it) => !it.isArchived && checkItemIncomplete(it).isIncomplete).length;
+  }, [items]);
 
   // Auto Import Modal State
   const [isAutoImportOpen, setIsAutoImportOpen] = useState(false);
@@ -214,6 +228,37 @@ export const ToolsView: React.FC<ToolsViewProps> = ({
 
             <button
               type="button"
+              onClick={() => setActiveSubTab('scanner')}
+              className={`flex items-center gap-2 px-3.5 py-1.5 text-xs font-mono font-medium transition-all cursor-pointer ${
+                activeSubTab === 'scanner'
+                  ? 'bg-white text-[#1A1A1A] shadow-xs font-bold'
+                  : 'text-[#767670] hover:text-[#1A1A1A]'
+              }`}
+            >
+              <Sparkles className="w-3.5 h-3.5 text-[#8C7355]" />
+              <span>Autoscan &amp; Fill</span>
+              {incompleteItemsCount > 0 && (
+                <span className="px-1.5 py-0.2 text-[9px] bg-amber-500 text-white rounded-full font-bold">
+                  {incompleteItemsCount}
+                </span>
+              )}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveSubTab('batch_paste')}
+              className={`flex items-center gap-2 px-3.5 py-1.5 text-xs font-mono font-medium transition-all cursor-pointer ${
+                activeSubTab === 'batch_paste'
+                  ? 'bg-white text-[#1A1A1A] shadow-xs font-bold'
+                  : 'text-[#767670] hover:text-[#1A1A1A]'
+              }`}
+            >
+              <FileText className="w-3.5 h-3.5 text-[#8C7355]" />
+              <span>Batch Paste Lines</span>
+            </button>
+
+            <button
+              type="button"
               onClick={() => setActiveSubTab('import')}
               className={`flex items-center gap-2 px-3.5 py-1.5 text-xs font-mono font-medium transition-all cursor-pointer ${
                 activeSubTab === 'import'
@@ -283,6 +328,38 @@ export const ToolsView: React.FC<ToolsViewProps> = ({
               <Layers className="w-3.5 h-3.5" />
               <span>Scan &amp; Merge Duplicates</span>
             </button>
+          )}
+
+          {activeSubTab === 'scanner' && (
+            <button
+              type="button"
+              onClick={() => setIsScanEnrichOpen(true)}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 bg-[#8C7355] hover:bg-[#735D43] text-white text-xs font-medium uppercase tracking-wider transition-all cursor-pointer shadow-xs"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-amber-200" />
+              <span>Launch Autoscan &amp; Fill</span>
+            </button>
+          )}
+
+          {activeSubTab === 'batch_paste' && (
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setIsBulkSuiteOpen(true)}
+                className="flex items-center gap-1.5 px-3.5 py-1.5 bg-[#8C7355] hover:bg-[#735D43] text-white text-xs font-medium uppercase tracking-wider transition-all cursor-pointer shadow-xs"
+              >
+                <Layers className="w-3.5 h-3.5 text-amber-200" />
+                <span>Launch Bulk &amp; Colorway Suite</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsBatchPasteOpen(true)}
+                className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-[#F2F1ED] border border-[#D5D5D0] text-[#1A1A1A] text-xs font-mono transition-colors cursor-pointer"
+              >
+                <FileText className="w-3.5 h-3.5 text-[#767670]" />
+                <span>Line-by-Line Creator</span>
+              </button>
+            </div>
           )}
 
           {activeSubTab === 'trash' && (
@@ -510,6 +587,115 @@ export const ToolsView: React.FC<ToolsViewProps> = ({
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* ===================== SECTION: INVENTORY SCAN & AUTOFILL ===================== */}
+      {activeSubTab === 'scanner' && (
+        <div className="space-y-6">
+          <div className="bg-white border border-[#E5E5E1] p-6 shadow-xs">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+              <div className="space-y-2 max-w-2xl">
+                <div className="inline-flex items-center gap-1.5 text-[11px] font-mono uppercase tracking-wider px-2 py-0.5 bg-[#FAF0E6] text-[#8C7355] font-semibold">
+                  <Sparkles className="w-3 h-3 text-[#8C7355]" />
+                  Autonomous Inventory Intelligence
+                </div>
+                <h2 className="text-xl font-serif font-bold text-[#1A1A1A]">
+                  Autoscan and Fill (Side-by-Side Review)
+                </h2>
+                <p className="text-xs text-[#767670] leading-relaxed">
+                  Automatically audits every garment in your wardrobe to detect missing high-resolution photography,
+                  fabric and textile composition, colorways, categories, and estimated retail valuation (RRP).
+                  Displays discovered details in a side-by-side comparison window (identical to the merge screen)
+                  where you can verify, toggle specific fields, choose alternative candidate photos, and batch apply updates.
+                </p>
+              </div>
+
+              <div className="flex flex-col sm:flex-row lg:flex-col gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setIsScanEnrichOpen(true)}
+                  className="flex items-center justify-center gap-2 px-5 py-2.5 bg-[#8C7355] hover:bg-[#735D43] text-white text-xs font-mono font-semibold uppercase tracking-wider transition-all cursor-pointer shadow-xs"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-amber-200" />
+                  <span>Launch Autoscan &amp; Fill</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsBatchPasteOpen(true)}
+                  className="flex items-center justify-center gap-1.5 px-4 py-2 bg-[#F8F7F4] hover:bg-[#EAE8E3] border border-[#D5D5D0] text-[#1A1A1A] text-xs font-mono transition-colors cursor-pointer"
+                >
+                  <FileText className="w-3.5 h-3.5 text-[#767670]" />
+                  <span>Batch Paste New Items</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Incomplete Status Snapshot */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-6 mt-6 border-t border-[#E5E5E1]">
+              <div className="p-3.5 bg-[#F8F7F4] border border-[#E5E5E1] space-y-1">
+                <div className="text-[11px] font-mono text-[#767670]">Total Wardrobe Pieces</div>
+                <div className="text-lg font-mono font-bold text-[#1A1A1A]">{items.length} garments</div>
+              </div>
+
+              <div className="p-3.5 bg-[#F8F7F4] border border-[#E5E5E1] space-y-1">
+                <div className="text-[11px] font-mono text-[#767670]">Pieces Requiring Enrichment</div>
+                <div className={`text-lg font-mono font-bold ${incompleteItemsCount > 0 ? 'text-amber-800' : 'text-emerald-700'}`}>
+                  {incompleteItemsCount} items
+                </div>
+              </div>
+
+              <div className="p-3.5 bg-[#F8F7F4] border border-[#E5E5E1] space-y-1">
+                <div className="text-[11px] font-mono text-[#767670]">Missing Product Photos</div>
+                <div className="text-lg font-mono font-bold text-rose-700">
+                  {items.filter((i) => !i.isArchived && !i.imageUrl).length} pieces
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===================== SECTION: BATCH LINE-BY-LINE PASTE ===================== */}
+      {activeSubTab === 'batch_paste' && (
+        <div className="space-y-6">
+          <div className="bg-white border border-[#E5E5E1] p-6 shadow-xs">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+              <div className="space-y-2 max-w-2xl">
+                <div className="inline-flex items-center gap-1.5 text-[11px] font-mono uppercase tracking-wider px-2 py-0.5 bg-[#F2F1ED] text-[#8C7355] font-semibold">
+                  <FileText className="w-3 h-3 text-[#8C7355]" />
+                  Multi-Line Batch Creator
+                </div>
+                <h2 className="text-xl font-serif font-bold text-[#1A1A1A]">
+                  Paste Text to Create Multiple Inventory Items
+                </h2>
+                <p className="text-xs text-[#767670] leading-relaxed">
+                  Paste multi-line text from receipts, email confirmations, spreadsheet tables, or personal notes.
+                  Each line automatically generates a new inventory record with clean brand extraction, model title,
+                  category classification, colorway detection, and price parsing.
+                </p>
+              </div>
+
+              <div className="flex flex-col sm:flex-row lg:flex-col gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setIsBulkSuiteOpen(true)}
+                  className="flex items-center justify-center gap-2 px-5 py-2.5 bg-[#8C7355] hover:bg-[#735D43] text-white text-xs font-mono font-semibold uppercase tracking-wider transition-all cursor-pointer shadow-xs"
+                >
+                  <Layers className="w-3.5 h-3.5 text-amber-200" />
+                  <span>Launch Bulk &amp; Colorway Suite</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsBatchPasteOpen(true)}
+                  className="flex items-center justify-center gap-1.5 px-4 py-2 bg-[#FAF9F5] hover:bg-[#F2F1ED] border border-[#D5D5D0] text-[#1A1A1A] text-xs font-mono transition-colors cursor-pointer"
+                >
+                  <FileText className="w-3.5 h-3.5 text-[#767670]" />
+                  <span>Quick Line Parser</span>
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
@@ -1002,6 +1188,35 @@ export const ToolsView: React.FC<ToolsViewProps> = ({
         <EbayImportModal
           isOpen={isEbayImportOpen}
           onClose={() => setIsEbayImportOpen(false)}
+          defaultDestination={importDestination}
+        />
+      )}
+
+      {/* Embedded Inventory Auto-Scan & Enrichment Review Modal */}
+      {isScanEnrichOpen && (
+        <InventoryScanEnrichModal
+          isOpen={isScanEnrichOpen}
+          onClose={() => setIsScanEnrichOpen(false)}
+          onOpenBatchPaste={() => setIsBatchPasteOpen(true)}
+        />
+      )}
+
+      {/* Embedded Batch Line-by-Line Creator Modal */}
+      {isBatchPasteOpen && (
+        <BatchLinePasteModal
+          isOpen={isBatchPasteOpen}
+          onClose={() => setIsBatchPasteOpen(false)}
+          onOpenScanner={() => setIsScanEnrichOpen(true)}
+          defaultDestination={importDestination}
+        />
+      )}
+
+      {/* Comprehensive Bulk & Colorway Suite Modal */}
+      {isBulkSuiteOpen && (
+        <BulkSuiteModal
+          isOpen={isBulkSuiteOpen}
+          onClose={() => setIsBulkSuiteOpen(false)}
+          onOpenScanner={() => setIsScanEnrichOpen(true)}
           defaultDestination={importDestination}
         />
       )}

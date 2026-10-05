@@ -114,87 +114,24 @@ export function isCancelledStatus(status?: string, notes?: string): boolean {
 }
 
 /**
- * Determines appropriate lifecycle status tags (Bought, Sold, Listed, Cancelled)
- * alongside domain tags (e.g. Vinted, Second-Hand).
- * Strictly produces unified, canonical TitleCase tags without lowercase duplicates.
+ * Determines appropriate lifecycle status tags.
+ * STRICT USER SPECIFICATION: Stop injecting unsolicited default tags (e.g. 'Bought', 'Listed', 'Sold', 'Vinted')
+ * when importing or pulling items. Strictly preserves the tags the user already has, or returns empty array.
  */
 export function determineLifecycleTags(params: DetermineLifecycleTagsParams): string[] {
-  const {
-    destination = 'wardrobe',
-    transactionType = '',
-    orderStatus = '',
-    sellingStatus,
-    shoppingStatus,
-    isVinted = false,
-    existingTags = [],
-  } = params;
+  const { existingTags = [] } = params;
 
-  const tagSet = new Set<string>();
-
-  // Add existing tags, canonicalizing each
-  for (const t of existingTags) {
-    if (t && typeof t === 'string') {
-      const canonical = canonicalizeTag(t);
-      if (canonical) tagSet.add(canonical);
-    }
+  // If user already has tags, strictly keep the ones they have without adding unsolicited default tags
+  if (existingTags && Array.isArray(existingTags) && existingTags.length > 0) {
+    const cleaned = existingTags
+      .filter((t) => typeof t === 'string' && t.trim().length > 0)
+      .map((t) => canonicalizeTag(t))
+      .filter(Boolean);
+    return normalizeTags(Array.from(new Set(cleaned)));
   }
 
-  // 1. CANCELLED CHECK (highest priority status exception)
-  const isCancelled =
-    isCancelledStatus(orderStatus) ||
-    shoppingStatus === 'Cancelled' ||
-    sellingStatus === 'Cancelled';
-
-  if (isCancelled) {
-    tagSet.add('Cancelled');
-    // Remove conflicting active states if cancelled
-    tagSet.delete('Sold');
-    tagSet.delete('Bought');
-    tagSet.delete('Listed');
-  } else {
-    // 2. SOLD CHECK
-    const isSold =
-      sellingStatus === 'Sold' ||
-      (destination === 'selling' && orderStatus.toLowerCase().includes('sold')) ||
-      (transactionType.toLowerCase() === 'sale') ||
-      (shoppingStatus as string) === 'Sold';
-
-    if (isSold) {
-      tagSet.add('Sold');
-      tagSet.delete('Listed');
-      tagSet.delete('Cancelled');
-    }
-
-    // 3. LISTED CHECK
-    const isListed =
-      sellingStatus === 'Listed' ||
-      (destination === 'selling' && sellingStatus !== 'Sold') ||
-      params.sourceType === 'account-scrape' ||
-      (isVinted && destination === 'selling');
-
-    if (isListed && !isSold) {
-      tagSet.add('Listed');
-      tagSet.delete('Cancelled');
-    }
-
-    // 4. BOUGHT / PURCHASED CHECK
-    const isBought =
-      destination === 'wardrobe' ||
-      shoppingStatus === 'Purchased' ||
-      (transactionType.toLowerCase() === 'purchase');
-
-    if (isBought && !isSold) {
-      tagSet.add('Bought');
-      tagSet.delete('Cancelled');
-    }
-  }
-
-  // 5. PLATFORM TAGS
-  if (isVinted) {
-    tagSet.add('Vinted');
-  }
-
-  return normalizeTags(Array.from(tagSet));
+  // If no existing tags were present, do NOT inject any default tags
+  return [];
 }
 
 /**

@@ -48,6 +48,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     setActiveTab,
     stats,
     customLabels,
+    garmentCategories = [],
+    homewareCategories = [],
     updateCustomLabel,
   } = useWardrobe();
 
@@ -351,7 +353,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2.5">
             {items
-              .filter((item) => !isHomewareCategory(item.category))
+              .filter((item) => item.itemType === 'clothing' || (item.itemType !== 'homeware_lifestyle' && !isHomewareCategory(item.category, garmentCategories, homewareCategories)))
               .slice(0, 6)
               .map((item) => {
               return (

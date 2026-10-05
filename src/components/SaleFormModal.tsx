@@ -27,6 +27,9 @@ import {
 import { useWardrobe } from '../context/WardrobeContext';
 import { calculateRrpSavings } from '../utils/formatters';
 
+import { CategorySelect } from './common/CategorySelect';
+import { getSafeCategories } from '../utils/categoryUtils';
+
 interface SaleFormModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -39,16 +42,16 @@ export const SaleFormModal: React.FC<SaleFormModalProps> = ({
   saleItemToEdit,
 }) => {
   const { categories = [], addSaleItem, updateSaleItem, addCategory } = useWardrobe();
-  const safeCategories = Array.isArray(categories) && categories.length > 0 ? categories : ['Tops', 'Knitwear', 'Trousers', 'Outerwear', 'Footwear', 'Accessories', 'Suits & Tailoring'];
+  const safeCategories = getSafeCategories(categories);
 
   const [name, setName] = useState('');
   const [brand, setBrand] = useState('');
-  const [category, setCategory] = useState<Category>((safeCategories[0] as Category) || 'Tops');
+  const [category, setCategory] = useState<string>((saleItemToEdit?.category as string) || '');
   const [isAddingCategory, setIsAddingCategory] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
   const [size, setSize] = useState('');
   const [color, setColor] = useState('');
-  const [condition, setCondition] = useState<Condition>('Excellent');
+  const [condition, setCondition] = useState<Condition | ''>((saleItemToEdit?.condition as Condition) || '');
   const [originalPricePaid, setOriginalPricePaid] = useState('');
   const [rrp, setRrp] = useState('');
   const [listingPrice, setListingPrice] = useState('');
@@ -74,10 +77,10 @@ export const SaleFormModal: React.FC<SaleFormModalProps> = ({
     if (saleItemToEdit) {
       setName(saleItemToEdit.name || '');
       setBrand(saleItemToEdit.brand || '');
-      setCategory(saleItemToEdit.category || (safeCategories[0] as Category) || 'Tops');
+      setCategory(saleItemToEdit.category || '');
       setSize(saleItemToEdit.size || '');
       setColor(saleItemToEdit.color || '');
-      setCondition(saleItemToEdit.condition || 'Excellent');
+      setCondition(saleItemToEdit.condition || '');
       setOriginalPricePaid(saleItemToEdit.originalPricePaid?.toString() || '0');
       setRrp(saleItemToEdit.rrp !== undefined && saleItemToEdit.rrp !== null ? saleItemToEdit.rrp.toString() : '');
       setListingPrice(saleItemToEdit.listingPrice?.toString() || '');
@@ -112,10 +115,10 @@ export const SaleFormModal: React.FC<SaleFormModalProps> = ({
       // Default new form state
       setName('');
       setBrand('');
-      setCategory((safeCategories[0] as Category) || 'Tops');
+      setCategory('');
       setSize('');
       setColor('');
-      setCondition('Excellent');
+      setCondition('');
       setOriginalPricePaid('0');
       setRrp('');
       setListingPrice('');
@@ -156,7 +159,7 @@ export const SaleFormModal: React.FC<SaleFormModalProps> = ({
       category,
       size: size.trim() || undefined,
       color: color.trim() || undefined,
-      condition,
+      condition: (condition || 'Good') as Condition,
       originalPricePaid: parseFloat(originalPricePaid) || 0,
       rrp: rrp.trim() !== '' ? parseFloat(rrp) || undefined : undefined,
       listingPrice: parseFloat(listingPrice) || 0,
@@ -269,62 +272,15 @@ export const SaleFormModal: React.FC<SaleFormModalProps> = ({
                 )}
               </div>
 
-              {isAddingCategory ? (
-                <div className="flex items-center gap-1.5">
-                  <input
-                    type="text"
-                    value={newCategoryName}
-                    onChange={(e) => setNewCategoryName(e.target.value)}
-                    placeholder="Category name..."
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        const clean = newCategoryName.trim();
-                        if (clean) {
-                          addCategory(clean);
-                          setCategory(clean as Category);
-                          setNewCategoryName('');
-                          setIsAddingCategory(false);
-                        }
-                      }
-                      if (e.key === 'Escape') setIsAddingCategory(false);
-                    }}
-                    autoFocus
-                    className="flex-1 px-2.5 py-1.5 bg-white border border-[#8C7355] rounded-md text-xs text-[#1A1A1A] focus:outline-none"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const clean = newCategoryName.trim();
-                      if (clean) {
-                        addCategory(clean);
-                        setCategory(clean as Category);
-                        setNewCategoryName('');
-                        setIsAddingCategory(false);
-                      }
-                    }}
-                    disabled={!newCategoryName.trim()}
-                    className="px-2.5 py-1.5 bg-[#8C7355] text-white text-xs font-mono rounded-md disabled:opacity-50 cursor-pointer"
-                  >
-                    Save
-                  </button>
-                </div>
-              ) : (
-                <select
-                  value={category}
-                  onChange={(e) => setCategory(e.target.value as Category)}
-                  className="w-full px-2.5 py-1.5 bg-white border border-[#E5E5E1] rounded-md text-xs text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none"
-                >
-                  {category && !safeCategories.includes(category) && (
-                    <option value={category}>{category}</option>
-                  )}
-                  {safeCategories.map((c) => (
-                    <option key={c} value={c}>
-                      {c}
-                    </option>
-                  ))}
-                </select>
-              )}
+              <CategorySelect
+                value={category}
+                onChange={(newCat) => setCategory(newCat as Category)}
+                categories={safeCategories}
+                allowAddNew={true}
+                allowEmpty={true}
+                emptyOptionLabel="Select Category (Optional / Empty)"
+                onAddNewCategory={(newCat) => addCategory(newCat)}
+              />
             </div>
 
             <div>
@@ -336,6 +292,7 @@ export const SaleFormModal: React.FC<SaleFormModalProps> = ({
                 onChange={(e) => setCondition(e.target.value as Condition)}
                 className="w-full px-2.5 py-1.5 bg-white border border-[#E5E5E1] rounded-md text-xs text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none"
               >
+                <option value="">Select Condition (Unspecified)</option>
                 <option value="Pristine / New">Pristine / New (BNWT)</option>
                 <option value="Excellent">Excellent</option>
                 <option value="Good">Good</option>

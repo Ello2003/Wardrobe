@@ -9,6 +9,7 @@ import { getColorHex } from '../utils/colorUtils';
 import { getShoppingStatusBadgeClass } from '../utils/statusUtils';
 import { useWardrobe } from '../context/WardrobeContext';
 import { GarmentImage } from './GarmentImage';
+import { CategorySelect } from './common/CategorySelect';
 import { ResizableHeaderCell } from './ResizableHeaderCell';
 import {
   ShoppingDisplaySettings,
@@ -71,6 +72,8 @@ const DEFAULT_SHOPPING_COLUMN_WIDTHS: Record<string, number> = {
   tags: 180,
   retailer: 130,
   season: 110,
+  size: 90,
+  material: 140,
   url: 120,
   vinted: 130,
   matching: 110,
@@ -195,6 +198,7 @@ export const ShoppingDatabaseTable: React.FC<ShoppingDatabaseTableProps> = ({
       field === 'retailerName' ||
       field === 'color' ||
       field === 'size' ||
+      field === 'material' ||
       field === 'season'
     ) {
       updateShoppingItem(id, { [field]: editingValue.trim() });
@@ -501,6 +505,34 @@ export const ShoppingDatabaseTable: React.FC<ShoppingDatabaseTableProps> = ({
               </ResizableHeaderCell>
             )}
 
+            {/* Size */}
+            {tableSettings.showSize && (
+              <ResizableHeaderCell
+                columnId="size"
+                width={getWidth('size')}
+                minWidth={80}
+                isResizing={resizingColumn === 'size'}
+                onResizeStart={startResize}
+                onDoubleClickReset={() => resetColumnWidth('size')}
+              >
+                Size
+              </ResizableHeaderCell>
+            )}
+
+            {/* Material */}
+            {tableSettings.showMaterial && (
+              <ResizableHeaderCell
+                columnId="material"
+                width={getWidth('material')}
+                minWidth={110}
+                isResizing={resizingColumn === 'material'}
+                onResizeStart={startResize}
+                onDoubleClickReset={() => resetColumnWidth('material')}
+              >
+                Material
+              </ResizableHeaderCell>
+            )}
+
             {/* Store URL */}
             {tableSettings.showUrl && (
               <ResizableHeaderCell
@@ -610,6 +642,7 @@ export const ShoppingDatabaseTable: React.FC<ShoppingDatabaseTableProps> = ({
             const isEditingRetailer = editingCellId === `${item.id}_retailerName`;
             const isEditingColor = editingCellId === `${item.id}_color`;
             const isEditingSize = editingCellId === `${item.id}_size`;
+            const isEditingMaterial = editingCellId === `${item.id}_material`;
             const isSelected = selectedItemIds.has(item.id);
 
             const rowBg = isSelected
@@ -818,19 +851,13 @@ export const ShoppingDatabaseTable: React.FC<ShoppingDatabaseTableProps> = ({
                     style={getCellStyle('category')}
                     className={`${densityPadding} overflow-hidden`}
                   >
-                    <select
+                    <CategorySelect
                       value={item.category}
-                      onChange={(e) =>
-                        updateShoppingItem(item.id, { category: e.target.value })
+                      onChange={(newCat) =>
+                        updateShoppingItem(item.id, { category: newCat })
                       }
                       className="w-full bg-[#F8F7F4] border border-[#E5E5E1] text-[#1A1A1A] px-1.5 py-0.5 focus:outline-none focus:border-[#8C7355] cursor-pointer rounded-xs truncate font-mono text-[11px]"
-                    >
-                      {categories.map((c) => (
-                        <option key={c} value={c}>
-                          {c}
-                        </option>
-                      ))}
-                    </select>
+                    />
                   </td>
                 )}
 
@@ -1115,6 +1142,82 @@ export const ShoppingDatabaseTable: React.FC<ShoppingDatabaseTableProps> = ({
                         </option>
                       ))}
                     </select>
+                  </td>
+                )}
+
+                {/* Size */}
+                {tableSettings.showSize && (
+                  <td
+                    style={getCellStyle('size')}
+                    className={`${densityPadding} overflow-hidden`}
+                  >
+                    {isEditingSize ? (
+                      <input
+                        type="text"
+                        value={editingValue}
+                        onChange={(e) => setEditingValue(e.target.value)}
+                        onBlur={() => handleSaveInline(item.id, 'size')}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') handleSaveInline(item.id, 'size');
+                          if (e.key === 'Escape') setEditingCellId(null);
+                        }}
+                        autoFocus
+                        placeholder="Size..."
+                        className="w-full text-xs font-mono border border-[#8C7355] px-1.5 py-0.5 bg-white rounded-xs"
+                      />
+                    ) : (
+                      <div
+                        onClick={() => {
+                          setEditingCellId(`${item.id}_size`);
+                          setEditingValue(item.size || '');
+                        }}
+                        className={`text-xs font-mono text-[#1A1A1A] hover:underline cursor-pointer flex items-center justify-between gap-1 group/field ${
+                          tableSettings.textWrap ? 'whitespace-normal' : 'truncate'
+                        }`}
+                        title="Click to edit size"
+                      >
+                        <span className="truncate">{item.size || <span className="text-[#A5A59E]">—</span>}</span>
+                        <Pencil className="w-2.5 h-2.5 opacity-0 group-hover/field:opacity-60 shrink-0 text-[#8C7355]" />
+                      </div>
+                    )}
+                  </td>
+                )}
+
+                {/* Material */}
+                {tableSettings.showMaterial && (
+                  <td
+                    style={getCellStyle('material')}
+                    className={`${densityPadding} overflow-hidden`}
+                  >
+                    {isEditingMaterial ? (
+                      <input
+                        type="text"
+                        value={editingValue}
+                        onChange={(e) => setEditingValue(e.target.value)}
+                        onBlur={() => handleSaveInline(item.id, 'material')}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') handleSaveInline(item.id, 'material');
+                          if (e.key === 'Escape') setEditingCellId(null);
+                        }}
+                        autoFocus
+                        placeholder="Material..."
+                        className="w-full text-xs font-mono border border-[#8C7355] px-1.5 py-0.5 bg-white rounded-xs"
+                      />
+                    ) : (
+                      <div
+                        onClick={() => {
+                          setEditingCellId(`${item.id}_material`);
+                          setEditingValue(item.material || '');
+                        }}
+                        className={`text-xs font-mono text-[#5A5A55] hover:underline cursor-pointer flex items-center justify-between gap-1 group/field ${
+                          tableSettings.textWrap ? 'whitespace-normal' : 'truncate'
+                        }`}
+                        title="Click to edit material"
+                      >
+                        <span className="truncate">{item.material || <span className="text-[#A5A59E]">—</span>}</span>
+                        <Pencil className="w-2.5 h-2.5 opacity-0 group-hover/field:opacity-60 shrink-0 text-[#8C7355]" />
+                      </div>
+                    )}
                   </td>
                 )}
 

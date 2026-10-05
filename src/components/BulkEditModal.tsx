@@ -27,6 +27,7 @@ import {
   Info,
 } from 'lucide-react';
 import { useWardrobe } from '../context/WardrobeContext';
+import { CategorySelect } from './common/CategorySelect';
 import {
   Category,
   Season,
@@ -44,6 +45,8 @@ import {
 import { GarmentImage } from './GarmentImage';
 import { canonicalizeTag } from '../utils/tagUtils';
 import { ALL_SELLING_STATUSES, ALL_SHIPPING_STATUSES } from '../utils/statusUtils';
+import { getColorSwatchHex } from './duplicateMerge/duplicateUtils';
+import { auditGarmentDetails } from '../utils/missingDetailsAudit';
 
 export type BulkEditTargetType = 'wardrobe' | 'shopping' | 'sales' | 'selling' | 'lookbook';
 
@@ -114,6 +117,14 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
   // Form Fields
   const [targetCategory, setTargetCategory] = useState<string>('__NO_CHANGE__');
   const [customNewCategory, setCustomNewCategory] = useState('');
+  const [targetBrand, setTargetBrand] = useState<string>('__NO_CHANGE__');
+  const [customBrandInput, setCustomBrandInput] = useState('');
+  const [targetSize, setTargetSize] = useState<string>('__NO_CHANGE__');
+  const [customSizeInput, setCustomSizeInput] = useState('');
+  const [targetMaterial, setTargetMaterial] = useState<string>('__NO_CHANGE__');
+  const [customMaterialInput, setCustomMaterialInput] = useState('');
+  const [targetColor, setTargetColor] = useState<string>('__NO_CHANGE__');
+  const [customColorInput, setCustomColorInput] = useState('');
   const [targetCondition, setTargetCondition] = useState<string>('__NO_CHANGE__');
   const [targetSeasons, setTargetSeasons] = useState<Season[]>([]);
   const [seasonMode, setSeasonMode] = useState<'replace' | 'add'>('replace');
@@ -149,7 +160,44 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
   const [rrpAdjType, setRrpAdjType] = useState<'none' | 'set_fixed' | 'percent_markup_over_price' | 'percent_discount' | 'add_fixed'>('none');
   const [rrpAdjValue, setRrpAdjValue] = useState<string>('');
 
-  // 1. Resolve full items matching selectedIds
+  // Resets all staging inputs ready for next entries
+  const resetForm = () => {
+    setTargetCategory('__NO_CHANGE__');
+    setCustomNewCategory('');
+    setTargetBrand('__NO_CHANGE__');
+    setCustomBrandInput('');
+    setTargetSize('__NO_CHANGE__');
+    setCustomSizeInput('');
+    setTargetMaterial('__NO_CHANGE__');
+    setCustomMaterialInput('');
+    setTargetColor('__NO_CHANGE__');
+    setCustomColorInput('');
+    setTargetCondition('__NO_CHANGE__');
+    setTargetSeasons([]);
+    setSeasonMode('replace');
+    setTargetPriority('__NO_CHANGE__');
+    setTargetShoppingStatus('__NO_CHANGE__');
+    setTargetRetailer('');
+    setTargetPlatform('__NO_CHANGE__');
+    setTargetSellingStatus('__NO_CHANGE__');
+    setTargetShippingStatus('__NO_CHANGE__');
+    setTargetCourier('__NO_CHANGE__');
+    setTargetOccasion('__NO_CHANGE__');
+    setTargetFavorite('__NO_CHANGE__');
+    setTargetArchived('__NO_CHANGE__');
+    setTargetLocation('');
+    setTagsToAddInput('');
+    setTagsToRemoveInput('');
+    setPriceAdjType('none');
+    setPriceAdjValue('');
+    setRrpAdjType('none');
+    setRrpAdjValue('');
+  };
+
+  const handleClose = () => {
+    resetForm();
+    onClose();
+  };
   const selectedItemsData = useMemo(() => {
     const idSet = new Set(selectedIds);
     if (targetType === 'wardrobe') return items.filter((it) => idSet.has(it.id));
@@ -165,60 +213,54 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
     }, 0);
   }, [selectedItemsData]);
 
+  // Unique brands across the closet collection for easy multi-change selection
+  const allUniqueBrands = useMemo(() => {
+    const set = new Set<string>();
+    items.forEach((i) => {
+      if (i.brand && i.brand.trim() && i.brand.toLowerCase() !== 'unbranded') {
+        set.add(i.brand.trim());
+      }
+    });
+    shoppingList.forEach((s) => {
+      if (s.brand && s.brand.trim()) set.add(s.brand.trim());
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [items, shoppingList]);
+
+  // Audit missing fields on selected garments
+  const selectedMissingAudit = useMemo(() => {
+    let missingSize = 0;
+    let missingBrand = 0;
+    let missingMaterial = 0;
+    let missingColor = 0;
+    let missingPrice = 0;
+    for (const it of selectedItemsData) {
+      const a = auditGarmentDetails(it);
+      if (a.isMissingSize) missingSize++;
+      if (a.isMissingBrand) missingBrand++;
+      if (a.isMissingMaterial) missingMaterial++;
+      if (a.isMissingColor) missingColor++;
+      if (a.isMissingPrice) missingPrice++;
+    }
+    return { missingSize, missingBrand, missingMaterial, missingColor, missingPrice };
+  }, [selectedItemsData]);
+
   // 2. Dynamic category aggregation
-  const allGarmentCategories = useMemo(() => {
+  const categoryCountsMap = useMemo(() => {
     const catMap = new Map<string, number>();
 
-    const baseline = [
-      'Outerwear',
-      'Knitwear',
-      'Tops',
-      'Bottoms',
-      'Trousers',
-      'Dresses & Jumpsuits',
-      'Shoes',
-      'Bags',
-      'Accessories',
-      'Formalwear',
-      'Activewear',
-      'Footwear',
-      'Jewellery',
-      'Tailoring',
-    ];
-    baseline.forEach((c) => catMap.set(c, 0));
+    const recordCategory = (cat?: string) => {
+      if (!cat || !cat.trim()) return;
+      const clean = cat.trim();
+      catMap.set(clean, (catMap.get(clean) || 0) + 1);
+    };
 
-    (categories || []).forEach((c) => {
-      if (c && c.trim()) {
-        const clean = c.trim();
-        if (!catMap.has(clean)) catMap.set(clean, 0);
-      }
-    });
+    items.forEach((i) => recordCategory(i.category));
+    shoppingList.forEach((s) => recordCategory(s.category));
+    saleItems.forEach((sl) => recordCategory(sl.category));
 
-    items.forEach((i) => {
-      if (i.category && i.category.trim()) {
-        const clean = i.category.trim();
-        catMap.set(clean, (catMap.get(clean) || 0) + 1);
-      }
-    });
-
-    shoppingList.forEach((s) => {
-      if (s.category && s.category.trim()) {
-        const clean = s.category.trim();
-        catMap.set(clean, (catMap.get(clean) || 0) + 1);
-      }
-    });
-
-    saleItems.forEach((sl) => {
-      if (sl.category && sl.category.trim()) {
-        const clean = sl.category.trim();
-        catMap.set(clean, (catMap.get(clean) || 0) + 1);
-      }
-    });
-
-    return Array.from(catMap.entries())
-      .sort((a, b) => a[0].localeCompare(b[0]))
-      .map(([name, count]) => ({ name, count }));
-  }, [categories, items, shoppingList, saleItems]);
+    return catMap;
+  }, [items, shoppingList, saleItems]);
 
   // 3. Tag pills on selected items
   const tagsOnSelectedItems = useMemo(() => {
@@ -339,6 +381,24 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
   } else if (targetCategory !== '__NO_CHANGE__') {
     stagedSummary.push(`Category: "${targetCategory}"`);
   }
+  if (targetBrand === '__CUSTOM__' && customBrandInput.trim()) {
+    stagedSummary.push(`Brand: "${customBrandInput.trim()}"`);
+  } else if (targetBrand !== '__NO_CHANGE__') {
+    stagedSummary.push(`Brand: "${targetBrand}"`);
+  }
+  if (targetSize === '__CUSTOM__' && customSizeInput.trim()) {
+    stagedSummary.push(`Size: "${customSizeInput.trim()}"`);
+  } else if (targetSize !== '__NO_CHANGE__') {
+    stagedSummary.push(`Size: "${targetSize}"`);
+  }
+  if (targetMaterial === '__CUSTOM__' && customMaterialInput.trim()) {
+    stagedSummary.push(`Material: "${customMaterialInput.trim()}"`);
+  } else if (targetMaterial !== '__NO_CHANGE__') {
+    stagedSummary.push(`Material: "${targetMaterial}"`);
+  }
+  if (targetColor === '__CUSTOM__' && customColorInput.trim()) {
+    stagedSummary.push(`Color: "${customColorInput.trim()}"`);
+  }
   if (targetCondition !== '__NO_CHANGE__') stagedSummary.push(`Condition: "${targetCondition}"`);
   if (targetSeasons.length > 0) stagedSummary.push(`Seasons: [${targetSeasons.join(', ')}]`);
   if (targetLocation.trim()) stagedSummary.push(`Location: "${targetLocation.trim()}"`);
@@ -379,6 +439,34 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
         ? targetCategory
         : undefined;
 
+    const effectiveBrand =
+      targetBrand === '__CUSTOM__'
+        ? customBrandInput.trim()
+        : targetBrand !== '__NO_CHANGE__'
+        ? targetBrand.trim()
+        : undefined;
+
+    const effectiveSize =
+      targetSize === '__CUSTOM__'
+        ? customSizeInput.trim()
+        : targetSize !== '__NO_CHANGE__'
+        ? targetSize.trim()
+        : undefined;
+
+    const effectiveMaterial =
+      targetMaterial === '__CUSTOM__'
+        ? customMaterialInput.trim()
+        : targetMaterial !== '__NO_CHANGE__'
+        ? targetMaterial.trim()
+        : undefined;
+
+    const effectiveColor =
+      targetColor === '__CUSTOM__'
+        ? customColorInput.trim()
+        : targetColor !== '__NO_CHANGE__'
+        ? targetColor.trim()
+        : undefined;
+
     const parseTags = (str: string) =>
       str
         .split(',')
@@ -402,6 +490,13 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
         (item) => {
           const patch: Partial<WardrobeItem> = {};
           if (effectiveCategory) patch.category = effectiveCategory;
+          if (effectiveBrand) patch.brand = effectiveBrand;
+          if (effectiveSize) patch.size = effectiveSize;
+          if (effectiveMaterial) patch.material = effectiveMaterial;
+          if (effectiveColor) {
+            patch.color = effectiveColor;
+            patch.colorHex = getColorSwatchHex(effectiveColor);
+          }
           if (targetCondition !== '__NO_CHANGE__') patch.condition = targetCondition as Condition;
           if (targetSeasons.length > 0) {
             if (seasonMode === 'replace') {
@@ -455,6 +550,10 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
         (item) => {
           const patch: Partial<ShoppingItem> = {};
           if (effectiveCategory) patch.category = effectiveCategory;
+          if (effectiveBrand) patch.brand = effectiveBrand;
+          if (effectiveSize) patch.size = effectiveSize;
+          if (effectiveMaterial) patch.material = effectiveMaterial;
+          if (effectiveColor) patch.color = effectiveColor;
           if (targetPriority !== '__NO_CHANGE__') patch.priority = targetPriority as ShoppingPriority;
           if (targetShoppingStatus !== '__NO_CHANGE__') patch.status = targetShoppingStatus as ShoppingStatus;
           if (targetRetailer.trim()) patch.retailerName = targetRetailer.trim();
@@ -500,6 +599,9 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
         (item) => {
           const patch: Partial<SaleItem> = {};
           if (effectiveCategory) patch.category = effectiveCategory;
+          if (effectiveBrand) patch.brand = effectiveBrand;
+          if (effectiveSize) patch.size = effectiveSize;
+          if (effectiveColor) patch.color = effectiveColor;
           if (targetPlatform !== '__NO_CHANGE__') patch.platform = targetPlatform as SellingPlatform;
           if (targetSellingStatus !== '__NO_CHANGE__') patch.status = targetSellingStatus as SellingStatus;
           if (targetShippingStatus !== '__NO_CHANGE__') patch.shippingStatus = targetShippingStatus as ShippingStatus;
@@ -553,6 +655,7 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
     }
 
     if (onComplete) onComplete();
+    resetForm();
     onClose();
   };
 
@@ -590,7 +693,7 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
           </div>
           <button
             type="button"
-            onClick={onClose}
+            onClick={handleClose}
             className="p-1.5 text-[#767670] hover:text-[#1A1A1A] hover:bg-[#F2F1ED] transition-colors cursor-pointer"
             title="Close"
           >
@@ -723,6 +826,237 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
           {/* TAB 1: ATTRIBUTES */}
           {activeTab === 'attributes' && (
             <div className="space-y-5 animate-in fade-in duration-100">
+              {/* Missing Details Audit Alert */}
+              {(selectedMissingAudit.missingSize > 0 ||
+                selectedMissingAudit.missingBrand > 0 ||
+                selectedMissingAudit.missingMaterial > 0 ||
+                selectedMissingAudit.missingColor > 0) && (
+                <div className="bg-amber-50 border border-amber-200 p-3 rounded-xs text-xs font-mono text-amber-900 flex items-center justify-between gap-2 shadow-2xs">
+                  <div className="flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 text-amber-700 shrink-0" />
+                    <span>
+                      <strong>Missing Details Audit:</strong>{' '}
+                      {selectedMissingAudit.missingSize > 0 && (
+                        <span className="font-bold underline mr-1.5">{selectedMissingAudit.missingSize} missing Size</span>
+                      )}
+                      {selectedMissingAudit.missingBrand > 0 && (
+                        <span className="font-bold underline mr-1.5">{selectedMissingAudit.missingBrand} missing Brand</span>
+                      )}
+                      {selectedMissingAudit.missingMaterial > 0 && (
+                        <span className="font-bold underline mr-1.5">{selectedMissingAudit.missingMaterial} missing Material</span>
+                      )}
+                      {selectedMissingAudit.missingColor > 0 && (
+                        <span className="font-bold underline">{selectedMissingAudit.missingColor} missing Color</span>
+                      )}
+                    </span>
+                  </div>
+                  <span className="text-[10px] bg-amber-100 text-amber-800 px-2 py-0.5 rounded-2xs uppercase tracking-wider font-bold">
+                    Batch fill below
+                  </span>
+                </div>
+              )}
+
+              {/* Multi-Change Brand */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label
+                    htmlFor="bulk-brand-select"
+                    className="block text-[10px] font-mono uppercase tracking-widest text-[#767670] font-bold"
+                  >
+                    Brand / Atelier
+                  </label>
+                  {selectedMissingAudit.missingBrand > 0 && (
+                    <span className="text-[10px] font-mono text-amber-800 bg-amber-50 px-1.5 py-0.5 rounded-2xs border border-amber-200">
+                      {selectedMissingAudit.missingBrand} of {count} missing brand
+                    </span>
+                  )}
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <select
+                    id="bulk-brand-select"
+                    value={targetBrand}
+                    onChange={(e) => {
+                      setTargetBrand(e.target.value);
+                      if (e.target.value !== '__CUSTOM__') setCustomBrandInput('');
+                    }}
+                    className="w-full bg-white border border-[#D5D5D0] p-2.5 text-xs font-mono text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none rounded-xs cursor-pointer"
+                  >
+                    <option value="__NO_CHANGE__">— No Change (Keep Existing Brands) —</option>
+                    <option value="__CUSTOM__">+ Set Custom Brand Name...</option>
+                    {allUniqueBrands.length > 0 && (
+                      <optgroup label="Existing Wardrobe Brands">
+                        {allUniqueBrands.map((b) => (
+                          <option key={b} value={b}>{b}</option>
+                        ))}
+                      </optgroup>
+                    )}
+                  </select>
+                  {targetBrand === '__CUSTOM__' && (
+                    <input
+                      type="text"
+                      value={customBrandInput}
+                      onChange={(e) => setCustomBrandInput(e.target.value)}
+                      placeholder="Type brand (e.g. Margaret Howell, Lemaire)..."
+                      className="w-full bg-white border border-[#8C7355] p-2 text-xs font-mono text-[#1A1A1A] focus:outline-none rounded-xs"
+                      autoFocus
+                    />
+                  )}
+                </div>
+              </div>
+
+              {/* Multi-Change Size */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label
+                    htmlFor="bulk-size-select"
+                    className="block text-[10px] font-mono uppercase tracking-widest text-[#767670] font-bold"
+                  >
+                    Garment Size
+                  </label>
+                  {selectedMissingAudit.missingSize > 0 && (
+                    <span className="text-[10px] font-mono text-amber-800 bg-amber-50 px-1.5 py-0.5 rounded-2xs border border-amber-200 font-bold">
+                      {selectedMissingAudit.missingSize} of {count} missing size
+                    </span>
+                  )}
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <select
+                    id="bulk-size-select"
+                    value={targetSize}
+                    onChange={(e) => {
+                      setTargetSize(e.target.value);
+                      if (e.target.value !== '__CUSTOM__') setCustomSizeInput('');
+                    }}
+                    className="w-full bg-white border border-[#D5D5D0] p-2.5 text-xs font-mono text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none rounded-xs cursor-pointer"
+                  >
+                    <option value="__NO_CHANGE__">— No Change (Keep Existing Sizes) —</option>
+                    <option value="__CUSTOM__">+ Type Custom Size...</option>
+                    <optgroup label="Standard Sizes">
+                      {['XXS', 'XS', 'S', 'M', 'L', 'XL', 'XXL', '3XL', 'One Size', '36R', '38R', '40R', '42R', '44R', '30W', '32W', '34W', '36W', 'UK 7', 'UK 8', 'UK 9', 'UK 10', 'UK 11'].map((s) => (
+                        <option key={s} value={s}>{s}</option>
+                      ))}
+                    </optgroup>
+                  </select>
+                  {targetSize === '__CUSTOM__' && (
+                    <input
+                      type="text"
+                      value={customSizeInput}
+                      onChange={(e) => setCustomSizeInput(e.target.value)}
+                      placeholder="Type size (e.g. 32/32, UK 9.5, 48 EU)..."
+                      className="w-full bg-white border border-[#8C7355] p-2 text-xs font-mono text-[#1A1A1A] focus:outline-none rounded-xs"
+                      autoFocus
+                    />
+                  )}
+                </div>
+              </div>
+
+              {/* Multi-Change Material */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label
+                    htmlFor="bulk-material-select"
+                    className="block text-[10px] font-mono uppercase tracking-widest text-[#767670] font-bold"
+                  >
+                    Fabric &amp; Material Composition
+                  </label>
+                  {selectedMissingAudit.missingMaterial > 0 && (
+                    <span className="text-[10px] font-mono text-amber-800 bg-amber-50 px-1.5 py-0.5 rounded-2xs border border-amber-200 font-bold">
+                      {selectedMissingAudit.missingMaterial} of {count} missing material
+                    </span>
+                  )}
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <select
+                    id="bulk-material-select"
+                    value={targetMaterial}
+                    onChange={(e) => {
+                      setTargetMaterial(e.target.value);
+                      if (e.target.value !== '__CUSTOM__') setCustomMaterialInput('');
+                    }}
+                    className="w-full bg-white border border-[#D5D5D0] p-2.5 text-xs font-mono text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none rounded-xs cursor-pointer"
+                  >
+                    <option value="__NO_CHANGE__">— No Change (Keep Existing Material) —</option>
+                    <option value="__CUSTOM__">+ Type Custom Fabric...</option>
+                    <optgroup label="Common Garment Fabrics">
+                      {[
+                        '100% Cotton',
+                        '100% Merino Wool',
+                        '100% Linen',
+                        '100% Silk',
+                        '100% Cashmere',
+                        'Wool Blend',
+                        'Linen & Cotton Blend',
+                        'Selvedge Denim',
+                        'Full Grain Leather',
+                        'Suede',
+                        'Waxed Cotton',
+                        'Technical Nylon',
+                        'Cotton Twill',
+                        'Corduroy',
+                      ].map((m) => (
+                        <option key={m} value={m}>{m}</option>
+                      ))}
+                    </optgroup>
+                  </select>
+                  {targetMaterial === '__CUSTOM__' && (
+                    <input
+                      type="text"
+                      value={customMaterialInput}
+                      onChange={(e) => setCustomMaterialInput(e.target.value)}
+                      placeholder="Type material (e.g. 70% Wool, 30% Alpaca)..."
+                      className="w-full bg-white border border-[#8C7355] p-2 text-xs font-mono text-[#1A1A1A] focus:outline-none rounded-xs"
+                      autoFocus
+                    />
+                  )}
+                </div>
+              </div>
+
+              {/* Multi-Change Color */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label
+                    htmlFor="bulk-color-select"
+                    className="block text-[10px] font-mono uppercase tracking-widest text-[#767670] font-bold"
+                  >
+                    Color Shade
+                  </label>
+                  {selectedMissingAudit.missingColor > 0 && (
+                    <span className="text-[10px] font-mono text-amber-800 bg-amber-50 px-1.5 py-0.5 rounded-2xs border border-amber-200">
+                      {selectedMissingAudit.missingColor} of {count} missing color
+                    </span>
+                  )}
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <select
+                    id="bulk-color-select"
+                    value={targetColor}
+                    onChange={(e) => {
+                      setTargetColor(e.target.value);
+                      if (e.target.value !== '__CUSTOM__') setCustomColorInput('');
+                    }}
+                    className="w-full bg-white border border-[#D5D5D0] p-2.5 text-xs font-mono text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none rounded-xs cursor-pointer"
+                  >
+                    <option value="__NO_CHANGE__">— No Change (Keep Existing Colors) —</option>
+                    <option value="__CUSTOM__">+ Type Custom Color...</option>
+                    <optgroup label="Staple Colors">
+                      {['Navy', 'Black', 'White', 'Charcoal', 'Heather Grey', 'Olive Green', 'Ecru / Cream', 'Camel', 'Dark Brown', 'Sky Blue', 'Burgundy'].map((c) => (
+                        <option key={c} value={c}>{c}</option>
+                      ))}
+                    </optgroup>
+                  </select>
+                  {targetColor === '__CUSTOM__' && (
+                    <input
+                      type="text"
+                      value={customColorInput}
+                      onChange={(e) => setCustomColorInput(e.target.value)}
+                      placeholder="Type color (e.g. Indigo, Ochre, Sage)..."
+                      className="w-full bg-white border border-[#8C7355] p-2 text-xs font-mono text-[#1A1A1A] focus:outline-none rounded-xs"
+                      autoFocus
+                    />
+                  )}
+                </div>
+              </div>
+
               {/* Category */}
               <div>
                 <div className="flex items-center justify-between mb-1.5">
@@ -730,26 +1064,29 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
                     htmlFor="bulk-category-select"
                     className="block text-[10px] font-mono uppercase tracking-widest text-[#767670] font-bold"
                   >
-                    Garment Category
+                    Category (Apparel &amp; Homeware)
                   </label>
                   <span className="text-[11px] font-mono text-[#A5A59E]">
-                    {allGarmentCategories.length} available
+                    {categories.length} available
                   </span>
                 </div>
-                <select
+                <CategorySelect
                   id="bulk-category-select"
                   value={targetCategory}
-                  onChange={(e) => setTargetCategory(e.target.value)}
-                  className="w-full bg-white border border-[#D5D5D0] p-2.5 text-xs font-mono text-[#1A1A1A] focus:border-[#8C7355] focus:outline-none cursor-pointer"
-                >
-                  <option value="__NO_CHANGE__">— No Change (Keep Existing Categories) —</option>
-                  {allGarmentCategories.map((c) => (
-                    <option key={c.name} value={c.name}>
-                      {c.name} {c.count > 0 ? `(${c.count} items)` : ''}
-                    </option>
-                  ))}
-                  <option value="__NEW__">+ Add Custom Category</option>
-                </select>
+                  onChange={(val) => setTargetCategory(val)}
+                  categories={categories}
+                  counts={categoryCountsMap}
+                  formatCategoryLabel={(cat, count) =>
+                    `${cat} ${count !== undefined && count > 0 ? `(${count} items)` : ''}`
+                  }
+                  extraOptionsBefore={[
+                    { value: '__NO_CHANGE__', label: '— No Change (Keep Existing Categories) —' },
+                  ]}
+                  extraOptionsAfter={[
+                    { value: '__NEW__', label: '+ Add Custom Category' },
+                  ]}
+                  className="p-2.5"
+                />
               </div>
 
               {targetCategory === '__NEW__' && (
@@ -1404,7 +1741,7 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
           <div className="flex items-center justify-between pt-4 border-t border-[#E5E5E1] shrink-0">
             <button
               type="button"
-              onClick={onClose}
+              onClick={handleClose}
               className="px-4 py-2 bg-white border border-[#D5D5D0] text-xs font-mono text-[#4A4A45] hover:text-[#1A1A1A] hover:bg-[#F2F1ED] transition cursor-pointer"
             >
               Cancel

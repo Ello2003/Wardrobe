@@ -30,6 +30,8 @@ export interface SellingTableColumnSettings {
   showBuyerTracking: boolean;
   showCourier: boolean;
   showShippingStatus: boolean;
+  showSize?: boolean;
+  showMaterial?: boolean;
   showTags: boolean;
   showActions: boolean;
 }
@@ -43,7 +45,7 @@ export interface SellingTableDisplaySettings extends SellingTableColumnSettings 
 }
 
 export interface SellingDisplaySettings {
-  viewMode?: 'grid' | 'table';
+  viewMode?: 'grid' | 'table' | 'board';
 
   // Major section toggles
   showStatsBanner: boolean;
@@ -60,6 +62,8 @@ export interface SellingDisplaySettings {
   showProjectedProfit: boolean;
   showSoldPrice: boolean;
   showShippingStatus: boolean;
+  showSize?: boolean;
+  showMaterial?: boolean;
   showTags: boolean;
   showQuickActions: boolean;
 
@@ -89,6 +93,8 @@ export const DEFAULT_SELLING_TABLE_SETTINGS: SellingTableDisplaySettings = {
   showBuyerTracking: true,
   showCourier: true,
   showShippingStatus: true,
+  showSize: true,
+  showMaterial: true,
   showTags: true,
   showActions: true,
 };
@@ -108,6 +114,8 @@ export const DEFAULT_SELLING_DISPLAY_SETTINGS: SellingDisplaySettings = {
   showProjectedProfit: true,
   showSoldPrice: true,
   showShippingStatus: true,
+  showSize: true,
+  showMaterial: true,
   showTags: true,
   showQuickActions: true,
 
@@ -295,6 +303,8 @@ export const SellingDisplaySettingsModal: React.FC<SellingDisplaySettingsModalPr
     { key: 'showOriginalPrice', label: 'Original Cost Basis (£)' },
     { key: 'showProjectedProfit', label: 'Net Profit P&L (£ / %)' },
     { key: 'showSoldPrice', label: 'Final Realized Sold Price (£)' },
+    { key: 'showSize', label: 'Size / Sizing' },
+    { key: 'showMaterial', label: 'Material / Fabric Composition' },
     { key: 'showShippingStatus', label: 'Fulfillment & Shipping Status' },
     { key: 'showTags', label: 'Custom Tags' },
     { key: 'showQuickActions', label: 'Quick Action Buttons (Sold, Edit, Delete)' },
@@ -310,6 +320,8 @@ export const SellingDisplaySettingsModal: React.FC<SellingDisplaySettingsModalPr
     { key: 'showPlatform', label: 'Sales Platform', description: 'Vinted, Grailed, eBay, Depop, etc.' },
     { key: 'showStatus', label: 'Listing Status', description: 'Listed, In Negotiations, Sold...' },
     { key: 'showCategory', label: 'Category', description: 'Category pill' },
+    { key: 'showSize', label: 'Garment Size', description: 'Garment size' },
+    { key: 'showMaterial', label: 'Material', description: 'Fabric composition' },
     { key: 'showOriginalPrice', label: 'Cost Basis (£)', description: 'Purchase price / cost basis' },
     { key: 'showListingPrice', label: 'Listing Price (£)', description: 'Asking price with inline edit' },
     { key: 'showSoldPrice', label: 'Sold Price (£)', description: 'Realized price with inline edit' },

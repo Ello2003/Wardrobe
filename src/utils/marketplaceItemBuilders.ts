@@ -239,7 +239,7 @@ export function buildMarketplaceWardrobeItem(
     brand: f.inferredBrand,
     category: f.inferredCategory,
     size: f.inferredSize,
-    color: f.inferredColor || extractColorFromTitleAndDesc(f.orderTitle, order.notes || order.description) || 'Neutral',
+    color: f.inferredColor || extractColorFromTitleAndDesc(f.orderTitle, order.notes || order.description) || '',
     season: ['All-Season'],
     purchasePrice: f.orderPrice,
     rrp: f.orderRrp !== undefined && f.orderRrp > 0 ? f.orderRrp : f.orderPrice,

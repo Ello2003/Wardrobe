@@ -12,11 +12,13 @@ import {
   AlertCircle,
   History,
   Wallet,
+  ShoppingBag,
 } from 'lucide-react';
 
 export interface DashboardDisplaySettings {
   showHeroBanner: boolean;
   showKpiMetrics: boolean;
+  showShopTheLook: boolean;
   showQuickWearLogger: boolean;
   showStaplesLeaderboard: boolean;
   showNeglectedLeaderboard: boolean;
@@ -27,6 +29,7 @@ export interface DashboardDisplaySettings {
 export const DEFAULT_DASHBOARD_DISPLAY_SETTINGS: DashboardDisplaySettings = {
   showHeroBanner: true,
   showKpiMetrics: true,
+  showShopTheLook: true,
   showQuickWearLogger: true,
   showStaplesLeaderboard: true,
   showNeglectedLeaderboard: true,
@@ -68,6 +71,7 @@ export const DashboardDisplaySettingsModal: React.FC<DashboardDisplaySettingsMod
         showNeglectedLeaderboard: false,
         showAuditLogSnapshot: false,
         showFinancialOverview: true,
+        showShopTheLook: true,
       });
     } else if (preset === 'analytics') {
       onChange({
@@ -78,6 +82,7 @@ export const DashboardDisplaySettingsModal: React.FC<DashboardDisplaySettingsMod
         showNeglectedLeaderboard: true,
         showAuditLogSnapshot: true,
         showFinancialOverview: true,
+        showShopTheLook: false,
       });
     } else if (preset === 'minimal') {
       onChange({
@@ -88,6 +93,7 @@ export const DashboardDisplaySettingsModal: React.FC<DashboardDisplaySettingsMod
         showNeglectedLeaderboard: false,
         showAuditLogSnapshot: false,
         showFinancialOverview: false,
+        showShopTheLook: false,
       });
     }
   };
@@ -109,6 +115,12 @@ export const DashboardDisplaySettingsModal: React.FC<DashboardDisplaySettingsMod
       label: 'Financial & Volume KPI Tiles',
       description: '4 summary cards: Total Closet Value, Monthly Spend, Lookbook Formulas, Monthly Budget',
       icon: TrendingUp,
+    },
+    {
+      key: 'showShopTheLook',
+      label: 'Shop the Look & Curated Retail Matches',
+      description: 'Find similar pieces available online with direct retailer links and one-click add to buy list',
+      icon: ShoppingBag,
     },
     {
       key: 'showQuickWearLogger',

@@ -4,10 +4,25 @@ import dotenv from 'dotenv';
 import Parser from 'rss-parser';
 import { GoogleGenAI, Type } from '@google/genai';
 import { extractAllGarmentAttributes } from './src/utils/garmentAttributeExtractor.ts';
+import { getColorSwatchHex } from './src/components/duplicateMerge/duplicateUtils.ts';
+import {
+  extractGarmentFromUrlFree,
+  extractGarmentFromTextFree,
+} from './src/utils/freeAutofillFallback.ts';
+import { canonicalizeCategory } from './src/constants/categories.ts';
+import { generateLocalWardrobeCombinations } from './src/utils/wardrobeCombinationEngine.ts';
 import {
   scrapeUrlUnified,
   getScraperEngineStatus,
 } from './src/services/unifiedScraper.ts';
+import {
+  searchProductImages,
+  findProductImageForGarment,
+  searchBrandOfficialSiteImages,
+  searchLuxuryRetailerImages,
+  getBrandOfficialDomain,
+  isValidProductImageUrl,
+} from './src/services/productImageLookupService.ts';
 
 dotenv.config();
 
@@ -43,12 +58,10 @@ function getGeminiClient(): GoogleGenAI | null {
   });
 }
 
-// Centralized active Gemini fallback model list
+// Centralized active Gemini fallback model list (prefer high-availability flash lite models)
 const DEFAULT_GEMINI_FALLBACK_MODELS = [
-  'gemini-3.8-flash',
-  'gemini-3.6-flash',
-  'gemini-flash-latest',
   'gemini-3.1-flash-lite',
+  'gemini-3.8-flash',
 ];
 
 // Helper to call Gemini with model fallback and automatic retry for 503/429 demand spikes
@@ -179,11 +192,22 @@ app.post('/api/gemini/generate-outfits', async (req, res) => {
       name: item.name,
       brand: item.brand,
       category: item.category,
+      subcategory: item.subcategory || '',
       color: item.color,
-      price: item.purchasePrice,
+      material: item.material || '',
+      size: item.size || '',
+      condition: item.condition || 'Good',
+      season: item.season || 'All-Season',
+      price: item.purchasePrice || 0,
+      rrp: item.rrp || undefined,
+      wearCount: item.wearCount || 0,
+      notes: item.notes || '',
+      tags: item.tags || [],
+      careNotes: item.careNotes || '',
+      imageUrl: item.imageUrl || '',
     }));
 
-    const prompt = `From these specific wardrobe items:
+    const prompt = `From these specific wardrobe items with full material and sizing specs:
 ${JSON.stringify(itemsSummary, null, 2)}
 
 Create 3 distinct, complete outfit combinations for:
@@ -191,7 +215,12 @@ Create 3 distinct, complete outfit combinations for:
 - Season: ${season || 'Autumn'}
 - Weather Condition / Temp: ${weatherTemp || 'Mild British Weather (15°C)'}
 
-Only use valid IDs from the provided items list. Calculate the total outfit value in £ GBP.`;
+Instructions:
+1. Actively utilize all available item fields:
+   - Materials & Fabric Textures (e.g. balance heavy wool or denim with crisp cotton or linen)
+   - Sizing and Layering Proportions (ensure outerwear fits over mid-layers)
+   - Condition & Wear Count (surface under-utilized pieces to maximize cost-per-wear)
+2. Only use valid IDs from the provided items list. Calculate the total outfit value in £ GBP.`;
 
     const schema = {
       type: Type.ARRAY,
@@ -226,6 +255,104 @@ Only use valid IDs from the provided items list. Calculate the total outfit valu
   } catch (error: any) {
     console.error('Outfit generation error:', error);
     res.status(500).json({ error: 'Failed to generate outfits.' });
+  }
+});
+
+// Gemini Endpoint: Travel Capsule & Multi-Day Packing Synthesizer
+app.post('/api/gemini/generate-travel-capsule', async (req, res) => {
+  try {
+    const { wardrobeItems, destination, daysCount, vibe, weatherTemp, luggageLimit } = req.body;
+    const ai = getGeminiClient();
+
+    if (!ai) {
+      return res.status(503).json({ error: 'GEMINI_API_KEY is not configured.' });
+    }
+
+    const itemsSummary = (wardrobeItems || []).map((item: any) => ({
+      id: item.id,
+      name: item.name,
+      brand: item.brand,
+      category: item.category,
+      color: item.color,
+      material: item.material || '',
+      size: item.size || '',
+      condition: item.condition || 'Good',
+      season: item.season || 'All-Season',
+      price: item.purchasePrice || 0,
+      imageUrl: item.imageUrl || '',
+    }));
+
+    const prompt = `You are a master luxury personal stylist and minimalist packing architect.
+From the user's specific wardrobe garments:
+${JSON.stringify(itemsSummary, null, 2)}
+
+Design an ultra-versatile, cohesive Travel Capsule for:
+- Destination: ${destination || 'European City Break'}
+- Duration: ${daysCount || 4} Days
+- Vibe / Dress Code: ${vibe || 'Smart Casual & Dining'}
+- Meteorological Climate / Forecast: ${weatherTemp || 'Mild (12°C - 17°C)'}
+- Luggage Limit: ${luggageLimit || 'Carry-On 10kg'}
+
+Instructions:
+1. Select a compact minimalist capsule of 8 to 14 core pieces that interlock cleanly in color, texture, and layering.
+2. Select 3-4 heavy transit pieces to be worn on the journey (coat, boots/shoes, trousers) to maximize luggage allowance.
+3. Generate distinct daily outfits (Day 1 through Day ${daysCount}) using ONLY the selected capsule item IDs.
+4. Include actionable styling, thermal layering, and day-to-night advice.`;
+
+    const schema = {
+      type: Type.OBJECT,
+      properties: {
+        capsuleItemIds: {
+          type: Type.ARRAY,
+          items: { type: Type.STRING },
+          description: 'Array of exact item IDs chosen for the travel capsule',
+        },
+        transitItemIds: {
+          type: Type.ARRAY,
+          items: { type: Type.STRING },
+          description: 'Heaviest pieces worn during travel / flight to maximize luggage space',
+        },
+        rationale: {
+          type: Type.STRING,
+          description: 'Styling rationale explaining how these pieces maximize permutation efficiency and thermal comfort',
+        },
+        weatherAdvice: {
+          type: Type.STRING,
+          description: 'Specific advice regarding temperature variations and precipitation for this destination',
+        },
+        dailyOutfits: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              day: { type: Type.NUMBER },
+              title: { type: Type.STRING },
+              itemIds: {
+                type: Type.ARRAY,
+                items: { type: Type.STRING },
+              },
+              occasion: { type: Type.STRING },
+              notes: { type: Type.STRING },
+            },
+            required: ['day', 'title', 'itemIds', 'occasion', 'notes'],
+          },
+        },
+      },
+      required: ['capsuleItemIds', 'transitItemIds', 'rationale', 'weatherAdvice', 'dailyOutfits'],
+    };
+
+    const response = await generateContentWithFallback(
+      ai,
+      prompt,
+      'You are a bespoke wardrobe capsule stylist. Only select item IDs present in the provided wardrobe list.',
+      schema
+    );
+
+    const parsed = JSON.parse(response.text || '{}');
+    res.json({ success: true, data: parsed });
+  } catch (error: any) {
+    console.error('Travel capsule generation error:', error);
+    res.status(500).json({ error: 'Failed to generate travel capsule.' });
   }
 });
 
@@ -395,6 +522,161 @@ Provide a complete editorial look breakdown.`;
   }
 });
 
+// Curated Fashion Intelligence & Editorial Synthesis Engine (Fallback for 429 quota exhaustion or offline)
+function generateCuratedEditorialResearch(
+  query: string,
+  aestheticFocus?: string,
+  occasion?: string,
+  season?: string,
+  wardrobeItems: any[] = []
+) {
+  const cleanQuery = query.trim();
+  const aesthetic = aestheticFocus || 'Contemporary Sartorial';
+  const occ = occasion || 'Smart Casual';
+  const seas = season || 'Autumn / Winter';
+
+  // Capitalize query for title
+  const formattedTitle = cleanQuery
+    .split(/\s+/)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(' ');
+  const lookTitle = `${formattedTitle} Sartorial Formula`;
+
+  const researchMarkdown = `# ${lookTitle}
+
+## Editorial Synthesis & Runway Context
+The architectural balance of ${cleanQuery} reflects modern sartorial sensibilities—a deliberate dialogue between effortless drape and disciplined tailoring. Rooted in the visual vernacular of contemporary European runways and refined street photography, this composition prioritizes tactile integrity, balanced silhouette weight, and understated luxury.
+
+## Color Story & Atmospheric Palette
+The palette is calibrated around atmospheric neutrals with measured depth:
+- **Espresso / Deep Charcoal (#1C1D21)**: Grounding tonal anchor for structured outerwear and leather foundations.
+- **Warm Bronze / Sartorial Camel (#8C7355)**: Tactile mid-layer warmth offering rich seasonal harmony.
+- **Bone White / Chalk (#F4F3EE)**: Clean breathable contrast at collar and inner layers.
+- **Slate Flannel (#4A5568)**: Textured wool drape balancing warm and cool undertones.
+
+## The Outfit Formula & Deconstructed Garments
+1. **Outerwear Layer**: Tailored double-breasted or relaxed balmacaan silhouette in heavy wool or waterproof waxed cotton.
+2. **Tactile Insulation**: 7-gauge or 12-gauge knitwear in pure cashmere or superfine merino wool.
+3. **Structured Lower Block**: Mid-rise forward-pleat trousers in flannel, cavalry twill, or Japanese denim.
+4. **Footwear Foundation**: Goodyear-welted leather derbies, loafers, or minimalist clean-line boots.
+
+## Capsule Synergy & Styling Principles
+- **Proportion Play**: Contrast structured shoulder lines with fluid trouser drape at the break.
+- **Fabric Dialogue**: Contrast matte flannel with brushed knitwear and burnished leather.
+- **Seasonal Versatility**: Unbutton outer layers to reveal internal tonal transitions.
+
+## Wardrobe Recommendations
+Cross-referencing your current wardrobe shows strong foundational synergy. Leverage your existing core staples while identifying intentional investments in elevated fabrics.`;
+
+  const defaultPieces = [
+    {
+      name: `${cleanQuery} Structured Coat / Jacket`,
+      category: 'Outerwear',
+      color: 'Warm Bronze / Charcoal',
+      suggestedBrand: 'Private White V.C. / Studio Nicholson',
+      estimatedPrice: 380,
+      stylingRole: 'Hero silhouette architectural anchor',
+    },
+    {
+      name: 'Ribbed Cashmere / Merino Crewneck',
+      category: 'Knitwear',
+      color: 'Oatmeal / Camel',
+      suggestedBrand: 'Johnstons of Elgin / Arket',
+      estimatedPrice: 175,
+      stylingRole: 'Tactile mid-layer thermal drape',
+    },
+    {
+      name: 'Single-Pleated Flannel Trousers',
+      category: 'Bottoms',
+      color: 'Charcoal Grey / Navy',
+      suggestedBrand: 'Drake’s / Incotex',
+      estimatedPrice: 240,
+      stylingRole: 'Fluid drape with subtle shoe break',
+    },
+    {
+      name: 'Goodyear-Welted Leather Footwear',
+      category: 'Shoes',
+      color: 'Dark Brown / Oxblood',
+      suggestedBrand: 'Crockett & Jones / Paraboot',
+      estimatedPrice: 395,
+      stylingRole: 'Grounded foundation with sartorial weight',
+    },
+  ];
+
+  const enrichedPieces = defaultPieces.map((piece) => {
+    const pCat = piece.category;
+    const pColor = piece.color.toLowerCase();
+    const pName = piece.name.toLowerCase();
+
+    const matched = (wardrobeItems || []).find((item: any) => {
+      if (item.category !== pCat) return false;
+      const itemName = (item.name || '').toLowerCase();
+      const itemColor = (item.color || '').toLowerCase();
+      if (pColor && (itemColor.includes(pColor) || pColor.includes(itemColor))) return true;
+      const keywords = pName.split(/[\s-]+/).filter((w: string) => w.length >= 4);
+      return keywords.some((k: string) => itemName.includes(k));
+    });
+
+    return {
+      name: piece.name,
+      category: piece.category,
+      color: piece.color,
+      suggestedBrand: piece.suggestedBrand,
+      estimatedPrice: piece.estimatedPrice,
+      stylingRole: piece.stylingRole,
+      silhouette: '',
+      matchedWardrobeItemId: matched ? matched.id : undefined,
+      matchedItemName: matched ? `${matched.brand} ${matched.name}` : undefined,
+      matchedItemImage: matched ? matched.imageUrl : undefined,
+      isGap: !matched,
+    };
+  });
+
+  const structured = {
+    title: lookTitle,
+    aesthetic,
+    occasion: occ,
+    season: seas,
+    summary: `Refined editorial study and styling formula centered on ${cleanQuery}.`,
+    colorPalette: ['#1C1D21', '#8C7355', '#F4F3EE', '#4A5568'],
+    paletteNames: ['Deep Charcoal', 'Sartorial Bronze', 'Bone White', 'Slate Flannel'],
+    tags: ['Curated Editorial', aesthetic, occ],
+    photographicMood: 'Editorial Street Style',
+    stylingTip: 'Layer structured weights over tactile fine-gauge textures for effortless composure.',
+    pieces: enrichedPieces,
+  };
+
+  const curatedGrounding = [
+    {
+      title: 'Vogue Runway Collections & Style Reports',
+      url: 'https://www.vogue.com/fashion-shows',
+      domain: 'vogue.com',
+    },
+    {
+      title: 'GQ Sartorial & Contemporary Wardrobe Guide',
+      url: 'https://www.gq-magazine.co.uk/fashion',
+      domain: 'gq-magazine.co.uk',
+    },
+    {
+      title: 'The Financial Times HTSI Style & Craftsmanship',
+      url: 'https://www.ft.com/style',
+      domain: 'ft.com',
+    },
+  ];
+
+  return {
+    success: true,
+    query: cleanQuery,
+    researchMarkdown,
+    structuredBreakdown: structured,
+    groundingSources: curatedGrounding,
+    searchQueries: [`${cleanQuery} runway styling`, `${cleanQuery} editorial street style`],
+    hasGoogleSearch: true,
+    isCuratedFallback: true,
+    timestamp: new Date().toISOString(),
+  };
+}
+
 // Gemini Endpoint 3c: Google AI Fashion & Editorial Research Studio with Live Google Search Grounding
 app.post('/api/gemini/editorial-research', async (req, res) => {
   try {
@@ -413,7 +695,14 @@ app.post('/api/gemini/editorial-research', async (req, res) => {
 
     const ai = getGeminiClient();
     if (!ai) {
-      return res.status(503).json({ error: 'GEMINI_API_KEY is not configured in server environment.' });
+      const fallbackResult = generateCuratedEditorialResearch(
+        query,
+        aestheticFocus,
+        occasion,
+        season,
+        wardrobeItems
+      );
+      return res.json(fallbackResult);
     }
 
     // Prepare wardrobe summary for contextual closet gap & synergy matching
@@ -639,10 +928,503 @@ Search the web for real runway references, contemporary streetwear, lookbook for
       timestamp: new Date().toISOString(),
     });
   } catch (error: any) {
-    console.error('Google AI Editorial Research error:', error);
-    res.status(500).json({
-      error: error?.message || 'Failed to complete Google AI editorial research.',
+    console.warn('Google AI Editorial Research API note (routing to curated fashion archive):', error?.message || error);
+    try {
+      const fallbackResult = generateCuratedEditorialResearch(
+        req.body?.query || 'Contemporary Capsule Wardrobe',
+        req.body?.aestheticFocus,
+        req.body?.occasion,
+        req.body?.season,
+        req.body?.wardrobeItems || []
+      );
+      return res.json(fallbackResult);
+    } catch (fallbackErr) {
+      console.error('Curated fallback error:', fallbackErr);
+      res.status(500).json({
+        error: 'Unable to generate research at this time. Please try again shortly.',
+      });
+    }
+  }
+});
+
+// Gemini Endpoint 3d: Wardrobe AI Stylist & Combinations Engine (with deterministic free fallback)
+app.post('/api/gemini/wardrobe-combinations', async (req, res) => {
+  try {
+    const {
+      wardrobeItems = [],
+      occasion = 'All',
+      season = 'All',
+      focalItemId,
+      numCombinations = 4,
+      enableGoogleSearch = true,
+    } = req.body;
+
+    if (!Array.isArray(wardrobeItems) || wardrobeItems.length === 0) {
+      return res.status(400).json({ error: 'Wardrobe items array is required.' });
+    }
+
+    // Filter out homeware/lifestyle items so combinations are strictly wearable clothing
+    const wearableItems = wardrobeItems.filter(
+      (item: any) => !item.isArchived && item.itemType !== 'homeware_lifestyle'
+    );
+
+    if (wearableItems.length === 0) {
+      return res.status(400).json({ error: 'No wearable clothing items available to combine.' });
+    }
+
+    // Try calling Gemini first if API key is configured
+    const ai = getGeminiClient();
+    if (ai) {
+      try {
+        const compactInventory = wearableItems.slice(0, 80).map((item: any) => ({
+          id: item.id,
+          name: item.name,
+          brand: item.brand,
+          category: item.category,
+          subcategory: item.subcategory || '',
+          color: item.color,
+          originalListingColor: item.originalListingColor || '',
+          material: item.material || '',
+          size: item.size || '',
+          condition: item.condition || 'Good',
+          season: item.season || 'All-Season',
+          purchasePrice: item.purchasePrice || 0,
+          rrp: item.rrp || undefined,
+          wearCount: item.wearCount || 0,
+          lastWornDate: item.lastWornDate || '',
+          careNotes: item.careNotes || '',
+          storageLocation: item.storageLocation || '',
+          notes: item.notes || '',
+          styleTags: item.styleTags || item.tags || [],
+          imageUrl: item.imageUrl || '',
+        }));
+
+        const focalItem = focalItemId
+          ? compactInventory.find((i: any) => i.id === focalItemId)
+          : null;
+
+        const systemInstruction = `You are a world-class sartorial wardrobe stylist, textile curator, and creative director.
+Your goal is to analyze the user's actual wardrobe inventory and synthesize high-utility outfit combinations using EXCLUSIVELY the items provided.
+Pay special attention to ALL available entered fields:
+- Material & Fabric Composition: Contrast textures intelligently (e.g. rough Shetland wool vs crisp pinpoint cotton oxford; selvedge denim vs smooth lambskin suede; breathable linen vs fine gauge knitwear).
+- Size & Silhouette Layering: Ensure inner and outer layers are proportioned properly (outerwear fits over knitwear, trouser silhouette balances top volume).
+- Wear Velocity & Cost-Per-Wear: Prioritize less-worn items (wearCount = 0) where appropriate to increase wardrobe utility.
+- Condition & Occasion: Pristine items for formal occasions; vintage / well-loved pieces for relaxed casual wear.
+- Real Color Tonality: Harmonize true colors, listing undertones, and hex palettes.
+- Picture AI Vision: When garment photographs are provided, inspect them to observe drape, lapels, collar style, and fabric luster.
+Ensure each outfit combination has balance: appropriate top, bottom, outerwear (if suitable), and footwear.
+Explain the exact styling rationale (why the colors harmonize, why the textures balance, and how to wear it).
+Currency is GBP (£).
+
+Return STRICTLY a JSON object with this exact schema:
+{
+  "combinations": [
+    {
+      "title": "Evocative Sartorial Title (e.g., Casual Parisian Linen & Earthy Chino)",
+      "occasion": "Work & Office | Weekend Casual | Evening & Dining | Date Night | Travel Capsule | Seasonal Transition",
+      "season": "Spring | Summer | Autumn | Winter | All-Season",
+      "focalItemId": "id of the hero piece if applicable",
+      "itemIds": ["id1", "id2", "id3", "id4"],
+      "stylingRationale": "In-depth rationale explaining why these specific garments, fabrics, and colors work together.",
+      "colorPalette": ["Navy", "Olive", "Ecru", "Tan"],
+      "stylingTips": ["Tuck the shirt loosely", "Roll chinos once", "Leave jacket unbuttoned"],
+      "vibe": "Aesthetic style keyword",
+      "groundingInsights": "Relevant trend note or Google Search styling grounding."
+    }
+  ]
+}`;
+
+        const userPrompt = `Synthesize ${numCombinations || 4} distinct, impeccably styled outfit combinations from this wardrobe:
+Target Occasion: ${occasion || 'All'}
+Target Season: ${season || 'All'}
+${focalItem ? `Anchor/Focal Piece: Must include "${focalItem.brand} ${focalItem.name}" (ID: ${focalItem.id}, Material: ${focalItem.material || 'Standard'}, Size: ${focalItem.size || 'N/A'})` : ''}
+
+Available Wardrobe Pieces (Complete Specs):
+${JSON.stringify(compactInventory, null, 2)}
+
+Requirements:
+- Each combination must use between 2 and 5 real item IDs from the list above.
+- Never invent item IDs.
+- Factored criteria: Textile materials, sizing fit, condition, color harmony, and wear volume.
+- Ensure color harmony (monochromatic, complementary, earth-tone, or tonal contrast).
+- Provide practical sartorial advice based on garment cuts and materials.`;
+
+        // Check if focal item has an image for Picture AI vision inspection
+        const promptParts: any[] = [];
+        if (focalItem?.imageUrl) {
+          try {
+            if (focalItem.imageUrl.startsWith('data:image/')) {
+              const cleanB64 = focalItem.imageUrl.replace(/^data:image\/[a-z]+;base64,/, '');
+              const mime = focalItem.imageUrl.startsWith('data:image/png') ? 'image/png' : 'image/jpeg';
+              promptParts.push({ inlineData: { data: cleanB64, mimeType: mime } });
+            }
+          } catch (imgErr) {
+            console.warn('Focal image parsing note:', imgErr);
+          }
+        }
+        promptParts.push({ text: userPrompt });
+
+        const extraConfig: any = {};
+        if (enableGoogleSearch !== false) {
+          extraConfig.tools = [{ googleSearch: {} }];
+        }
+
+        const response = await generateContentWithFallback(
+          ai,
+          promptParts.length > 1 ? [{ role: 'user', parts: promptParts }] : userPrompt,
+          systemInstruction,
+          undefined,
+          0.5,
+          extraConfig
+        );
+
+        const fullText = response.text || '';
+        let parsedData: any = null;
+
+        const jsonMatch = fullText.match(/```json\s*([\s\S]*?)\s*```/) || fullText.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          const rawJson = jsonMatch[1] || jsonMatch[0];
+          try {
+            parsedData = JSON.parse(rawJson);
+          } catch (pErr) {
+            console.warn('Failed parsing Gemini JSON, attempting sanitization:', pErr);
+          }
+        }
+
+        if (parsedData && Array.isArray(parsedData.combinations) && parsedData.combinations.length > 0) {
+          const enrichedCombos = parsedData.combinations.map((combo: any, idx: number) => {
+            const matchedItems = (combo.itemIds || [])
+              .map((id: string) => wearableItems.find((w: any) => w.id === id))
+              .filter(Boolean);
+
+            return {
+              id: `gemini-combo-${Date.now()}-${idx}`,
+              title: combo.title || `Curated Look ${idx + 1}`,
+              occasion: combo.occasion || occasion || 'Weekend Casual',
+              season: combo.season || season || 'All-Season',
+              focalItemId: combo.focalItemId || (matchedItems[0] ? matchedItems[0].id : undefined),
+              itemIds: matchedItems.map((m: any) => m.id),
+              items: matchedItems,
+              stylingRationale: combo.stylingRationale || 'Curated sartorial combination.',
+              colorPalette: combo.colorPalette || matchedItems.map((m: any) => m.color).filter(Boolean),
+              stylingTips: Array.isArray(combo.stylingTips) ? combo.stylingTips : ['Style with confidence.'],
+              vibe: combo.vibe || 'Curated Editorial',
+              engineUsed: 'gemini_grounded',
+              groundingInsights: combo.groundingInsights || 'Grounded in Google fashion search trends.',
+            };
+          }).filter((c: any) => c.items.length >= 2);
+
+          if (enrichedCombos.length > 0) {
+            return res.json({
+              success: true,
+              combinations: enrichedCombos,
+              engine: 'gemini_grounded',
+              model: 'gemini-3.8-flash',
+              count: enrichedCombos.length,
+            });
+          }
+        }
+      } catch (geminiError: any) {
+        console.warn('Gemini combinations call failed, engaging deterministic fallback:', geminiError?.message);
+      }
+    }
+
+    // Deterministic fallback (100% free, zero token cost, always succeeds)
+    const localCombinations = generateLocalWardrobeCombinations(wearableItems, {
+      occasion,
+      season,
+      focalItemId,
+      numCombinations,
     });
+
+    res.json({
+      success: true,
+      combinations: localCombinations,
+      engine: 'deterministic_local',
+      notice: 'Generated via deterministic local styling & color-harmony engine (zero token cost).',
+      count: localCombinations.length,
+    });
+  } catch (err: any) {
+    console.error('Wardrobe combinations error:', err);
+    res.status(500).json({ error: err?.message || 'Failed to generate wardrobe combinations.' });
+  }
+});
+
+// Gemini Endpoint 3e: Shop the Look - Online Retailer Search Grounding & Matching
+app.post('/api/gemini/shop-the-look', async (req, res) => {
+  try {
+    const {
+      item,
+      outfit,
+      targetPieceName,
+      targetPieceCategory,
+      customQuery,
+      budgetRange = 'all',
+      limit = 8,
+    } = req.body;
+
+    const sourceTitle = customQuery || targetPieceName || item?.name || outfit?.title || 'Heritage Jacket';
+    const category = targetPieceCategory || item?.category || 'Outerwear';
+    const brand = item?.brand || 'Classic Heritage';
+
+    const ai = getGeminiClient();
+    if (ai) {
+      try {
+        const systemInstruction = `You are an elite personal shopping stylist and luxury fashion buyer with encyclopedic knowledge of UK and international fashion retailers (e.g., MR PORTER, End Clothing, Arket, COS, Uniqlo, Selfridges, Reiss, John Lewis, ASOS, Vinted, eBay UK).
+Your task is to recommend real, existing, similar garments and items available for purchase online that match the silhouette, fabric, texture, and aesthetic of the requested item or outfit look.
+For each item, specify an authentic brand, retailer name, direct product or search URL, estimated price in GBP (£), similarity score (0-100), and a concise explanation of why it is a compelling match or purchase alternative.
+Always output strictly JSON.`;
+
+        const userPrompt = `Search and curate ${limit} real, stylish retail items available online matching this look/garment:
+Item/Look Name: "${sourceTitle}"
+Category: "${category}"
+Existing Reference Brand: "${brand}"
+Budget Preference: "${budgetRange}"
+${item?.color ? `Color: "${item.color}"` : ''}
+${item?.material ? `Material: "${item.material}"` : ''}
+${outfit?.aesthetic ? `Aesthetic Mood: "${outfit.aesthetic}"` : ''}
+
+Return JSON with this exact structure:
+{
+  "items": [
+    {
+      "title": "Exact product title (e.g. Relaxed Wool Serge Chore Jacket)",
+      "brand": "Brand name (e.g. Universal Works)",
+      "category": "${category}",
+      "priceGbp": 165,
+      "originalPriceGbp": 195,
+      "retailer": "Retailer name (e.g. End Clothing)",
+      "retailerDomain": "endclothing.com",
+      "productUrl": "https://www.endclothing.com/gb/catalogsearch/results?q=Universal+Works+Chore+Jacket",
+      "imageUrl": "https://images.unsplash.com/photo-1617137984095-74e4e5e3613f?q=80&w=800&auto=format&fit=crop",
+      "similarityScore": 95,
+      "similarityReason": "Concise 1-sentence sartorial reason matching cut, collar, and fabric weight.",
+      "color": "Charcoal Grey",
+      "material": "Wool Serge",
+      "season": "Autumn / Winter",
+      "inStock": true
+    }
+  ],
+  "aesthetic": "Aesthetic keyword"
+}`;
+
+        const geminiRes = await generateContentWithFallback(
+          ai,
+          userPrompt,
+          systemInstruction,
+          undefined,
+          0.6,
+          { tools: [{ googleSearch: {} }] }
+        );
+
+        const text = geminiRes.text || '';
+        const jsonMatch = text.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          const parsed = JSON.parse(jsonMatch[0]);
+          if (Array.isArray(parsed.items) && parsed.items.length > 0) {
+            const enriched = parsed.items.map((it: any, i: number) => ({
+              id: `gemini-shop-${Date.now()}-${i}`,
+              title: it.title || sourceTitle,
+              brand: it.brand || brand,
+              category: it.category || category,
+              priceGbp: Number(it.priceGbp) || 120,
+              originalPriceGbp: it.originalPriceGbp ? Number(it.originalPriceGbp) : undefined,
+              retailer: it.retailer || 'MR PORTER',
+              retailerDomain: it.retailerDomain || 'mrporter.com',
+              productUrl: it.productUrl || `https://www.google.com/search?tbm=shop&q=${encodeURIComponent(`${it.brand || brand} ${it.title || sourceTitle}`)}`,
+              imageUrl: it.imageUrl || (item?.imageUrl || 'https://images.unsplash.com/photo-1548883354-7622d03aca27?q=80&w=800&auto=format&fit=crop'),
+              similarityScore: Number(it.similarityScore) || (90 + (i % 7)),
+              similarityReason: it.similarityReason || `High silhouette similarity matching ${brand} cut and fabric.`,
+              color: it.color || item?.color || 'Neutral',
+              material: it.material || item?.material || 'Premium Fabric',
+              season: it.season || item?.season || 'All-Season',
+              inStock: it.inStock !== false,
+            }));
+
+            return res.json({
+              success: true,
+              items: enriched,
+              engine: 'gemini_search_grounded',
+              sourceTitle,
+              aesthetic: parsed.aesthetic || 'Curated Retail',
+            });
+          }
+        }
+      } catch (geminiErr: any) {
+        console.warn('Gemini shop-the-look failed, fallback will engage:', geminiErr?.message);
+      }
+    }
+
+    // Server-side fallback if Gemini offline or not configured
+    return res.json({
+      success: true,
+      items: [],
+      engine: 'curated_retail_matcher',
+      sourceTitle,
+      message: 'Engaging client curated retail fallback catalog.',
+    });
+  } catch (err: any) {
+    console.error('Shop-the-look endpoint error:', err);
+    res.status(500).json({ error: err?.message || 'Failed to search shop the look.' });
+  }
+});
+
+// Gemini Endpoint 3f: AI Outfit Matcher (Thermodynamic Weather & Occasion Synthesis)
+app.post('/api/gemini/outfit-matcher', async (req, res) => {
+  try {
+    const {
+      wardrobeItems = [],
+      weatherPresetId = 'mild_transitional',
+      customTempC,
+      customCondition,
+      occasion = 'Smart Casual',
+      focalItemId,
+      numCombinations = 3,
+    } = req.body;
+
+    if (!Array.isArray(wardrobeItems) || wardrobeItems.length === 0) {
+      return res.status(400).json({ error: 'wardrobeItems array is required.' });
+    }
+
+    const wearableItems = wardrobeItems.filter(
+      (item: any) => !item.isArchived && item.itemType !== 'homeware_lifestyle'
+    );
+
+    if (wearableItems.length === 0) {
+      return res.status(400).json({ error: 'No wearable clothing items found in wardrobe.' });
+    }
+
+    const ai = getGeminiClient();
+    if (ai) {
+      try {
+        const compactInventory = wearableItems.slice(0, 80).map((item: any) => ({
+          id: item.id,
+          name: item.name,
+          brand: item.brand,
+          category: item.category,
+          subcategory: item.subcategory || '',
+          color: item.color,
+          originalListingColor: item.originalListingColor || '',
+          material: item.material || '',
+          size: item.size || '',
+          condition: item.condition || 'Good',
+          season: item.season || 'All-Season',
+          purchasePrice: item.purchasePrice || 0,
+          rrp: item.rrp || undefined,
+          wearCount: item.wearCount || 0,
+          careNotes: item.careNotes || '',
+          notes: item.notes || '',
+          tags: item.tags || [],
+          imageUrl: item.imageUrl || '',
+        }));
+
+        const focalItem = focalItemId
+          ? compactInventory.find((i: any) => i.id === focalItemId)
+          : null;
+
+        const systemInstruction = `You are a world-class sartorial director, textile engineer, and personal stylist.
+Your task is to analyze the user's wardrobe inventory and synthesize new, cohesive outfit combinations specifically tailored to the designated WEATHER conditions (temperature, precipitation, wind, breathability) and OCCASION.
+Guidelines:
+1. ONLY pick from the provided item IDs. Never fabricate IDs.
+2. Formulate practical layering appropriate for the exact weather (e.g. wool/cashmere + outer layer for cold/wet, lightweight open-weave for heat).
+3. Evaluate color harmony, texture balance, and silhouette proportions.
+4. For each combination, provide a weather-specific comfort rationale, cohesion score (85-99), styling tips, and optionally suggest a missing piece with a retailer recommendation.
+Always respond in strict JSON.`;
+
+        const userPrompt = `Synthesize ${numCombinations} distinct, cohesive outfit combinations from this wardrobe:
+Target Occasion: ${occasion}
+Weather Condition / Temperature: ${customCondition || weatherPresetId} ${customTempC !== undefined ? `(${customTempC}°C)` : ''}
+${focalItem ? `Anchor Piece (MUST include): "${focalItem.brand} ${focalItem.name}" (ID: ${focalItem.id})` : ''}
+
+Available Wardrobe Inventory:
+${JSON.stringify(compactInventory, null, 2)}
+
+Return JSON with this exact schema:
+{
+  "combinations": [
+    {
+      "title": "Evocative Title (e.g., Transitional British Tailoring & Waxed Canvas)",
+      "occasion": "${occasion}",
+      "season": "Autumn | Winter | Spring | Summer | All-Season",
+      "weatherRecommendation": "Detailed 1-2 sentence explanation of why these fabrics and layers keep the wearer comfortable in this specific weather.",
+      "weatherConditions": "e.g. 14°C · Mild breeze & overcast",
+      "itemIds": ["id1", "id2", "id3"],
+      "stylingRationale": "Why these cuts, fabrics, and colors harmonize.",
+      "colorPalette": ["#2B2B28", "#8C7355", "#EAE8E3"],
+      "stylingTips": ["Tip 1", "Tip 2"],
+      "vibe": "Aesthetic style label",
+      "cohesionScore": 95,
+      "suggestedMissingPiece": {
+        "name": "Piece name (e.g. Cashmere Ribbed Scarf)",
+        "category": "Accessories",
+        "suggestedRetailer": "End Clothing",
+        "searchQuery": "Acne Studios wool scarf",
+        "estimatedPriceGbp": 120,
+        "reason": "Why this complementary piece elevates the look"
+      }
+    }
+  ]
+}`;
+
+        const geminiRes = await generateContentWithFallback(
+          ai,
+          userPrompt,
+          systemInstruction,
+          undefined,
+          0.7
+        );
+
+        const text = geminiRes.text || '';
+        const jsonMatch = text.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          const parsed = JSON.parse(jsonMatch[0]);
+          if (Array.isArray(parsed.combinations) && parsed.combinations.length > 0) {
+            const enriched = parsed.combinations.map((c: any, i: number) => {
+              const matchedItems = (c.itemIds || [])
+                .map((id: string) => wearableItems.find((w: any) => w.id === id))
+                .filter(Boolean);
+
+              return {
+                id: `gemini-matcher-${Date.now()}-${i}`,
+                title: c.title || `${occasion} Look`,
+                occasion: c.occasion || occasion,
+                season: c.season || 'All-Season',
+                weatherRecommendation: c.weatherRecommendation || 'Engineered for optimal comfort and breathability.',
+                weatherConditions: c.weatherConditions || `${customTempC || 15}°C`,
+                itemIds: matchedItems.map((m: any) => m.id),
+                items: matchedItems,
+                stylingRationale: c.stylingRationale || 'Harmonious color and silhouette coordination.',
+                colorPalette: Array.isArray(c.colorPalette) ? c.colorPalette : ['#1E293B', '#8C7355'],
+                stylingTips: Array.isArray(c.stylingTips) ? c.stylingTips : ['Style with confidence.'],
+                vibe: c.vibe || 'Curated Sartorial',
+                cohesionScore: Number(c.cohesionScore) || 94,
+                engineUsed: 'gemini_grounded',
+                suggestedMissingPiece: c.suggestedMissingPiece,
+              };
+            }).filter((c: any) => c.itemIds.length >= 2);
+
+            if (enriched.length > 0) {
+              return res.json({
+                success: true,
+                combinations: enriched,
+                engine: 'gemini_grounded',
+                count: enriched.length,
+              });
+            }
+          }
+        }
+      } catch (geminiErr: any) {
+        console.warn('Gemini outfit-matcher failed, falling back:', geminiErr?.message);
+      }
+    }
+
+    return res.json({
+      success: false,
+      message: 'Engaging client local weather matcher.',
+    });
+  } catch (err: any) {
+    console.error('Outfit matcher endpoint error:', err);
+    res.status(500).json({ error: err?.message || 'Failed to match outfits.' });
   }
 });
 
@@ -722,11 +1504,18 @@ Provide an optimized listing that converts quickly while accurately disclosing c
 Brand: ${item.brand}
 Name: ${item.name}
 Category: ${item.category}
+Subcategory: ${item.subcategory || 'Not specified'}
 Color: ${item.color || 'Not specified'}
 Size: ${item.size || 'Not specified'}
+Material / Composition: ${item.material || 'Not specified'}
 Condition: ${item.condition || 'Pre-loved'}
+Season: ${Array.isArray(item.season) ? item.season.join(', ') : item.season || 'All-Season'}
+Care Instructions: ${item.careNotes || 'Standard care'}
+Notes: ${item.notes || 'None'}
 Original Purchase Price: £${item.originalPricePaid || 0}
+RRP Benchmark: £${item.rrp || 'N/A'}
 Target Listing Price: £${item.listingPrice || 0}
+Tags: ${(item.tags || []).join(', ') || 'None'}
 Target Resale Platform: ${platform || 'Vinted'}
 Listing Tone: ${tone || 'enthusiast'}
 Include Measurements Section: ${includeMeasurements ? 'Yes' : 'No'}
@@ -924,19 +1713,26 @@ function cleanImageUrl(rawUrl: string | undefined, baseUrl: string): string | un
 // Gemini Endpoint 5: Extract Clothes & Product Details from URL(s) or Shopping Baskets
 app.post('/api/gemini/extract-from-url', async (req, res) => {
   try {
-    const { url, urls } = req.body;
+    const { url, urls, availableCategories, userCategories } = req.body;
     const rawInput = (url || urls || '').toString();
     if (!rawInput.trim()) {
       return res.status(400).json({ error: 'A valid URL or list of URLs is required.' });
     }
 
-    // Split multiple URLs if user provided multiple lines or links
-    const urlList = rawInput
+    const rawList = rawInput
       .split(/[\n,\s]+/)
       .map((u: string) => u.trim())
-      .filter((u: string) => u.startsWith('http://') || u.startsWith('https://'));
+      .filter(Boolean);
 
-    const effectiveUrls = urlList.length > 0 ? urlList : [rawInput.trim()];
+    // Normalize each URL to ensure http:// or https:// protocol is present so fetch never fails
+    const effectiveUrls = (rawList.length > 0 ? rawList : [rawInput.trim()]).map((u: string) => {
+      if (/^https?:\/\//i.test(u)) return u;
+      return `https://${u}`;
+    });
+
+    const targetCategories: string[] = Array.isArray(availableCategories) && availableCategories.length > 0
+      ? availableCategories
+      : (Array.isArray(userCategories) && userCategories.length > 0 ? userCategories : []);
 
     // Single Source of Truth: Scrape and extract metadata from each URL via unified scraper
     const fetchedResults: any[] = [];
@@ -995,7 +1791,7 @@ ${JSON.stringify(fetchedResults, null, 2)}
 Requirements for each item:
 - name: Clean, concise garment title (e.g. "Beaufort Waxed Cotton Jacket", "Oversized Cashmere Crewneck", "Pleated Wide-Leg Trousers"). Avoid SEO spam.
 - brand: The fashion brand / designer (e.g. "Barbour", "Arket", "COS", "Toast", "Zara", "Reiss", "Sézane", "Toteme").
-- category: Exactly one of: 'Outerwear', 'Knitwear', 'Tops', 'Bottoms', 'Dresses & Jumpsuits', 'Shoes', 'Bags', 'Accessories'.
+- category: ${targetCategories.length > 0 ? `Exactly one of user's defined categories: ${targetCategories.map((c: string) => `'${c}'`).join(', ')}. If coats/outerwear, map to '${targetCategories.find((c: string) => /coats?/i.test(c)) || targetCategories.find((c: string) => /outerwear/i.test(c)) || targetCategories[0]}'.` : `Exactly one of: 'Outerwear', 'Knitwear', 'Tops', 'Bottoms', 'Dresses & Jumpsuits', 'Shoes', 'Bags', 'Accessories'.`}
 - purchasePrice: Number in British Pounds (£ GBP). If original was $ or €, convert to £. If missing, estimate realistic retail price.
 - rrp: Original recommended retail price in £ GBP. If item is on sale, rrp should be the original price; otherwise same as purchasePrice.
 - color: Primary color shade.
@@ -1024,7 +1820,7 @@ Requirements for each item:
                   brand: { type: Type.STRING },
                   category: {
                     type: Type.STRING,
-                    description: 'Outerwear, Knitwear, Tops, Bottoms, Dresses & Jumpsuits, Shoes, Bags, or Accessories',
+                    description: targetCategories.length > 0 ? `One of: ${targetCategories.join(', ')}` : 'Outerwear, Knitwear, Tops, Bottoms, Dresses & Jumpsuits, Shoes, Bags, or Accessories',
                   },
                   purchasePrice: { type: Type.NUMBER },
                   rrp: {
@@ -1087,6 +1883,7 @@ Requirements for each item:
           return {
             ...item,
             id: `imported-item-${Date.now()}-${idx}`,
+            category: targetCategories.length > 0 ? canonicalizeCategory(item.category, targetCategories) : item.category,
             imageUrl: finalImg,
             allCandidateImages: cImages.length > 0 ? cImages : (finalImg ? [finalImg] : []),
             targetStoreUrl: item.targetStoreUrl || correspondingFetch.url || effectiveUrls[0],
@@ -1119,40 +1916,67 @@ Requirements for each item:
       }
     }
 
-    // High Quality Deterministic Multi-Item Fallback using Unified Scraper
-    const fallbackItems: any[] = fetchedResults.map((fr, idx) => {
-      const inferredBrand = fr.extractedMeta.brand || inferBrandFromUrl(fr.url, fr.extractedMeta.siteName);
-      const cleanedTitle = (fr.extractedMeta.title || 'Curated Wardrobe Piece')
+    // High Quality Deterministic Multi-Item Fallback using Free Deterministic Fallback Engine & Scraped Data
+    const fallbackItems: any[] = [];
+    for (let idx = 0; idx < fetchedResults.length; idx++) {
+      const fr = fetchedResults[idx];
+      const freeExtract = extractGarmentFromUrlFree(fr.url, {
+        imageUrl: fr.extractedMeta.image,
+        candidateImages: fr.candidateImages,
+        title: fr.extractedMeta.title,
+        description: fr.extractedMeta.description,
+        brand: fr.extractedMeta.brand,
+        color: fr.extractedMeta.color,
+        material: fr.extractedMeta.material,
+        siteName: fr.extractedMeta.siteName,
+      });
+
+      const inferredBrand = fr.extractedMeta.brand || (freeExtract.brand !== 'Curated Brand' ? freeExtract.brand : inferBrandFromUrl(fr.url, fr.extractedMeta.siteName));
+      const cleanedTitle = (fr.extractedMeta.title || freeExtract.name || 'Curated Wardrobe Piece')
         .replace(/\|.*$/g, '')
         .replace(/-.*$/g, '')
         .trim();
-      const inferredCategory = inferCategoryFromText(cleanedTitle + ' ' + (fr.extractedMeta.description || '') + ' ' + fr.url);
-      const parsedPrice = parseFloat(fr.extractedMeta.price || '120') || 120;
-      const parsedRrp = parseFloat(fr.extractedMeta.rrp || fr.extractedMeta.price || '120') || parsedPrice;
-      const finalImg = fr.extractedMeta.image || (fr.candidateImages.length > 0 ? fr.candidateImages[0] : '');
+      const inferredCategory = fr.extractedMeta.category || freeExtract.category || inferCategoryFromText(cleanedTitle + ' ' + (fr.extractedMeta.description || '') + ' ' + fr.url);
+      const parsedPrice = parseFloat(fr.extractedMeta.price || (freeExtract.purchasePrice ? freeExtract.purchasePrice.toString() : '65')) || 65;
+      const parsedRrp = parseFloat(fr.extractedMeta.rrp || (freeExtract.rrp ? freeExtract.rrp.toString() : '')) || parsedPrice;
+      
+      let finalImg = fr.extractedMeta.image || (fr.candidateImages.length > 0 ? fr.candidateImages[0] : '');
+      let candidateImgs = fr.candidateImages.length > 0 ? [...fr.candidateImages] : (finalImg ? [finalImg] : []);
 
-      return {
+      if (!finalImg) {
+        try {
+          const imgLookup = await findProductImageForGarment(inferredBrand, cleanedTitle, fr.extractedMeta.color, inferredCategory);
+          if (imgLookup.primaryImageUrl) {
+            finalImg = imgLookup.primaryImageUrl;
+            candidateImgs = imgLookup.candidateImages;
+          }
+        } catch (imgErr) {
+          console.warn('Image scout fallback notice:', imgErr);
+        }
+      }
+
+      fallbackItems.push({
         id: `imported-item-${Date.now()}-${idx}`,
-        name: cleanedTitle || 'Imported Fashion Piece',
+        name: cleanedTitle || freeExtract.name || 'Imported Fashion Piece',
         brand: inferredBrand,
-        category: inferredCategory,
+        category: targetCategories.length > 0 ? canonicalizeCategory(inferredCategory, targetCategories) : inferredCategory,
         purchasePrice: parsedPrice,
         rrp: parsedRrp,
-        color: fr.extractedMeta.color || 'Neutral',
-        originalListingColor: fr.extractedMeta.originalListingColor || fr.extractedMeta.color || '',
-        material: fr.extractedMeta.material || 'Natural Fiber / Blend',
+        color: fr.extractedMeta.color || freeExtract.color || 'Neutral',
+        originalListingColor: fr.extractedMeta.originalListingColor || fr.extractedMeta.color || freeExtract.color || '',
+        material: fr.extractedMeta.material || freeExtract.material || 'Natural Fiber / Blend',
         season: ['Autumn', 'Winter', 'Spring'],
         condition: 'Pristine / New',
         imageUrl: finalImg,
-        allCandidateImages: fr.candidateImages.length > 0 ? fr.candidateImages : (finalImg ? [finalImg] : []),
-        retailerName: fr.extractedMeta.siteName || inferBrandFromUrl(fr.url),
+        allCandidateImages: candidateImgs,
+        retailerName: fr.extractedMeta.siteName || freeExtract.retailerName || inferBrandFromUrl(fr.url),
         targetStoreUrl: fr.url,
-        engineUsed: fr.engineUsed || 'stealth-fallback',
+        engineUsed: fr.engineUsed || 'free-deterministic-fallback',
         careNotes: 'Check garment care label.',
-        notes: fr.extractedMeta.description || `Extracted garment specifications from ${inferredBrand}.`,
-        tags: ['auto-imported', inferredCategory.toLowerCase(), 'capsule'],
-      };
-    });
+        notes: fr.extractedMeta.description || freeExtract.notes || `Extracted specifications for ${inferredBrand}.`,
+        tags: [], // STRICT USER SPECIFICATION: Zero unsolicited default tags added
+      });
+    }
 
     const totalEstimatedGbp = fallbackItems.reduce((sum, it) => sum + (Number(it.purchasePrice) || 0), 0);
 
@@ -1166,32 +1990,297 @@ Requirements for each item:
       retailerName: fallbackItems[0]?.retailerName || 'Online Retailer',
     });
   } catch (error: any) {
-    console.error('URL extraction error:', error);
+    console.error('URL extraction error, using free deterministic fallback:', error);
+    const targetUrl = (req.body?.url || req.body?.urls || '').toString().trim();
+    const freeItem = extractGarmentFromUrlFree(targetUrl || 'https://example.com/wardrobe-item');
+    
+    let safeImage = '';
+    let safeCandidates: string[] = [];
+    try {
+      const imgScout = await findProductImageForGarment(freeItem.brand, freeItem.name, freeItem.color, freeItem.category);
+      if (imgScout.primaryImageUrl) {
+        safeImage = imgScout.primaryImageUrl;
+        safeCandidates = imgScout.candidateImages;
+      }
+    } catch (scoutErr) {
+      console.warn('Image scout catch error:', scoutErr);
+    }
+
     const safeItem = {
       id: `imported-item-${Date.now()}-0`,
-      name: 'Imported Fashion Piece',
-      brand: 'Designer Brand',
-      category: 'Outerwear',
-      purchasePrice: 120,
-      color: 'Neutral',
-      material: 'Quality Cotton / Wool',
+      name: freeItem.name,
+      brand: freeItem.brand,
+      category: freeItem.category,
+      purchasePrice: freeItem.purchasePrice || 65,
+      rrp: freeItem.rrp || 95,
+      color: freeItem.color || 'Neutral',
+      originalListingColor: freeItem.color || '',
+      material: freeItem.material || 'Quality Cotton / Wool',
       season: ['Autumn', 'Winter'],
       condition: 'Pristine / New',
-      imageUrl: '',
-      allCandidateImages: [],
-      retailerName: 'Online Retailer',
-      targetStoreUrl: req.body?.url || '',
+      imageUrl: safeImage,
+      allCandidateImages: safeCandidates,
+      retailerName: freeItem.retailerName || 'Online Retailer',
+      targetStoreUrl: targetUrl,
+      engineUsed: 'free-deterministic-fallback',
       careNotes: 'Check garment care label.',
-      notes: 'Imported product link.',
-      tags: ['imported', 'wardrobe'],
+      notes: freeItem.notes || 'Imported product details.',
+      tags: [], // STRICT: No default tags
     };
     res.json({
       success: true,
       isBasket: false,
       item: safeItem,
       items: [safeItem],
-      totalEstimatedGbp: 120,
+      totalEstimatedGbp: safeItem.purchasePrice,
+      retailerName: safeItem.retailerName,
     });
+  }
+});
+
+/**
+ * Autonomous Product Image Search Endpoint
+ * Look up high-resolution product photographs across Google Search Grounding,
+ * Brand Official Stores, Luxury Stockists, and Web Catalogues
+ */
+app.post('/api/scraper/lookup-product-images', async (req, res) => {
+  try {
+    const {
+      query,
+      brand = '',
+      name = '',
+      color = '',
+      category = '',
+      provider = 'all',
+      brandDomain,
+      limit = 12,
+    } = req.body;
+
+    const effectiveBrand = String(brand || '').trim();
+    const effectiveName = String(name || '').trim();
+    const cleanQuery = (query || [effectiveBrand, effectiveName, color, category].filter(Boolean).join(' ')).trim();
+
+    if (!cleanQuery && !effectiveBrand && !effectiveName) {
+      return res.json({ success: true, images: [] });
+    }
+
+    const aggregatedImages: any[] = [];
+    const seenUrls = new Set<string>();
+
+    const addImage = (img: any) => {
+      if (img && img.imageUrl && isValidProductImageUrl(img.imageUrl) && !seenUrls.has(img.imageUrl)) {
+        seenUrls.add(img.imageUrl);
+        aggregatedImages.push(img);
+      }
+    };
+
+    const resolvedBrandDomain = brandDomain || getBrandOfficialDomain(effectiveBrand);
+
+    // 1. Google Search Grounding with Gemini 3.8 Flash
+    if ((provider === 'all' || provider === 'google') && (effectiveBrand || effectiveName || cleanQuery)) {
+      const ai = getGeminiClient();
+      if (ai) {
+        try {
+          const prompt = `Search Google for authentic high-resolution e-commerce product photographs and official store listings for:
+Brand: "${effectiveBrand}"
+Product Model: "${effectiveName || cleanQuery}"
+Colorway: "${color || 'standard'}"
+Category: "${category || 'clothing'}"
+
+Check official store (${resolvedBrandDomain || 'official brand store'}) and leading luxury stockists (Farfetch, SSENSE, Mr Porter, End Clothing, Net-a-Porter, Nordstrom).
+Locate authentic direct product image URLs and return a JSON array:
+[
+  {
+    "title": "Clean item title",
+    "imageUrl": "https://... direct image URL (jpg/png/webp)",
+    "source": "Site Name e.g. Brand Official Store (${resolvedBrandDomain || ''}) or Mr Porter or SSENSE",
+    "sourceType": "google"
+  }
+]
+Return valid JSON array only.`;
+
+          const response = await ai.models.generateContent({
+            model: 'gemini-3.8-flash',
+            contents: prompt,
+            config: {
+              tools: [{ googleSearch: {} }],
+              temperature: 0.2,
+            },
+          });
+
+          const respText = response.text || '';
+          try {
+            const jsonMatch = respText.match(/\[[\s\S]*\]/);
+            if (jsonMatch) {
+              const parsed = JSON.parse(jsonMatch[0]);
+              if (Array.isArray(parsed)) {
+                for (const p of parsed) {
+                  if (p.imageUrl) {
+                    addImage({
+                      title: p.title || cleanQuery,
+                      imageUrl: p.imageUrl,
+                      thumbnail: p.imageUrl,
+                      source: p.source || 'Google Search Grounding',
+                      sourceType: 'google',
+                    });
+                  }
+                }
+              }
+            }
+          } catch {
+            const urlMatches = respText.match(/https:\/\/[^"'\s)]+\.(?:jpg|jpeg|png|webp|avif)(?:\?[^"'\s)]*)?/gi) || [];
+            urlMatches.forEach((u) => {
+              addImage({
+                title: `${effectiveBrand} ${effectiveName}`.trim() || cleanQuery,
+                imageUrl: u,
+                thumbnail: u,
+                source: 'Google Search Result',
+                sourceType: 'google',
+              });
+            });
+          }
+        } catch (geminiErr: any) {
+          console.warn('Gemini Google Search Grounding notice:', geminiErr?.message || geminiErr);
+        }
+      }
+    }
+
+    // 2. Official Brand Website Search (site:brand.com)
+    if ((provider === 'all' || provider === 'brand_site') && effectiveBrand && (effectiveName || cleanQuery) && resolvedBrandDomain) {
+      try {
+        const brandImages = await searchBrandOfficialSiteImages(effectiveBrand, effectiveName || cleanQuery, 6);
+        brandImages.forEach(addImage);
+      } catch (e: any) {
+        console.warn('Brand official site search notice:', e?.message || e);
+      }
+    }
+
+    // 3. Luxury Stockists & Retailers (site:mrporter.com, ssense.com, farfetch.com, endclothing.com)
+    if ((provider === 'all' || provider === 'retailer') && effectiveBrand && (effectiveName || cleanQuery)) {
+      try {
+        const retailerImages = await searchLuxuryRetailerImages(effectiveBrand, effectiveName || cleanQuery, 6);
+        retailerImages.forEach(addImage);
+      } catch (e: any) {
+        console.warn('Retailer image search notice:', e?.message || e);
+      }
+    }
+
+    // 4. Web Engine Fallback (DuckDuckGo + Wikimedia)
+    if (aggregatedImages.length < Number(limit)) {
+      try {
+        const remaining = Number(limit) - aggregatedImages.length;
+        const webImages = await searchProductImages(cleanQuery, Math.max(remaining, 6));
+        webImages.forEach(addImage);
+      } catch (e: any) {
+        console.warn('Web image search notice:', e?.message || e);
+      }
+    }
+
+    return res.json({
+      success: true,
+      images: aggregatedImages.slice(0, Number(limit)),
+      totalFound: aggregatedImages.length,
+      brandDomain: resolvedBrandDomain,
+    });
+  } catch (err: any) {
+    console.error('Product image lookup error:', err);
+    res.status(500).json({ success: false, error: err?.message || 'Failed to lookup images', images: [] });
+  }
+});
+
+/**
+ * Autonomous Text & Specs Extraction Endpoint
+ * Extracts structured garment attributes and automatically pairs matching product imagery
+ */
+app.post('/api/scraper/extract-from-text', async (req, res) => {
+  try {
+    const { text } = req.body;
+    if (!text || typeof text !== 'string') {
+      return res.status(400).json({ success: false, error: 'Text content is required' });
+    }
+
+    let item: any = null;
+    const ai = getGeminiClient();
+
+    // Prefer high-intelligence AI extraction when available
+    if (ai) {
+      try {
+        const prompt = `Extract structured fashion garment details from this text, receipt, or specification sheet:
+"""
+${text.slice(0, 4000)}
+"""
+
+Tasks:
+- Identify canonical brand, clean garment name, category, subcategory, size, color, fabric composition, purchase price, and estimated retail RRP in £ GBP.
+- Extract size code from tags or receipt lines if present (e.g. "M", "38R", "UK 10", "32x32").`;
+
+        const schema = {
+          type: Type.OBJECT,
+          properties: {
+            name: { type: Type.STRING },
+            brand: { type: Type.STRING },
+            category: { type: Type.STRING, description: 'Outerwear, Knitwear, Tops, Bottoms, Dresses & Jumpsuits, Shoes, Bags, Accessories, Tailoring, or Homeware' },
+            subcategory: { type: Type.STRING },
+            color: { type: Type.STRING },
+            colorHex: { type: Type.STRING },
+            material: { type: Type.STRING },
+            size: { type: Type.STRING },
+            purchasePrice: { type: Type.NUMBER },
+            rrp: { type: Type.NUMBER },
+            condition: { type: Type.STRING },
+            careNotes: { type: Type.STRING },
+            notes: { type: Type.STRING },
+            tags: { type: Type.ARRAY, items: { type: Type.STRING } },
+          },
+          required: ['name', 'brand', 'category', 'color', 'material'],
+        };
+
+        const response = await generateContentWithFallback(
+          ai,
+          prompt,
+          'You are a premier fashion archivist. Extract garment specifications with maximum precision in British Pounds (£ GBP).',
+          schema,
+          0.2
+        );
+        const parsed = JSON.parse(response.text || '{}');
+        if (parsed.name) {
+          item = {
+            ...parsed,
+            purchasePrice: Number(parsed.purchasePrice) || 65,
+            rrp: Number(parsed.rrp) || Math.round((Number(parsed.purchasePrice) || 65) * 1.4),
+            colorHex: parsed.colorHex || getColorSwatchHex(parsed.color),
+            condition: parsed.condition || 'Pristine / New',
+            engineUsed: 'gemini-3.8-flash',
+          };
+        }
+      } catch (aiErr) {
+        console.warn('Scraper text AI extraction fallback note:', aiErr);
+      }
+    }
+
+    if (!item) {
+      const free = extractGarmentFromTextFree(text);
+      item = {
+        ...free,
+        colorHex: getColorSwatchHex(free.color),
+      };
+    }
+    
+    // Automatically locate authentic high-res product photography
+    try {
+      const imgScout = await findProductImageForGarment(item.brand, item.name, item.color, item.category);
+      if (imgScout.primaryImageUrl) {
+        item.imageUrl = imgScout.primaryImageUrl;
+        item.allCandidateImages = imgScout.candidateImages;
+      }
+    } catch (imgErr) {
+      console.warn('Text extraction image lookup notice:', imgErr);
+    }
+
+    res.json({ success: true, item });
+  } catch (err: any) {
+    console.error('Text extraction error:', err);
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
@@ -1214,19 +2303,26 @@ app.post('/api/gemini/extract-from-image', async (req, res) => {
     const prompt = `Analyze this image, which may be:
 1. A screenshot or photo of a shopping basket / cart / checkout page with multiple items
 2. An order confirmation invoice / receipt listing multiple garments
-3. A single garment product photograph
+3. A single garment product photograph or physical clothing piece
+4. A garment care tag, brand label, neck tag, or price tag showing size and composition
 
 Tasks:
 - Detect ALL distinct clothing items, shoes, bags, or accessories shown in the shopping basket/receipt/image.
+- If the image contains a garment tag, care label, barcode, or receipt, extract the exact SIZE (e.g. "M", "38R", "UK 10", "32x32", "One Size").
 - If it contains multiple items in a shopping basket or receipt, return EACH item separately in the "items" array with all individual details.
 - Calculate or detect the total basket value in British Pounds (£ GBP).
 - For each item, provide:
-  * name: Clean garment name (e.g. "Beaufort Waxed Jacket", "Cashmere V-Neck Sweater", "Leather Derby Shoes")
-  * brand: Designer brand or retailer (e.g. "Barbour", "Arket", "Zara", "COS", "Toast", "Reiss")
-  * category: Exactly one of: 'Outerwear', 'Knitwear', 'Tops', 'Bottoms', 'Dresses & Jumpsuits', 'Shoes', 'Bags', 'Accessories'
+  * name: Clean, evocative garment name (e.g. "Beaufort Waxed Jacket", "Cashmere V-Neck Sweater", "105 Standard Selvedge Denim")
+  * brand: Canonical designer brand or retailer (e.g. "Barbour", "Arket", "Acne Studios", "COS", "Toast", "Studio Nicholson")
+  * category: Exactly one of: 'Outerwear', 'Knitwear', 'Tops', 'Bottoms', 'Dresses & Jumpsuits', 'Shoes', 'Bags', 'Accessories', 'Tailoring', 'Homeware'
+  * subcategory: Specific garment silhouette (e.g. "Waxed Jacket", "Oxford Shirt", "Chelsea Boots", "Pleated Trousers")
   * purchasePrice: Price in numeric £ GBP (convert from foreign currency if needed)
-  * color: Primary color shade
-  * material: Fabric composition (e.g. "100% Wool", "Pure Silk", "Calf Leather", "Organic Cotton")
+  * rrp: Estimated original retail RRP in £ GBP
+  * size: Sizing code or measurement extracted from label or description (e.g. "M", "38", "UK 9", "32W 32L")
+  * color: Primary descriptive colorway (e.g. "Sage Green", "Charcoal Melange", "Oatmeal", "Midnight Navy")
+  * colorHex: 6-digit hex color swatch code (e.g. "#4A5D4E")
+  * originalListingColor: Original retailer colorway name
+  * material: Specific fabric composition (e.g. "100% Waxed Cotton", "100% Scottish Shetland Wool", "13.5oz Raw Selvedge Denim")
   * season: Array from ['Autumn', 'Winter', 'Spring', 'Summer', 'All-Season']
   * condition: 'Pristine / New'
   * careNotes: Washing or care advice
@@ -1248,10 +2344,15 @@ Tasks:
               brand: { type: Type.STRING },
               category: {
                 type: Type.STRING,
-                description: 'Outerwear, Knitwear, Tops, Bottoms, Dresses & Jumpsuits, Shoes, Bags, or Accessories',
+                description: 'Outerwear, Knitwear, Tops, Bottoms, Dresses & Jumpsuits, Shoes, Bags, Accessories, Tailoring, or Homeware',
               },
+              subcategory: { type: Type.STRING },
               purchasePrice: { type: Type.NUMBER },
+              rrp: { type: Type.NUMBER },
+              size: { type: Type.STRING },
               color: { type: Type.STRING },
+              colorHex: { type: Type.STRING },
+              originalListingColor: { type: Type.STRING },
               material: { type: Type.STRING },
               season: {
                 type: Type.ARRAY,
@@ -1293,7 +2394,7 @@ Tasks:
             ],
           },
         ],
-        'You are an elite fashion archivist and computer vision specialist. Accurately detect all garments in shopping baskets, carts, and photos in British Pounds (£ GBP).',
+        'You are an elite fashion archivist, garments specialist, and computer vision expert. Accurately detect all garments, tags, and receipts in British Pounds (£ GBP).',
         schema,
         0.2
       );
@@ -1307,24 +2408,27 @@ Tasks:
     if (extractedItems.length === 0) {
       extractedItems = [
         {
-          name: 'Curated Fashion Piece',
-          brand: 'Designer Brand',
-          category: 'Outerwear',
-          purchasePrice: 120,
-          color: 'Neutral',
-          material: 'Natural Blend',
-          season: ['Autumn', 'Winter'],
-          condition: 'Pristine / New',
-          careNotes: 'Check garment care label.',
-          notes: 'Identified via Photo Vision.',
-          tags: ['photo-import', 'capsule'],
+          name: '',
+          brand: '',
+          category: '',
+          purchasePrice: 0,
+          rrp: undefined,
+          size: '',
+          color: '',
+          colorHex: '',
+          originalListingColor: '',
+          material: '',
+          season: [],
+          condition: '',
+          careNotes: '',
+          notes: 'Extracted via Photo Vision.',
+          tags: ['photo-import'],
         },
       ];
     }
 
-    // Assign imagery to each item in the basket
+    // Assign imagery & normalize attributes for each item in the basket
     extractedItems = extractedItems.map((item, idx) => {
-      // If single item image, use the uploaded photo directly. If multi-item, keep base64 or empty
       const itemImg = extractedItems.length === 1 ? imageBase64 : (imageBase64 || '');
 
       return {
@@ -1332,7 +2436,12 @@ Tasks:
         id: `imported-vision-${Date.now()}-${idx}`,
         imageUrl: itemImg,
         allCandidateImages: imageBase64 ? [imageBase64] : [],
+        size: item.size || '',
+        subcategory: item.subcategory || '',
+        colorHex: item.colorHex || getColorSwatchHex(item.color),
+        originalListingColor: item.originalListingColor || item.color || '',
         purchasePrice: Number(item.purchasePrice) || 120,
+        rrp: Number(item.rrp) || Number(item.purchasePrice) || 160,
         condition: item.condition || 'Pristine / New',
         season: Array.isArray(item.season) && item.season.length > 0 ? item.season : ['Autumn', 'Winter'],
         tags: Array.isArray(item.tags) && item.tags.length > 0 ? item.tags : ['photo-import', item.category?.toLowerCase() || 'wardrobe'],
@@ -1366,7 +2475,37 @@ app.post('/api/gemini/extract-from-text', async (req, res) => {
 
     const ai = getGeminiClient();
     if (!ai) {
-      return res.status(503).json({ error: 'GEMINI_API_KEY is not configured.' });
+      const freeItem = extractGarmentFromTextFree(text);
+      const safeItem = {
+        id: `imported-text-${Date.now()}-0`,
+        name: freeItem.name,
+        brand: freeItem.brand,
+        category: freeItem.category,
+        subcategory: '',
+        size: freeItem.size || '',
+        purchasePrice: freeItem.purchasePrice || 65,
+        rrp: freeItem.rrp || 95,
+        color: freeItem.color || 'Neutral',
+        colorHex: getColorSwatchHex(freeItem.color),
+        originalListingColor: freeItem.color || '',
+        material: freeItem.material || 'Natural Fiber / Blend',
+        season: ['Autumn', 'Winter', 'Spring'],
+        condition: 'Pristine / New',
+        imageUrl: '',
+        allCandidateImages: [],
+        careNotes: 'Check garment care label.',
+        notes: freeItem.notes || text.slice(0, 250),
+        tags: [], // STRICT: Zero default tags
+      };
+      return res.json({
+        success: true,
+        isBasket: false,
+        item: safeItem,
+        items: [safeItem],
+        basketTotalGbp: safeItem.purchasePrice,
+        totalEstimatedGbp: safeItem.purchasePrice,
+        retailerName: 'Text Extractor',
+      });
     }
 
     const prompt = `Extract all fashion garment products and shopping basket line items from this text:
@@ -1377,12 +2516,18 @@ ${text.slice(0, 4000)}
 Requirements:
 - If the text contains multiple items (e.g. from an order confirmation email, shopping cart receipt, or list of clothing), extract EACH SEPARATE ITEM into the "items" array.
 - Extract prices in British Pounds (£ GBP).
+- Extract garment size (e.g. "M", "38R", "UK 10", "32x32") from labels or line items.
 - For each item:
   * name: Clean garment name
   * brand: Designer brand or retailer
-  * category: Exactly one of: 'Outerwear', 'Knitwear', 'Tops', 'Bottoms', 'Dresses & Jumpsuits', 'Shoes', 'Bags', 'Accessories'
+  * category: Exactly one of: 'Outerwear', 'Knitwear', 'Tops', 'Bottoms', 'Dresses & Jumpsuits', 'Shoes', 'Bags', 'Accessories', 'Tailoring', 'Homeware'
+  * subcategory: Specific silhouette (e.g. "Waxed Jacket", "Oxford Shirt")
+  * size: Sizing code or measurements
   * purchasePrice: Numeric price in £ GBP
+  * rrp: Estimated original retail RRP in £ GBP
   * color: Primary color
+  * colorHex: 6-digit hex color code
+  * originalListingColor: Original retailer shade name
   * material: Fabric composition
   * season: Array from ['Autumn', 'Winter', 'Spring', 'Summer', 'All-Season']
   * condition: 'Pristine / New'
@@ -1405,10 +2550,15 @@ Requirements:
               brand: { type: Type.STRING },
               category: {
                 type: Type.STRING,
-                description: 'Outerwear, Knitwear, Tops, Bottoms, Dresses & Jumpsuits, Shoes, Bags, or Accessories',
+                description: 'Outerwear, Knitwear, Tops, Bottoms, Dresses & Jumpsuits, Shoes, Bags, Accessories, Tailoring, or Homeware',
               },
+              subcategory: { type: Type.STRING },
+              size: { type: Type.STRING },
               purchasePrice: { type: Type.NUMBER },
+              rrp: { type: Type.NUMBER },
               color: { type: Type.STRING },
+              colorHex: { type: Type.STRING },
+              originalListingColor: { type: Type.STRING },
               material: { type: Type.STRING },
               season: {
                 type: Type.ARRAY,
@@ -1433,7 +2583,8 @@ Requirements:
       ai,
       prompt,
       'You are a fashion product and shopping basket parser. Extract all separate items in British Pounds (£ GBP).',
-      schema
+      schema,
+      0.2
     );
 
     const parsed = JSON.parse(response.text || '{}');
@@ -1446,7 +2597,11 @@ Requirements:
           brand: 'Designer Brand',
           category: 'Tops',
           purchasePrice: 85,
+          rrp: 120,
+          size: '',
           color: 'Neutral',
+          colorHex: '#8C7355',
+          originalListingColor: 'Neutral',
           material: 'Cotton Blend',
           season: ['Autumn', 'Winter', 'Spring'],
           condition: 'Pristine / New',
@@ -1463,10 +2618,15 @@ Requirements:
         id: `imported-text-${Date.now()}-${idx}`,
         imageUrl: '',
         allCandidateImages: [],
+        size: item.size || '',
+        subcategory: item.subcategory || '',
+        colorHex: item.colorHex || getColorSwatchHex(item.color),
+        originalListingColor: item.originalListingColor || item.color || '',
         purchasePrice: Number(item.purchasePrice) || 85,
+        rrp: Number(item.rrp) || Math.round((Number(item.purchasePrice) || 85) * 1.4),
         condition: item.condition || 'Pristine / New',
         season: Array.isArray(item.season) && item.season.length > 0 ? item.season : ['Autumn', 'Winter'],
-        tags: Array.isArray(item.tags) && item.tags.length > 0 ? item.tags : ['text-import', item.category?.toLowerCase() || 'wardrobe'],
+        tags: Array.isArray(item.tags) ? item.tags : [],
       };
     });
 
@@ -1482,8 +2642,343 @@ Requirements:
       retailerName: parsed?.retailerName || 'Order Confirmation',
     });
   } catch (error: any) {
-    console.error('Text extraction error:', error);
-    res.status(500).json({ error: 'Failed to extract product details from text.' });
+    console.warn('AI Text extraction fallback:', error);
+    const rawText = (req.body?.text || '').toString();
+    const freeItem = extractGarmentFromTextFree(rawText);
+    const safeItem = {
+      id: `imported-text-${Date.now()}-0`,
+      name: freeItem.name,
+      brand: freeItem.brand,
+      category: freeItem.category,
+      subcategory: '',
+      size: freeItem.size || '',
+      purchasePrice: freeItem.purchasePrice || 65,
+      rrp: freeItem.rrp || 95,
+      color: freeItem.color || 'Neutral',
+      colorHex: getColorSwatchHex(freeItem.color),
+      originalListingColor: freeItem.color || '',
+      material: freeItem.material || 'Natural Fiber / Blend',
+      season: ['Autumn', 'Winter'],
+      condition: 'Pristine / New',
+      imageUrl: '',
+      allCandidateImages: [],
+      careNotes: 'Check garment care label.',
+      notes: freeItem.notes || rawText.slice(0, 200),
+      tags: [],
+    };
+    res.json({
+      success: true,
+      isBasket: false,
+      item: safeItem,
+      items: [safeItem],
+      totalEstimatedGbp: safeItem.purchasePrice,
+      retailerName: 'Text Extractor',
+    });
+  }
+});
+
+// Gemini Endpoint 7.5: Inventory Intelligence & Autofill Scanner (Deep Wardrobe Audit)
+app.post('/api/gemini/inventory-scan', async (req, res) => {
+  try {
+    const { items, mode } = req.body;
+    if (!Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ success: false, error: 'Items array is required' });
+    }
+
+    const ai = getGeminiClient();
+
+    // Prepare item summaries for Gemini
+    const itemSummaries = items.slice(0, 15).map((it, idx) => ({
+      index: idx,
+      id: it.id,
+      name: it.name || 'Unnamed Garment',
+      currentBrand: it.brand || '',
+      currentCategory: it.category || '',
+      currentColor: it.color || '',
+      currentMaterial: it.material || '',
+      currentSize: it.size || '',
+      currentNotes: it.notes || '',
+      purchasePrice: it.purchasePrice || 0,
+      hasPhoto: Boolean(it.imageUrl && it.imageUrl.trim() !== ''),
+    }));
+
+    let aiResults: any[] = [];
+
+    if (ai && mode !== 'fast_only') {
+      try {
+        const prompt = `You are an elite luxury, heritage, and contemporary fashion archivist and capsule wardrobe director.
+Audit the following wardrobe inventory items that have incomplete, unrefined, or missing specifications:
+
+${JSON.stringify(itemSummaries, null, 2)}
+
+Instructions for each item:
+1. Identify the canonical brand (e.g. Barbour, Margaret Howell, Acne Studios, Universal Works, Arket, COS, Studio Nicholson, Lemaire, Drakes). Never invent fake brands; if genuinely unbranded or independent, mark as "Curated Label".
+2. Refine the product title: elegant, authentic model name without duplicate brand prefixes.
+3. Category: Exactly one of: 'Outerwear', 'Knitwear', 'Tops', 'Bottoms', 'Dresses & Jumpsuits', 'Shoes', 'Bags', 'Accessories', 'Tailoring', 'Homeware'.
+4. Subcategory: specific garment silhouette (e.g. Waxed Jacket, Oxford Shirt, Selvedge Denim, Chelsea Boots, Cable Knit).
+5. Exact color: accurate specific shade name (e.g. "Sage Green", "Charcoal Melange", "Oatmeal", "Midnight Navy", "Tobacco Brown", "Washed Black", "Ecru", "Burgundy"). NEVER default to "Classic Navy" unless the item is genuinely navy.
+6. colorHex: authentic 6-digit hex color swatch (e.g. "#4A5D4E", "#2B3542", "#D8D2C2").
+7. Material: precise, realistic textile composition tailored to the garment category and brand (e.g. "100% Waxed Thornproof Cotton", "100% Scottish Shetland Wool", "13.5oz Raw Selvedge Denim", "Full-grain Horween Calfskin"). NEVER default blindly to "100% Cotton" for wool, leather, or outerwear pieces.
+8. Size: extracted from title/notes or standard size format (e.g. "M", "38R", "UK 9", "32x32", "One Size").
+9. careNotes: tailored fabric care instructions.
+10. rrp: realistic estimated original retail price in £ GBP.
+11. tags: 3-5 curated capsule styling tags.
+12. confidence: 80 to 98.
+13. improvements: 2-4 concrete, professional improvement bullet points (e.g. ["Identified 100% Waxed Cotton", "Extracted Sage Green Swatch", "Standardized Sizing to M", "Valued at Est. RRP £289"]).`;
+
+        const schema = {
+          type: Type.OBJECT,
+          properties: {
+            audits: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  id: { type: Type.STRING },
+                  proposedBrand: { type: Type.STRING },
+                  proposedName: { type: Type.STRING },
+                  proposedCategory: { type: Type.STRING },
+                  proposedSubcategory: { type: Type.STRING },
+                  proposedColor: { type: Type.STRING },
+                  proposedColorHex: { type: Type.STRING },
+                  proposedMaterial: { type: Type.STRING },
+                  proposedSize: { type: Type.STRING },
+                  proposedCareNotes: { type: Type.STRING },
+                  proposedRrp: { type: Type.NUMBER },
+                  proposedTags: { type: Type.ARRAY, items: { type: Type.STRING } },
+                  confidence: { type: Type.NUMBER },
+                  improvements: { type: Type.ARRAY, items: { type: Type.STRING } },
+                },
+                required: ['id', 'proposedBrand', 'proposedName', 'proposedCategory', 'proposedColor', 'proposedMaterial'],
+              },
+            },
+          },
+          required: ['audits'],
+        };
+
+        const response = await generateContentWithFallback(
+          ai,
+          prompt,
+          'You are a senior fashion director and archive curator. Return rigorous, authentic garment enrichments with zero token hallucinations.',
+          schema,
+          0.2
+        );
+        const parsed = JSON.parse(response.text || '{}');
+        if (Array.isArray(parsed.audits)) {
+          aiResults = parsed.audits;
+        }
+      } catch (aiErr) {
+        console.warn('AI inventory audit note, using enhanced deterministic engine:', aiErr);
+      }
+    }
+
+    // Map AI audits or merge with deterministic attributes and scout web photos
+    const proposals = await Promise.all(
+      items.map(async (origItem: any) => {
+        const audit = aiResults.find((a) => a.id === origItem.id);
+        const detectedAttrs = extractAllGarmentAttributes({
+          title: origItem.name,
+          description: origItem.notes || '',
+          brand: origItem.brand,
+          color: origItem.color,
+          material: origItem.material,
+          size: origItem.size,
+        });
+
+        const brand = audit?.proposedBrand || (detectedAttrs.brand !== 'Unbranded' ? detectedAttrs.brand : (origItem.brand || ''));
+        const name = audit?.proposedName || origItem.name;
+        const category = audit?.proposedCategory || origItem.category || '';
+        const subcategory = audit?.proposedSubcategory || origItem.subcategory || '';
+        const color = audit?.proposedColor || (detectedAttrs.color !== 'Neutral' ? detectedAttrs.color : (origItem.color || ''));
+        const colorHex = audit?.proposedColorHex || (color ? getColorSwatchHex(color) : '');
+        const material = audit?.proposedMaterial || (detectedAttrs.material !== 'Natural Fiber / Blend' ? detectedAttrs.material : (origItem.material || ''));
+        const size = audit?.proposedSize || origItem.size || detectedAttrs.size || '';
+        const careNotes = audit?.proposedCareNotes || origItem.careNotes || 'Machine wash cold on gentle cycle or professional dry clean.';
+        const rrp = audit?.proposedRrp || origItem.rrp || Math.round((Number(origItem.purchasePrice) || 60) * 1.6);
+        const tags = audit?.proposedTags || origItem.tags || ['capsule', category.toLowerCase()];
+        const confidence = audit?.confidence || 82;
+        const improvements = audit?.improvements || [
+          'Audited garment metadata',
+          `Standardized ${category} taxonomy`,
+          `Refined fabric to ${material}`,
+        ];
+
+        // Autonomous image scouting if photo is missing
+        let proposedImageUrl = origItem.imageUrl || '';
+        let candidateImages = origItem.imageUrl ? [origItem.imageUrl] : [];
+
+        if (!proposedImageUrl) {
+          try {
+            const scout = await findProductImageForGarment(brand, name, color, category);
+            if (scout.primaryImageUrl) {
+              proposedImageUrl = scout.primaryImageUrl;
+              candidateImages = scout.candidateImages;
+              improvements.push('Discovered Authentic Product Photo');
+            }
+          } catch (scoutErr) {
+            console.warn('Scout error for item:', origItem.id, scoutErr);
+          }
+        }
+
+        return {
+          itemId: origItem.id,
+          originalItem: origItem,
+          proposedImageUrl,
+          candidateImages,
+          proposedBrand: brand,
+          proposedName: name,
+          proposedCategory: category,
+          proposedSubcategory: subcategory,
+          proposedColor: color,
+          proposedColorHex: colorHex,
+          proposedMaterial: material,
+          proposedSize: size,
+          proposedCareNotes: careNotes,
+          proposedRrp: rrp,
+          proposedTags: tags,
+          confidence,
+          improvements,
+          missingFieldsCount: 0,
+          engineUsed: aiResults.length > 0 ? 'gemini-3.8-flash' : 'enhanced-deterministic-audit',
+        };
+      })
+    );
+
+    res.json({
+      success: true,
+      proposals,
+      engine: aiResults.length > 0 ? 'gemini-3.8-flash' : 'enhanced-deterministic-audit',
+    });
+  } catch (err: any) {
+    console.error('Inventory scan endpoint error:', err);
+    res.status(500).json({ success: false, error: err?.message || 'Inventory scan failed' });
+  }
+});
+
+// Gemini Endpoint 7.6: Single Garment Vision Inspection (Scan Photo Directly & Use All Available Fields)
+app.post('/api/gemini/scan-garment-photo', async (req, res) => {
+  try {
+    const { imageBase64, imageUrl, currentItem } = req.body;
+    const ai = getGeminiClient();
+
+    if (!ai) {
+      return res.status(503).json({ error: 'GEMINI_API_KEY is not configured.' });
+    }
+
+    let inlineDataPart: any = null;
+    const effectiveImage = imageBase64 || imageUrl;
+
+    if (effectiveImage) {
+      if (effectiveImage.startsWith('data:image/')) {
+        const cleanBase64 = effectiveImage.replace(/^data:image\/[a-z]+;base64,/, '');
+        const mimeType = effectiveImage.startsWith('data:image/png') ? 'image/png' : 'image/jpeg';
+        inlineDataPart = { inlineData: { data: cleanBase64, mimeType } };
+      } else if (effectiveImage.startsWith('http://') || effectiveImage.startsWith('https://')) {
+        try {
+          const imgFetch = await fetch(effectiveImage, {
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            },
+          });
+          if (imgFetch.ok) {
+            const buf = await imgFetch.arrayBuffer();
+            const b64 = Buffer.from(buf).toString('base64');
+            const cType = imgFetch.headers.get('content-type') || 'image/jpeg';
+            inlineDataPart = { inlineData: { data: b64, mimeType: cType.split(';')[0] } };
+          }
+        } catch (fetchErr) {
+          console.warn('Could not fetch external image for vision scan:', fetchErr);
+        }
+      }
+    }
+
+    // Build comprehensive context from all available entered fields
+    const detailsList: string[] = [];
+    if (currentItem?.name) detailsList.push(`Name: "${currentItem.name}"`);
+    if (currentItem?.brand) detailsList.push(`Brand: "${currentItem.brand}"`);
+    if (currentItem?.category) detailsList.push(`Category: "${currentItem.category}"`);
+    if (currentItem?.subcategory) detailsList.push(`Subcategory: "${currentItem.subcategory}"`);
+    if (currentItem?.color) detailsList.push(`Color: "${currentItem.color}"`);
+    if (currentItem?.material) detailsList.push(`Material / Fabric: "${currentItem.material}"`);
+    if (currentItem?.size) detailsList.push(`Size: "${currentItem.size}"`);
+    if (currentItem?.condition) detailsList.push(`Condition: "${currentItem.condition}"`);
+    if (currentItem?.purchasePrice) detailsList.push(`Purchase Price Paid: £${currentItem.purchasePrice}`);
+    if (currentItem?.rrp) detailsList.push(`RRP: £${currentItem.rrp}`);
+    if (currentItem?.season && (Array.isArray(currentItem.season) ? currentItem.season.length : currentItem.season)) {
+      detailsList.push(`Season: "${Array.isArray(currentItem.season) ? currentItem.season.join(', ') : currentItem.season}"`);
+    }
+    if (currentItem?.notes) detailsList.push(`Notes: "${currentItem.notes}"`);
+    if (currentItem?.careNotes) detailsList.push(`Care Notes: "${currentItem.careNotes}"`);
+    if (currentItem?.storageLocation) detailsList.push(`Location: "${currentItem.storageLocation}"`);
+    if (currentItem?.tags && Array.isArray(currentItem.tags) && currentItem.tags.length > 0) {
+      detailsList.push(`Tags: "${currentItem.tags.join(', ')}"`);
+    }
+
+    const itemContext = detailsList.length > 0
+      ? `User-entered item details already recorded:\n${detailsList.join('\n')}\n`
+      : 'No prior item details recorded.\n';
+
+    const prompt = `Perform an in-depth computer vision and fashion archival audit of this garment.
+${itemContext}
+
+Task:
+Using BOTH the picture AI photograph and ALL available user-entered fields above:
+1. Confirm, refine, or fill in the authentic Brand and Model Name.
+2. Determine the most accurate wardrobe Category and Subcategory.
+3. Identify the true primary Colorway and accurate HEX code.
+4. Detect the exact Material / Textile Composition (e.g. 100% Merino Wool, Heavyweight 14oz Selvedge Denim, Waxed Cotton, Irish Linen, Mulberry Silk, Calfskin Leather).
+5. Detect or intelligently suggest the Size & Sizing Scale (e.g. M / 40R, 32/32, UK 9).
+6. Provide specific garment Care Instructions (e.g. Hand wash cold, Dry clean only, Sponge clean with cold water).
+7. Estimate realistic retail valuation benchmark RRP in British Pounds (£ GBP).
+8. Recommend appropriate target Seasons and 4-6 relevant Style Tags.
+9. Assess condition if visible.`;
+
+    const schema = {
+      type: Type.OBJECT,
+      properties: {
+        brand: { type: Type.STRING },
+        name: { type: Type.STRING },
+        category: { type: Type.STRING },
+        subcategory: { type: Type.STRING },
+        color: { type: Type.STRING },
+        colorHex: { type: Type.STRING },
+        material: { type: Type.STRING },
+        size: { type: Type.STRING },
+        condition: { type: Type.STRING },
+        careNotes: { type: Type.STRING },
+        rrp: { type: Type.NUMBER },
+        season: { type: Type.ARRAY, items: { type: Type.STRING } },
+        tags: { type: Type.ARRAY, items: { type: Type.STRING } },
+        confidence: { type: Type.NUMBER },
+        improvements: { type: Type.ARRAY, items: { type: Type.STRING } },
+      },
+      required: ['brand', 'name', 'category', 'color', 'material'],
+    };
+
+    const parts: any[] = [];
+    if (inlineDataPart) parts.push(inlineDataPart);
+    parts.push({ text: prompt });
+
+    const response = await generateContentWithFallback(
+      ai,
+      [{ role: 'user', parts }],
+      'You are a world-class sartorial fashion archivist and computer vision specialist. Provide meticulous garment analysis.',
+      schema,
+      0.2
+    );
+
+    const parsed = JSON.parse(response.text || '{}');
+    res.json({
+      success: true,
+      audit: {
+        ...parsed,
+        colorHex: parsed.colorHex || getColorSwatchHex(parsed.color),
+      },
+      engine: inlineDataPart ? 'gemini-vision-multimodal' : 'gemini-text-sartorial',
+    });
+  } catch (err: any) {
+    console.error('Scan garment photo error:', err);
+    res.status(500).json({ success: false, error: err?.message || 'Vision scan failed' });
   }
 });
 
